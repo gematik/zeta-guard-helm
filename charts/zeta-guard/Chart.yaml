@@ -1,0 +1,11 @@
+apiVersion: v2
+name: zeta-guard
+description: ZETA Guard
+type: application
+version: 0.1.3
+dependencies:
+  - name: postgresql
+    # Bitnami PostgreSQL chart for local/dev setups (pin exact version, use OCI to avoid large index)
+    version: "15.5.38"
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled

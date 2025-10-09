@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authserver
+  labels:
+    app: authserver
+    component: authserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authserver
+  template:
+    metadata:
+      labels:
+        app: authserver
+        component: authserver
+    spec:
+      {{ with ( default .Values.global.image_pull_secret .Values.authserver.image.image_pull_secret )}}
+      imagePullSecrets:
+        - name: "{{ . }}"
+      {{ end }}
+      containers:
+        - name: keycloak
+          image: "{{ default .Values.global.registry .Values.authserver.image.registry }}{{ .Values.authserver.image.repository }}:{{ .Values.authserver.image.tag }}"
+          imagePullPolicy: "{{ .Values.authserver.image.pullPolicy }}"
+          args:
+            - start
+            - --http-relative-path=/auth
+            - --hostname-strict=false
+            - --proxy-headers=xforwarded
+            - --hostname={{ .Values.authserver.hostname }}
+          livenessProbe:
+            httpGet:
+              path: /auth/
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /auth/
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 5
+          env:
+            # Environment variable 'KEYCLOAK_ADMIN' is deprecated, use 'KC_BOOTSTRAP_ADMIN_USERNAME' instead
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: authserver-admin
+                  key: username
+            # Environment variable 'KEYCLOAK_ADMIN_PASSWORD' is deprecated, use 'KC_BOOTSTRAP_ADMIN_PASSWORD' instead
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: authserver-admin
+                  key: password
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # Initial hash for admin events log
+            # TODO: should be generated upon first startup
+            - name: GENESIS_HASH
+              value: 4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c
+              # DB wiring switches by databaseMode value (operator|bitnami)
+            {{- if eq .Values.databaseMode "operator" }}
+            # Operator-backed DB wiring for staging
+            - name: KC_DB
+              value: "postgres"
+            - name: KC_DB_URL
+              value: "jdbc:postgresql://keycloak-db:5432/keycloak"
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "keycloak.keycloak-db.credentials.postgresql.acid.zalan.do"
+                  key: username
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "keycloak.keycloak-db.credentials.postgresql.acid.zalan.do"
+                  key: password
+            - name: KC_DB_SCHEMA
+              value: "public"
+            {{- else }}
+            # Simplest wiring: DB settings for local/dev (Bitnami)
+            - name: KC_DB
+              value: "postgres"
+            - name: KC_DB_URL
+              value: "jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/keycloak?sslmode=disable"
+            - name: KC_DB_USERNAME
+              value: "keycloak"
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-postgresql"
+                  key: password
+            - name: KC_DB_SCHEMA
+              value: "public"
+            {{- end }}
+          ports:
+            - containerPort: 8080
+              name: http
