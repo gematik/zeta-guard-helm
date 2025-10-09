@@ -1,0 +1,62 @@
+{{- /* vim: set ft=helm: */ -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pep-deployment
+  labels:
+    component: pep
+spec:
+  selector:
+    matchLabels:
+      app: pep-proxy
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: pep-proxy
+        component: pep
+      {{ if .Values.pepproxy.nginxConf.generateConfigMap }}
+      annotations:
+        checksum/nginx-conf: {{ (.Values.pepproxy.nginxConf.fileContent | sha256sum) }}
+      {{ end }}
+    spec:
+      {{ with ( default .Values.global.image_pull_secret .Values.pepproxy.image.image_pull_secret )}}
+      imagePullSecrets:
+        - name: "{{ . }}"
+      {{ end }}
+      containers:
+        - name: nginx
+          image: "{{ default .Values.global.registry .Values.pepproxy.image.registry }}{{ .Values.pepproxy.image.repository }}:{{ .Values.pepproxy.image.tag }}"
+          imagePullPolicy: "{{ .Values.pepproxy.image.pullPolicy }}"
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - mountPath: /etc/nginx/nginx.conf
+              name: nginx-conf
+              subPath: nginx.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: "{{ if .Values.pepproxy.nginxConf.generateConfigMap }}nginx.conf{{ else }}{{ .Values.pepproxy.configMapName }}{{ end }}"
+            defaultMode: 0444
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+---
+{{ if .Values.pepproxy.nginxConf.generateConfigMap }}
+{{ include "configmap" (deepCopy . | mustMerge (dict "name" "nginx.conf" "app" "pep-proxy" "source" .Values.pepproxy.nginxConf.fileContent)) }}
+{{ end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pep-proxy-svc
+spec:
+  selector:
+    app: pep-proxy
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  type: ClusterIP

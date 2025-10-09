@@ -1,0 +1,17 @@
+{{- if eq .Values.databaseMode "operator" }}
+apiVersion: acid.zalan.do/v1
+kind: postgresql
+metadata:
+  name: keycloak-db
+spec:
+  teamId: zeta
+  numberOfInstances: 1
+  volume:
+    size: 20Gi
+  users:
+    keycloak: []
+  databases:
+    keycloak: keycloak
+  postgresql:
+    version: "15"
+{{- end }}

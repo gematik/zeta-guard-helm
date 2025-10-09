@@ -1,0 +1,52 @@
+{{- if .Values.opa.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  labels:
+    app: opa
+    component: opa
+spec:
+  replicas: {{ .Values.opa.replicaCount }}
+  selector:
+    matchLabels:
+      app: opa
+  template:
+    metadata:
+      labels:
+        app: opa
+        component: opa
+    spec:
+      {{ with ( default .Values.global.image_pull_secret .Values.opa.image.image_pull_secret )}}
+      imagePullSecrets:
+        - name: "{{ . }}"
+      {{ end }}
+      containers:
+        - name: opa
+          image: "{{ default .Values.global.registry .Values.opa.image.registry }}{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          imagePullPolicy: "{{ .Values.opa.image.pullPolicy }}"
+          args:
+            - "run"
+            - "--server"
+            - "--addr=0.0.0.0:8181"
+          ports:
+            - containerPort: 8181
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+{{ toYaml .Values.opa.resources | indent 12 }}
+{{- end }}
+
