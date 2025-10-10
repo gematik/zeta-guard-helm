@@ -4,7 +4,7 @@ global:
 
 authserver:
   image:
-    repository: /keycloak-zeta
+    repository: keycloak-zeta
     tag: 0.1.3
     pullPolicy: Always
   admin:
@@ -16,7 +16,7 @@ authserver:
 
 pepproxy:
   image:
-    repository: /ngx_pep
+    repository: ngx_pep
     tag: 0.1.3
     pullPolicy: Always
   nginxConf: {}
