@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tiger-proxy
+  labels:
+    {{- include "tiger-proxy.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ default "ClusterIP" .Values.service.type }}
+  {{- $svcType := default "ClusterIP" .Values.service.type }}
+  ports:
+    - name: proxy-port
+      port: {{ default 80 .Values.service.ports.proxy }}
+      targetPort: proxy-port
+      protocol: TCP
+      {{- $svcType := default "ClusterIP" .Values.service.type }}
+      {{- if and (or (eq $svcType "NodePort") (eq $svcType "LoadBalancer")) .Values.service.nodePorts.proxy }}
+      nodePort: {{ .Values.service.nodePorts.proxy }}
+      {{- end }}
+    - name: admin-port
+      port: {{ default 9999 .Values.service.ports.admin }}
+      targetPort: admin-port
+      protocol: TCP
+      {{- if and (or (eq $svcType "NodePort") (eq $svcType "LoadBalancer")) .Values.service.nodePorts.admin }}
+      nodePort: {{ .Values.service.nodePorts.admin }}
+      {{- end }}
+  selector:
+    {{- include "tiger-proxy.selectorLabels" . | nindent 4 }}

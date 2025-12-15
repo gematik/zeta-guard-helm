@@ -1,0 +1,30 @@
+dependencies:
+- name: ingress-nginx
+  repository: https://kubernetes.github.io/ingress-nginx
+  version: 4.11.5
+- name: testfachdienst
+  repository: file://charts/testfachdienst
+  version: 0.0.1
+- name: popp-mocks
+  repository: file://charts/popp-mocks
+  version: 0.0.1
+- name: test-monitoring-service
+  repository: file://charts/test-monitoring-service
+  version: 0.1.0
+- name: exauthsim
+  repository: file://charts/exauthsim
+  version: 0.0.1
+- name: zeta-guard
+  repository: file://charts/zeta-guard
+  version: 0.2.3
+- name: testdriver
+  repository: file://charts/test-driver
+  version: 0.0.1
+- name: tiger-proxy
+  repository: file://charts/tiger-proxy
+  version: 0.0.1
+- name: tiger-testsuite
+  repository: file://charts/tiger-testsuite
+  version: 0.0.1
+digest: sha256:9911906afa4293ca245a58ae97b824f4f8a2afa14d28a69047004eb2b4da15e3
+generated: "2025-12-12T19:29:22.662943264+01:00"

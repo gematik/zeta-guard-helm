@@ -1,5 +1,4 @@
 {{- /* vim: set ft=helm: */ -}}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,38 +14,116 @@ spec:
     metadata:
       labels:
         app: pep-proxy
+        app.kubernetes.io/name: pep-proxy
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: zeta-guard
+        app.kubernetes.io/component: pep
         component: pep
-      {{ if .Values.pepproxy.nginxConf.generateConfigMap }}
+      {{- if or .Values.devMode .Values.pepproxy.nginxConf.generateConfigMap }}
       annotations:
-        checksum/nginx-conf: {{ (.Values.pepproxy.nginxConf.fileContent | sha256sum) }}
-      {{ end }}
+        {{- if .Values.pepproxy.nginxConf.generateConfigMap }}
+        {{- $nginxConf := include "zeta-guard.pep-nginx-conf" . }}
+        checksum/nginx-conf: {{ $nginxConf | sha256sum }}
+        {{- end }}
+        {{- if .Values.devMode }}
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+        {{- end }}
+      {{- end }}
     spec:
-      {{ with ( default .Values.global.image_pull_secret .Values.pepproxy.image.image_pull_secret )}}
       imagePullSecrets:
-        - name: "{{ . }}"
-      {{ end }}
+        - name: "{{ .Values.pepproxy.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       containers:
         - name: nginx
-          image: "{{ default .Values.global.registry .Values.pepproxy.image.registry }}{{ .Values.pepproxy.image.repository }}:{{ .Values.pepproxy.image.tag }}"
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.pepproxy.image.registry }}{{ .Values.pepproxy.image.repository }}:{{ .Values.pepproxy.image.tag }}"
           imagePullPolicy: "{{ .Values.pepproxy.image.pullPolicy }}"
           ports:
-            - containerPort: 80
+            - name: http
+              containerPort: 80
+            - name: status
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: status
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: status
+          startupProbe:
+            httpGet:
+              path: /status
+              port: status
           volumeMounts:
-            - mountPath: /etc/nginx/nginx.conf
-              name: nginx-conf
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            {{- /* use subPath to only project intended files, not ..data etc. */ -}}
+            {{- $files := .Files.Glob "files/well-known/*" }}
+            {{- range $path, $_ := $files }}
+            - name: well-known
+              mountPath: /srv/.well-known/{{ base $path }}
+              subPath: {{ base $path }}
+            {{- end }}
+
+      {{- if .Values.pepproxyMetricsEnabled }}
+        - name: metrics
+          image: nginx/nginx-prometheus-exporter:1.5.1
+          command:
+            - nginx-prometheus-exporter
+          args:
+            - --nginx.scrape-uri=http://$(MY_POD_IP):8080/status
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - name: metrics
+              containerPort: 9113
+          livenessProbe:
+            tcpSocket:
+              port: metrics
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+          startupProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+      {{- end }}
+
       volumes:
         - name: nginx-conf
           configMap:
-            name: "{{ if .Values.pepproxy.nginxConf.generateConfigMap }}nginx.conf{{ else }}{{ .Values.pepproxy.configMapName }}{{ end }}"
+            name: "{{ .Values.pepproxy.nginxConf.configMapName }}"
             defaultMode: 0444
             items:
               - key: nginx.conf
                 path: nginx.conf
+        - name: well-known
+          configMap:
+            name: pep-well-known
+            defaultMode: 0444
 ---
-{{ if .Values.pepproxy.nginxConf.generateConfigMap }}
-{{ include "configmap" (deepCopy . | mustMerge (dict "name" "nginx.conf" "app" "pep-proxy" "source" .Values.pepproxy.nginxConf.fileContent)) }}
-{{ end }}
+{{- if .Values.pepproxy.nginxConf.generateConfigMap }}
+{{- $nginxConf := include "zeta-guard.pep-nginx-conf" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Values.pepproxy.nginxConf.configMapName }}"
+  labels:
+    app: "pep-proxy"
+    app.kubernetes.io/name: pep-proxy
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: zeta-guard
+    app.kubernetes.io/component: pep
+data:
+  nginx.conf: |-
+    {{- $nginxConf | nindent 4 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -58,5 +135,10 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: 80
+      targetPort: http
+    {{- if .Values.pepproxyMetricsEnabled }}
+    - name: metrics
+      port: 9113
+      targetPort: metrics
+    {{- end }}
   type: ClusterIP

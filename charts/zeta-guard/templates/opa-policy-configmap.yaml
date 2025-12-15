@@ -1,0 +1,46 @@
+{{- if .Values.opa.enabled }}
+# Decide if we should render opa-config as a Secret when credentials are present
+{{- $cred := .Values.opa.bundle.credentials }}
+{{- $renderConfigAsSecret := false }}
+{{- if and .Values.opa.bundle.enabled $cred }}
+  {{- if and $cred.secretRef $cred.secretRef.name }}
+    {{- $renderConfigAsSecret = true }}
+  {{- end }}
+{{- end }}
+{{- if not .Values.opa.bundle.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policy
+  labels:
+    app: opa
+    component: opa
+data:
+  authz.rego: |
+{{ include "opa.policyRego" . | indent 4 }}
+{{- end }}
+{{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+---
+apiVersion: v1
+kind: {{ ternary "Secret" "ConfigMap" $renderConfigAsSecret }}
+metadata:
+  name: opa-config
+  labels:
+    app: opa
+    component: opa
+{{- if $renderConfigAsSecret }}
+type: Opaque
+stringData:
+  opa.yaml: |
+{{- else }}
+data:
+  opa.yaml: |
+{{- end }}
+{{- if .Values.opa.bundle.enabled }}
+{{ include "opa.bundleConfigYaml" . | indent 4 }}
+{{- else }}
+{{ include "opa.configYaml" . | indent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

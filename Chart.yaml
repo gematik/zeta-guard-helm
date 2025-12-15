@@ -1,0 +1,51 @@
+apiVersion: v2
+name: zeta-testenv
+description: ZETA Guard test installation
+type: application
+version: 0.0.1
+dependencies:
+  - name: ingress-nginx
+    version: 4.11.5
+    repository: https://kubernetes.github.io/ingress-nginx
+    condition: ingress-nginx.enabled
+  - name: testfachdienst
+    version: 0.0.1
+    repository: file://charts/testfachdienst
+    tags:
+      - testfachdienst
+  - name: popp-mocks
+    version: 0.0.1
+    repository: file://charts/popp-mocks
+    condition: popp-mocks.enabled
+    tags:
+      - popp-mocks
+  - name: test-monitoring-service
+    version: 0.1.0
+    repository: file://charts/test-monitoring-service
+    alias: testMonitoringService
+    condition: testMonitoringServiceEnabled
+  - name: exauthsim
+    version: 0.0.1
+    repository: file://charts/exauthsim
+    tags:
+      - exauthsim
+  - name: zeta-guard
+    version: 0.2.3
+    repository: file://charts/zeta-guard
+    tags:
+      - zeta-guard
+  - name: testdriver
+    version: 0.0.1
+    repository: file://charts/test-driver
+    tags:
+      - testdriver
+  - name: tiger-proxy
+    version: 0.0.1
+    repository: file://charts/tiger-proxy
+    tags:
+      - tiger-proxy
+  - name: tiger-testsuite
+    version: 0.0.1
+    repository: file://charts/tiger-testsuite
+    tags:
+      - tiger-testsuite

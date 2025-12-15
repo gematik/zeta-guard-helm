@@ -1,0 +1,31 @@
+{{- $wif := .Values.opa.workloadIdentityFederation -}}
+{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opa-secret-patcher
+  labels:
+    app: opa
+    component: opa
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "secrets" ]
+    verbs: [ "get","patch" ]
+    resourceNames:
+      - opa-gcp-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opa-token-renewer-secret-patcher
+  labels:
+    app: opa
+    component: opa
+subjects:
+  - kind: ServiceAccount
+    name: opa-token-renewer
+roleRef:
+  kind: Role
+  name: opa-secret-patcher
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

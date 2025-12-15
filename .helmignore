@@ -2,3 +2,22 @@
 .*
 
 sonar-project.properties
+
+terraform-provider-*
+*.zip
+*.tar.gz
+*.sh
+/*.tgz
+/dist/
+/docs/
+/httpRequests/
+/kind-local.yaml
+/private/
+/terraform/
+Makefile
+/opa_bundle/
+
+# do not remove
+.envrc.local
+.smb_keystore
+.smb_keystore_pw

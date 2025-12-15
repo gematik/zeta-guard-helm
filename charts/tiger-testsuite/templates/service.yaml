@@ -1,0 +1,28 @@
+{{- $service := .Values.service | default dict }}
+{{- $workflowUi := .Values.workflowUi | default dict }}
+{{- $svcType := $service.type }}
+{{- $servicePort := $service.port }}
+{{- if and $service.enabled $workflowUi.activateWorkflowUi }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tiger-testsuite.fullname" . }}
+  labels:
+    {{- include "tiger-testsuite.labels" . | nindent 4 }}
+  {{- if $service.annotations }}
+  annotations:
+    {{- toYaml $service.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svcType }}
+  ports:
+    - name: workflow-ui
+      port: {{ $servicePort }}
+      targetPort: workflow-ui
+      protocol: TCP
+      {{- if and (or (eq $svcType "NodePort") (eq $svcType "LoadBalancer")) $service.nodePort }}
+      nodePort: {{ $service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "tiger-testsuite.selectorLabels" . | nindent 4 }}
+{{- end }}

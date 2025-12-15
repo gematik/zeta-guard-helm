@@ -8,5 +8,13 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: 8080
+      targetPort: http-port
+    - name: mgmt-interface
+      port: 9000
+      targetPort: http-mgmt-port
+    {{- if .Values.devMode }}
+    - name: jdwp
+      port: 5005
+      targetPort: 5005
+    {{- end }}
   type: ClusterIP

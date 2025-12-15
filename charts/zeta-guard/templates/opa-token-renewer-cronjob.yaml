@@ -1,0 +1,131 @@
+{{- $wif := .Values.opa.workloadIdentityFederation -}}
+{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opa-token-renewer-cronjob
+  labels:
+    app: opa
+    component: opa
+spec:
+  schedule: {{ $wif.tokenRenewer.schedule | quote }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ default 5 $wif.tokenRenewer.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            app: opa
+            component: opa
+          {{- if $.Values.devMode }}
+          annotations:
+            zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+          {{- end }}
+        spec:
+          serviceAccountName: opa-token-renewer
+          restartPolicy: OnFailure
+          containers:
+            - name: token-renewer
+              image: google/cloud-sdk:549.0.0
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: GCP_STS_URL
+                  value: {{ default "https://sts.googleapis.com/v1/token" $wif.sts.tokenUrl | quote }}
+                - name: GCP_STS_AUDIENCE
+                  value: {{ $wif.sts.audience | quote }}
+                - name: GCP_STS_SCOPE
+                  value: {{ $wif.sts.scope }}
+                - name: SA_GCP_MAIL
+                  value: {{ $wif.sts.sa }}
+                - name: IAM_BASE_URL
+                  value: {{ $wif.sts.iamUrl }}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  echo "Beginne Token-Erneuerung..."
+
+                  # Sicherstellen, dass jq verfügbar ist (Basis-Image enthält es evtl. nicht)
+                  if ! command -v jq >/dev/null 2>&1; then
+                    apt-get update -y && apt-get install -y jq && rm -rf /var/lib/apt/lists/* || true
+                  fi
+
+                  # 1. K8s Service Account Token aus dem projizierten Volume lesen
+                  K8S_TOKEN=$(cat /var/run/secrets/sts.googleapis.com/serviceaccount/token)
+
+                  # 2. Token beim GCP Security Token Service (STS) gegen ein GCP Access Token tauschen
+                  # JSON-Payload für STS aufbauen
+                  read -r -d '' STS_PAYLOAD << JSON || true
+                  {
+                    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                    "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+                    "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                    "subject_token": "${K8S_TOKEN}",
+                    "audience": "${GCP_STS_AUDIENCE}",
+                    "scope": "${GCP_STS_SCOPE}"
+                  }
+                  JSON
+
+                  # Debug: STS Payload (ohne sensiblen Token-Inhalt)
+                  echo "STS Payload (redacted):" >&2
+                  echo "$STS_PAYLOAD" | sed -E 's/("subject_token"\s*:\s*")([^"]+)(")/\1<REDACTED>\3/' >&2
+                  echo "" >&2
+
+                  # K8s JWT gegen kurzlebiges GCP Access Token eintauschen (mit Debug-Ausgabe)
+                  HTTP_CODE=$(curl -s -o /tmp/sts.json -w "%{http_code}" -X POST "$GCP_STS_URL" \
+                    -H "Content-Type: application/json" \
+                    -d "$STS_PAYLOAD")
+                  GCP_ACCESS_TOKEN=$(jq -r '.access_token' /tmp/sts.json 2>/dev/null || echo "")
+
+                  if [ "$HTTP_CODE" != "200" ] || [ -z "$GCP_ACCESS_TOKEN" ] || [ "$GCP_ACCESS_TOKEN" = "null" ]; then
+                    echo "FEHLER: STS Aufruf fehlgeschlagen (HTTP $HTTP_CODE)." >&2
+                    echo "STS Antwort:" >&2
+                    cat /tmp/sts.json >&2 || true
+                    echo "" >&2
+                    echo "Verwendete Audience: $GCP_STS_AUDIENCE" >&2
+                    echo "Verwendeter Scope: $GCP_STS_SCOPE" >&2
+                    # uncomment when debugging
+                    #echo "Verwendeter token: $K8S_TOKEN" >&2
+                    exit 1
+                  fi
+
+                  # 3. GSA-Impersonation: STS Access Token gegen GSA Access Token tauschen (GAR-kompatibel)
+                  IAM_CRED_URL="$IAM_BASE_URL/v1/projects/-/serviceAccounts/$SA_GCP_MAIL:generateAccessToken"
+                  echo "used url for impersonation: $IAM_CRED_URL"
+
+                  IMP_HTTP_CODE=$(curl -s -o /tmp/imp.json -w "%{http_code}" -X POST \
+                    "$IAM_CRED_URL" \
+                    -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"],"lifetime":"3600s"}')
+                  IMP_TOKEN=$(jq -r '.accessToken' /tmp/imp.json 2>/dev/null || echo "")
+
+                  if [ "$IMP_HTTP_CODE" != "200" ] || [ -z "$IMP_TOKEN" ] || [ "$IMP_TOKEN" = "null" ]; then
+                    echo "FEHLER: GSA-Impersonation fehlgeschlagen (HTTP $IMP_HTTP_CODE)." >&2
+                    echo "Antwort IAM Credentials API:" >&2
+                    cat /tmp/imp.json >&2 || true
+                    exit 1
+                  fi
+
+                  # 4. Das Secret 'opa-gcp-token' mit dem neuen, base64-kodierten Token patchen
+                  # Für GAR via Basic muss der Dateiinhalt exakt "oauth2accesstoken:<ACCESS_TOKEN>" sein.
+                  # Zuerst die Klartext-Datei, dann base64-kodiere den Dateiinhalt.
+                  echo -n "oauth2accesstoken:${IMP_TOKEN}" > /tmp/gar_basic.txt
+                  ENCODED_TOKEN=$(base64 -w0 /tmp/gar_basic.txt 2>/dev/null || base64 /tmp/gar_basic.txt | tr -d '\n')
+
+                  kubectl patch secret opa-gcp-token \
+                    --type='json' \
+                    -p="[{\"op\": \"replace\", \"path\": \"/data/token\", \"value\": \"${ENCODED_TOKEN}\"}]"
+
+                  echo "Kubernetes Secret 'opa-gcp-token' aktualisiert (Basic-Präfix gesetzt)."
+              volumeMounts:
+                - name: gcp-sa-token
+                  mountPath: /var/run/secrets/sts.googleapis.com/serviceaccount
+          volumes:
+            - name: gcp-sa-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      audience: {{ $wif.sts.audience | quote }}
+{{- end }}

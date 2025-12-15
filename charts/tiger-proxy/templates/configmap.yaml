@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tiger-proxy
+  labels:
+    {{- include "tiger-proxy.labels" . | nindent 4 }}
+data:
+  application.yaml: | 
+    tigerProxy:
+      proxyPort: {{ .Values.proxyConfig.proxyPort }}
+      adminPort: {{ .Values.proxyConfig.adminPort }}
+      proxyLogLevel: {{ .Values.proxyConfig.proxyLogLevel }}
+      activateRbelParsing: {{ .Values.proxyConfig.activateRbelParsing }}
+      activateWorkflowUi: true
+      parsingShouldBlockCommunication: {{ .Values.proxyConfig.parsingShouldBlockCommunication }}
+      fileSaveInfo:
+        writeToFile: {{ .Values.proxyConfig.fileSaveInfo.writeToFile }}
+        fileName: {{ .Values.proxyConfig.fileSaveInfo.fileName }}
+      proxyRoutes: {{ range $route := .Values.proxyConfig.proxyRoutes }}
+      - from: {{ $route.from }}
+        to: {{ $route.to }}
+      {{ end }}
+      {{- with .Values.proxyConfig.tls }}
+      tls:
+{{ toYaml . | indent 8 }}
+      {{- end }}

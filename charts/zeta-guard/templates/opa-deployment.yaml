@@ -1,4 +1,13 @@
 {{- if .Values.opa.enabled }}
+# Precompute config snippets for checksum to avoid inline assignment
+{{- $bundleCfg := "" }}
+{{- if .Values.opa.bundle.enabled }}
+{{- $bundleCfg = include "opa.bundleConfigYaml" . }}
+{{- end }}
+{{- $inlinePolicy := "" }}
+{{- if not .Values.opa.bundle.enabled }}
+{{- $inlinePolicy = include "opa.policyRego" . }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,38 +24,112 @@ spec:
     metadata:
       labels:
         app: opa
+        app.kubernetes.io/name: opa
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: zeta-guard
+        app.kubernetes.io/component: ops
         component: opa
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
     spec:
-      {{ with ( default .Values.global.image_pull_secret .Values.opa.image.image_pull_secret )}}
+      {{- $wif := .Values.opa.workloadIdentityFederation }}
+      {{- if .Values.opa.serviceAccountName }}
+      serviceAccountName: {{ .Values.opa.serviceAccountName | quote }}
+      {{- end }}
       imagePullSecrets:
-        - name: "{{ . }}"
-      {{ end }}
+        - name: "{{ .Values.opa.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       containers:
         - name: opa
-          image: "{{ default .Values.global.registry .Values.opa.image.registry }}{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.opa.image.registry }}{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
           imagePullPolicy: "{{ .Values.opa.image.pullPolicy }}"
+          env:
+            - name: CHECKSUM_OPA
+              value: "{{ list $inlinePolicy (include "opa.configYaml" .) $bundleCfg | toJson | sha256sum }}"
+            
           args:
             - "run"
             - "--server"
             - "--addr=0.0.0.0:8181"
+            - "--log-level={{ .Values.opa.logLevel }}"
+            {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+            - "--config-file=/config/opa.yaml"
+            {{- end }}
+            {{- if not .Values.opa.bundle.enabled }}
+            - "/policies/authz.rego"
+            {{- end }}
           ports:
             - containerPort: 8181
               name: http
           livenessProbe:
             httpGet:
               path: /health
-              port: 8181
+              port: http
             initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: {{ .Values.opa.health.liveness.periodSeconds }}
             failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /health
-              port: 8181
+              port: http
             initialDelaySeconds: 3
-            periodSeconds: 10
+            periodSeconds: {{ .Values.opa.health.readiness.periodSeconds }}
             failureThreshold: 5
           resources:
 {{ toYaml .Values.opa.resources | indent 12 }}
+          volumeMounts:
+            {{- if not .Values.opa.bundle.enabled }}
+            - name: opa-policy
+              mountPath: /policies/authz.rego
+              subPath: authz.rego
+              readOnly: true
+            {{- end }}
+            {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+            - name: opa-config
+              mountPath: /config/opa.yaml
+              subPath: opa.yaml
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) }}
+            - name: gcp-token-volume
+              mountPath: /var/run/secrets/gcp
+              readOnly: true
+            {{- end }}
+            
+            - name: opa-persistence
+              mountPath: /var/opa
+      volumes:
+        {{- if not .Values.opa.bundle.enabled }}
+        - name: opa-policy
+          configMap:
+            name: opa-policy
+        {{- end }}
+        {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+        {{/* Decide if opa-config is a Secret based on presence of SecretRef credentials */}}
+        {{- $cred := .Values.opa.bundle.credentials }}
+        {{- $configIsSecret := false }}
+        {{- if and .Values.opa.bundle.enabled $cred }}
+          {{- if and $cred.secretRef $cred.secretRef.name }}
+            {{- $configIsSecret = true }}
+          {{- end }}
+        {{- end }}
+        - name: opa-config
+          {{- if $configIsSecret }}
+          secret:
+            secretName: opa-config
+          {{- else }}
+          configMap:
+            name: opa-config
+          {{- end }}
+        {{- end }}
+        
+        - name: opa-persistence
+          emptyDir: { }
+        {{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) }}
+        - name: gcp-token-volume
+          secret:
+            secretName: opa-gcp-token
+        {{- end }}
 {{- end }}
-

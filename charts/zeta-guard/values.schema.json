@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "properties": {
+    "authServerLogConsoleOutput": {
+      "type": "string",
+      "enum": [
+        "default",
+        "json"
+      ]
+    },
+    "authServerMetricsEnabled": {
+      "type": "boolean"
+    },
+    "authServerTracingEnabled": {
+      "type": "boolean"
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "registry_host": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "registry_host"
+      ]
+    },
+    "log-collector": {
+      "type": "object"
+    },
+    "logCollectorEnabled": {
+      "type": "boolean"
+    },
+    "opaDistributedTracingEnabled": {
+      "type": "boolean"
+    },
+    "opaStatusPrometheus": {
+      "type": "boolean"
+    },
+    "pepproxy": {
+      "type": "object",
+      "properties": {
+        "nginxConf": {
+          "type": "object",
+          "properties": {
+            "configMapName": {
+              "type": "string"
+            },
+            "fachdienstUrl": {
+              "type": "string"
+            },
+            "fileContent": {
+              "type": "string"
+            },
+            "generateConfigMap": {
+              "type": "boolean"
+            },
+            "httpClientAcceptInvalidCerts": {
+              "type": "boolean"
+            },
+            "locations": {
+              "type": "string"
+            },
+            "pepIssuer": {
+              "type": "string"
+            },
+            "requiredAudience": {
+              "type": "string"
+            },
+            "requiredScopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "configMapName",
+            "generateConfigMap"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "generateConfigMap": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "fachdienstUrl": {
+                    "minLength": 1
+                  },
+                  "requiredAudience": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "fachdienstUrl",
+                  "httpClientAcceptInvalidCerts",
+                  "locations",
+                  "pepIssuer",
+                  "requiredAudience",
+                  "requiredScopes"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "nginxConf"
+      ]
+    },
+    "pepproxyMetricsEnabled": {
+      "type": "boolean"
+    },
+    "pepproxyTracingEnabled": {
+      "type": "boolean"
+    },
+    "telemetry-gateway": {
+      "type": "object"
+    },
+    "telemetryGatewayEnabled": {
+      "type": "boolean"
+    },
+    "opa": {
+      "type": "object",
+      "properties": {
+        "bundle": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "serviceName": { "type": "string" },
+            "url": { "type": "string" },
+            "resource": { "type": "string" },
+            "polling": {
+              "type": "object",
+              "properties": {
+                "min_delay_seconds": { "type": "integer" },
+                "max_delay_seconds": { "type": "integer" }
+              }
+            },
+            "verification": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "keyId": { "type": "string" },
+                "algorithm": { "type": "string" },
+                "publicKey": { "type": "string" }
+              }
+            },
+            "credentials": {
+              "type": "object",
+              "properties": {
+                "secretRef": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "workloadIdentityFederation": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "workloadIdentityFederation": {
+                "type": "object",
+                "properties": { "enabled": { "const": true } }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "properties": {
+                "bundle": {
+                  "type": "object",
+                  "properties": {
+                    "credentials": {
+                      "type": "object",
+                      "properties": {
+                        "secretRef": {
+                          "type": "object",
+                          "properties": {
+                            "name": { "type": "string", "minLength": 1 }
+                          },
+                          "required": ["name"]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "bundle": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "const": true }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "bundle": {
+                "properties": {
+                  "serviceName": { "minLength": 1 },
+                  "resource": { "minLength": 1 }
+                },
+                "required": ["serviceName", "resource"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "authServerLogConsoleOutput",
+    "authServerMetricsEnabled",
+    "authServerTracingEnabled",
+    "global",
+    "logCollectorEnabled",
+    "opaDistributedTracingEnabled",
+    "opaStatusPrometheus",
+    "pepproxy",
+    "pepproxyMetricsEnabled",
+    "pepproxyTracingEnabled",
+    "telemetryGatewayEnabled"
+  ],
+  "title": "Values",
+  "type": "object"
+}

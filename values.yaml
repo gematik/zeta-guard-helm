@@ -1,0 +1,153 @@
+# Minimal defaults to support helm lint without env-specific files
+
+
+# Global defaults used by subcharts; keep safe empties
+global:
+  image_pull_secret: nil
+  registry_host: ""
+  registry: ""
+
+# Keep tags empty by default; env files can enable as needed
+tags: { }
+
+testfachdienst: { }
+
+popp-mocks:
+  enabled: false
+
+# If testMonitoringServiceEnabled is true, observability backends are added to the deployment.
+testMonitoringServiceEnabled: false
+
+testMonitoringService:
+  opentelemetry-demo:
+    grafana:
+      rbac:
+        namespaced: true
+    prometheus:
+      server:
+        resources:
+          limits:
+            memory: 600Mi
+
+exauthsim: { }
+testdriver: { }
+
+zeta-guard:
+  authserver:
+    image:
+      tag: main
+  authServerLogConsoleOutput: default
+  authServerMetricsEnabled: true
+  authServerTracingEnabled: true
+  logCollectorEnabled: false
+  opaDistributedTracingEnabled: true
+  opaStatusPrometheus: false
+  pepproxy:
+    image:
+      tag: main
+    nginxConf:
+      configMapName: pep-test-nginx-conf
+
+      # fachdienstUrl value has to be aligned with tags.tiger-proxy state
+      # see docs/How_to_configure_tiger-proxy.md for reference */ - } }
+      fachdienstUrl: "https://tiger-proxy:80/testfachdienst"
+      # fachdienstUrl: "https://testfachdienst:443"
+
+      httpClientAcceptInvalidCerts: true
+      poppIssuer: http://popp-statics
+
+      locations: |-
+        location / {
+          proxy_pass          {{ .Values.pepproxy.nginxConf.fachdienstUrl }}/;
+          proxy_ssl_verify    off;
+        }
+        location /achelos_testfachdienst/ws/ {
+          proxy_pass            {{ .Values.pepproxy.nginxConf.fachdienstUrl }}/achelos_testfachdienst/ws/;
+          proxy_http_version    1.1;
+          proxy_set_header      Upgrade $http_upgrade;
+          proxy_set_header      Connection $connection_upgrade;
+        }
+        location /achelos_testfachdienst/ws {
+          proxy_pass            {{ .Values.pepproxy.nginxConf.fachdienstUrl }}/achelos_testfachdienst/ws;
+          proxy_http_version    1.1;
+          proxy_set_header      Upgrade $http_upgrade;
+          proxy_set_header      Connection $connection_upgrade;
+        }
+        location /pep/ {
+          proxy_pass            {{ .Values.pepproxy.nginxConf.fachdienstUrl }}/;
+          proxy_ssl_verify      off;
+          pep                   on;
+          pep_require_aud       {{ .Values.pepproxy.nginxConf.requiredAudience }};
+          # pep_require_scope     "{{ join " " .Values.pepproxy.nginxConf.requiredScopes }}";
+          # pep_leeway           60; # s
+          pep_require_popp      on;
+        }
+        location /pep/achelos_testfachdienst/ws/ {
+          proxy_pass            {{ .Values.pepproxy.nginxConf.fachdienstUrl }}/achelos_testfachdienst/ws/;
+          proxy_http_version    1.1;
+          proxy_set_header      Upgrade $http_upgrade;
+          proxy_set_header      Connection $connection_upgrade;
+          pep_require_popp      on;
+        }
+        location /pep/achelos_testfachdienst/ws {
+          proxy_pass            {{ .Values.pepproxy.nginxConf.fachdienstUrl }}/achelos_testfachdienst/ws;
+          proxy_http_version    1.1;
+          proxy_set_header      Upgrade $http_upgrade;
+          proxy_set_header      Connection $connection_upgrade;
+          pep_require_popp      on;
+        }
+        # Proxy OAuth Authorization Server metadata to Keycloak
+        # Served as: http(s)://<host>/.well-known/oauth-authorization-server
+        # Target:   http://authserver/auth/realms/zeta-guard/.well-known/zeta-guard-well-known
+        location = /.well-known/oauth-authorization-server {
+          proxy_pass         http://authserver/auth/realms/zeta-guard/.well-known/zeta-guard-well-known;
+          proxy_http_version 1.1;
+        }
+        location /.well-known/ {
+          default_type  application/json;
+          alias         /srv/.well-known/;
+          autoindex     off;
+        }
+        {{- if .Values.pepproxy.asl_enabled }}
+        location /ASL {
+          pep                   on;
+          asl                   on;
+          pep_require_aud       {{ .Values.pepproxy.nginxConf.requiredAudience }};
+          # pep_require_scope     "{{ join " " .Values.pepproxy.nginxConf.requiredScopes }}";
+          # pep_leeway           60; # s
+        }
+        {{- end }}
+  pepproxyMetricsEnabled: true
+  pepproxyTracingEnabled: true
+
+  telemetryGatewayEnabled: true
+  telemetry-gateway:
+    config:
+      # if testMonitoringServiceEnabled
+      exporters:
+        otlp/test-monitoring:
+          endpoint: otel-collector:4317
+          tls:
+            insecure: true
+      service:
+        pipelines:
+          logs:
+            exporters: [ otlp/test-monitoring ]
+          metrics:
+            exporters: [ otlp/test-monitoring ]
+          traces:
+            exporters: [ otlp/test-monitoring ]
+
+ingress-nginx:
+  enabled: false
+
+# Safe defaults for cert-manager issuers to avoid nil pointer lookups
+issuers:
+  local:
+    enabled: false
+    issuerName: local-selfsigned
+    certificateName: zeta-guard-local-tls
+    secretName: zeta-guard-tls
+    commonName: ""
+    dnsNames: [ ]
+    duration: 8760h

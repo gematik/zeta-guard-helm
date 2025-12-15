@@ -14,15 +14,28 @@ spec:
     metadata:
       labels:
         app: authserver
+        app.kubernetes.io/name: authserver
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/part-of: zeta-guard
+        app.kubernetes.io/component: authserver
         component: authserver
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
     spec:
-      {{ with ( default .Values.global.image_pull_secret .Values.authserver.image.image_pull_secret )}}
       imagePullSecrets:
-        - name: "{{ . }}"
-      {{ end }}
+        - name: "{{ .Values.authserver.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      {{- with .Values.authserver.hostAlias }}
+      hostAliases:
+        - ip: {{ .ip | quote }}
+          hostnames:
+            - {{ .name | quote }}
+      {{- end }}
       containers:
         - name: keycloak
-          image: "{{ default .Values.global.registry .Values.authserver.image.registry }}{{ .Values.authserver.image.repository }}:{{ .Values.authserver.image.tag }}"
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.authserver.image.registry }}{{ .Values.authserver.image.repository }}:{{ .Values.authserver.image.tag }}"
           imagePullPolicy: "{{ .Values.authserver.image.pullPolicy }}"
           args:
             - start
@@ -32,18 +45,30 @@ spec:
             - --hostname={{ .Values.authserver.hostname }}
           livenessProbe:
             httpGet:
-              path: /auth/
-              port: 8080
+              path: /auth-mgmt/health/live/ # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              port: http-mgmt-port
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /auth/
-              port: 8080
-            initialDelaySeconds: 20
+              path: /auth-mgmt/health/ready/  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              port: http-mgmt-port
+            initialDelaySeconds: 30
             periodSeconds: 10
-            failureThreshold: 5
+            failureThreshold: 10
+          startupProbe:
+            httpGet:
+              path: /auth-mgmt/health/ready/  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              port: http-mgmt-port
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 10
+          volumeMounts:
+            - name: smcb-keystore
+              mountPath: "/opt/keycloak/conf/smcb-certificates.p12"
+              subPath: "smcb-certificates.p12"
+              readOnly: true
           env:
             # Environment variable 'KEYCLOAK_ADMIN' is deprecated, use 'KC_BOOTSTRAP_ADMIN_USERNAME' instead
             - name: KEYCLOAK_ADMIN
@@ -57,15 +82,72 @@ spec:
                 secretKeyRef:
                   name: authserver-admin
                   key: password
+            - name: SMCB_KEYSTORE_LOCATION
+              value: "/opt/keycloak/conf/smcb-certificates.p12"
+            - name: SMCB_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdp-smcb-keystore
+                  key: password
+            {{- if .Values.devMode }}
+            # Enable remote debugging in devMode
+            - name: JAVA_OPTS
+              value: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+            {{- end }}
+            - name: KC_LOG_LEVEL
+              value: "{{ .Values.authserver.log.level }}"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
             - name: KC_HTTP_ENABLED
               value: "true"
+            - name: KC_DEBUG
+              value: "true"
+            - name: KC_DEBUG_PORT
+              value: "*:8787"
+            - name: JAVA_LOCALE
+              value: "-Duser.timezone=Europe/Berlin"
+            - name: JAVA_OPTS_APPEND
+              value: "-ea"
+            - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              value: "/auth-mgmt"
+            - name: KC_LOG_CONSOLE_JSON_FORMAT
+              value: "ecs"
+            - name: KC_LOG_CONSOLE_OUTPUT
+              value: {{ quote .Values.authServerLogConsoleOutput }}
+            - name: KC_METRICS_ENABLED
+              value: {{ quote .Values.authServerMetricsEnabled }}
+            - name: KC_TRACING_ENABLED
+              value: {{ quote .Values.authServerTracingEnabled }}
+            - name: KC_TRACING_ENDPOINT
+              value: "http://{{ include "telemetryGateway.hostname" . }}:4317"
+            # Configure ZETA SMC-B token-exchange provider and OPA toggle
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
+              value: "{{ .Values.authserver.provider.smcB.opa.enabled }}"
+            # OPA endpoints and behavior
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_BASE_URL
+              value: "{{ .Values.authserver.provider.smcB.opaBaseUrl }}"
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_DECISION_PATH
+              value: "{{ .Values.authserver.provider.smcB.decisionPath }}"
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_CONNECTION_TIMEOUT_MS
+              value: "{{ .Values.authserver.provider.smcB.connectionTimeoutMs }}"
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_READ_TIMEOUT_MS
+              value: "{{ .Values.authserver.provider.smcB.readTimeoutMs }}"
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_FAIL_CLOSED
+              value: "{{ .Values.authserver.provider.smcB.failClosed }}"
+            - name: SMCB_USER_MAX_CLIENTS
+              value: "{{ .Values.authserver.config.maxClients }}"
+            - name: CLIENT_REGISTRATION_TTL
+              value: "{{ .Values.authserver.config.clientRegistrationTTL }}"
+            - name: CLIENT_REGISTRATION_SCHEDULER_INTERVAL
+              value: "{{ .Values.authserver.config.clientRegistrationSchedulerInterval }}"
+
             # Initial hash for admin events log
             # TODO: should be generated upon first startup
             - name: GENESIS_HASH
               value: 4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c
               # DB wiring switches by databaseMode value (operator|bitnami)
             {{- if eq .Values.databaseMode "operator" }}
-            # Operator-backed DB wiring for staging
+            # Operator-backed DB
             - name: KC_DB
               value: "postgres"
             - name: KC_DB_URL
@@ -83,7 +165,7 @@ spec:
             - name: KC_DB_SCHEMA
               value: "public"
             {{- else }}
-            # Simplest wiring: DB settings for local/dev (Bitnami)
+            # Simplest wiring: DB settings for local (Bitnami)
             - name: KC_DB
               value: "postgres"
             - name: KC_DB_URL
@@ -99,5 +181,18 @@ spec:
               value: "public"
             {{- end }}
           ports:
-            - containerPort: 8080
-              name: http
+            - containerPort: 8080 # align with KC_HTTP_PORT
+              name: http-port
+            - containerPort: 9000 # align with KC_HTTP_MANAGEMENT_PORT
+              name: http-mgmt-port
+            {{- if .Values.devMode }}
+            - containerPort: 5005
+              name: jdwp
+            {{- end }}
+      volumes:
+        - name: smcb-keystore
+          secret:
+            secretName: pdp-smcb-keystore
+            items:
+              - key: keystore
+                path: "smcb-certificates.p12"

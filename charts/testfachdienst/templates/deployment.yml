@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: testfachdienst
+  labels:
+    component: testfachdienst
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: testfachdienst
+  template:
+    metadata:
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+      labels:
+        app: testfachdienst
+        component: testfachdienst
+    spec:
+      securityContext:
+        fsGroup: 1000
+      imagePullSecrets:
+        - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      containers:
+        - name: testfachdienst
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          {{- with .Values.env }}
+          env:
+          {{- range . }}
+            - name: {{ .name | quote }}
+              value: {{ .value | quote }}
+          {{- end }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}

@@ -1,44 +1,348 @@
 global:
   image_pull_secret: nil
   registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+
+registry_name: ""
 
 authserver:
   image:
     repository: keycloak-zeta
-    tag: 0.1.3
+    tag: 0.2.3
     pullPolicy: Always
+  smcb_keystore:
+    # base64 encoded PKCS#12 keystore containing the CA certs to trust for signing SMC-B AUT certs
+    keystore: ""
+    # password for the keystore
+    password: ""
+  # Provider configuration for ZETA SMC-B token-exchange implementation
+  provider:
+    smcB:
+      opa:
+        enabled: true
+      opaBaseUrl: "http://opa:8181"
+      decisionPath: "/v1/data/zeta/authz/decision"
+      connectionTimeoutMs: 1000
+      readTimeoutMs: 2000
+      failClosed: true
   admin:
     username: admin
     # HINT: THIS IS TEMPORARY! CHANGE AT RUNTIME!
     # TODO: use robust Secret-based strategy
     password:
-  resources: {}
+  config:
+    maxClients: "256"
+    clientRegistrationTTL: "PT5M"
+    clientRegistrationSchedulerInterval: "PT2M"
+  resources: { }
+  # mostly for test setup purposes
+  # Adds an entry to the authserver's hosts file, mapping hostAlias.ip to hostAlias.name
+  hostAlias: { }
+  log:
+    level: "INFO"
+
+# authServerLogConsoleOutput sets the log output to JSON or default (plain) unstructured logging
+authServerLogConsoleOutput: json
+
+# authServerMetricsEnabled enables the metrics endpoint for Keycloak
+authServerMetricsEnabled: true
+
+# authServerTracingEnabled enables the OpenTelemetry tracing
+authServerTracingEnabled: true
 
 pepproxy:
   image:
     repository: ngx_pep
-    tag: 0.1.3
+    tag: 0.2.3
     pullPolicy: Always
-  nginxConf: {}
+  wellKnownBase: http://localhost
+  # boolean that controls if ASL should be enabled (true) or not (false)
+  asl_enabled: true
+  nginxConf:
+    configMapName: pep-nginx-conf
+    generateConfigMap: false
+
+    httpClientAcceptInvalidCerts: false
+
+    # fachdienstUrl defines the fachdienst url to be used for the pep-proxy.
+    fachdienstUrl: ""
+
+    # requiredAudience defines the audience required for a valid access token.
+    requiredAudience: ""
+
+    # requiredScopes defines scopes required for a valid access token.
+    requiredScopes: [ ]
+
+# pepproxyMetricsEnabled enables the metrics endpoint for Keycloak
+pepproxyMetricsEnabled: true
+
+# pepproxyTracingEnabled enables tracing for nginx
+pepproxyTracingEnabled: true
+
+# When true, the ingress routes traffic to the tiger-proxy service
+# instead of directly exposing internal services.
+routeViaTigerProxy: false
+
+# When enabled, injects a changing annotation to force pod rollouts
+# on each helm upgrade/apply even if image tag is unchanged.
+devMode: false
 
 
 # DB mode switch:
 # - bitnami: local using Bitnami subchart service/secret
-# - operator: staging/dev/prod using Zalando Postgres Operator
+# - operator: cd/staging/dev/prod using Zalando Postgres Operator
 databaseMode: bitnami
 postgresql:
   enabled: false
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
-clusterIssuer: "letsencrypt-staging"
+clusterIssuer: "letsencrypt-cd"
 
 opa:
   enabled: true
   replicaCount: 1
+  serviceAccountName: ""
   image:
-    # use default registry here
+    # use the default registry here
     registry: "openpolicyagent"
     repository: /opa
-    tag: 1.8.0-static
+    tag: 1.11.0-static
     pullPolicy: IfNotPresent
+  # Set OPA server log level: debug|info|warn|error (default: info)
+  logLevel: info
+  # Bundle mode (disabled by default) — inline policyRego is used when disabled
+  bundle:
+    enabled: false
+    # Logical service name used in OPA config (e.g., 'gitlab-registry' or 'local-proxy')
+    serviceName: registry
+    # Base URL of registry
+    url: ""
+    # fully qualified resource (including the registry host)
+    resource: ""
+    credentials:
+      # Reference a Secret containing registry bearer credentials.
+      secretRef:
+        # Name of the Secret in the release namespace that holds credentials
+        name: ""
+    polling:
+      min_delay_seconds: 120
+      max_delay_seconds: 180
+    # Signature verification for OPA bundles
+    verification:
+      enabled: true
+      # set in env-specific values
+      keyId: ""
+      algorithm: ""
+      publicKey: ""
+  # Workload Identity Federation (AKS → GCP STS) for GAR access
+  workloadIdentityFederation:
+    enabled: false
+    sts:
+      # Full STS audience for the WI provider
+      audience: ""
+      iamUrl: ""
+      # GPC service-account (email format)
+      sa: ""
+      scope: ""
+      # STS token endpoint
+      tokenUrl: ""
+
+    tokenRenewer:
+      enabled: true
+      # Default schedule: refresh every 45 minutes
+      # Immediately get token: kubectl -n NAMESPACE create job token-renewer-once --from=cronjob/opa-token-renewer-cronjob
+      schedule: "*/45 * * * *"
+      # Number of retries for failed Jobs spawned by the CronJob
+      backoffLimit: 5
+
+  # --- Example: Workload Identity Federation (WIF) ---
+  #
+  # WIF mode (AKS → GCP STS → GAR)
+  # serviceAccountName: opa
+  # bundle:
+  #   enabled: true
+  #   serviceName: gar
+  #   url: https://<region>-docker.pkg.dev
+  #   resource: <PROJECT_ID>/<REPO>/<IMAGE>:<TAG>
+  #   credentials:
+  #     secretRef:
+  #       name: ""   # keep empty in WIF mode
+  #    verification:
+  #      enabled: true
+  #      keyId: zeta_artifact_reg
+  #      algorithm: ES256
+  #      publicKey: |
+  #        -----BEGIN PUBLIC KEY-----
+  #        ...
+  #        -----END PUBLIC KEY-----
+  # workloadIdentityFederation:
+  #   enabled: true
+  #   sts:
+  #     # Use the provider resource name, for example:
+  #     # //iam.googleapis.com/projects/<PROJECT_ID>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+  #     audience: ""
+  #     iamUrl: "https://iamcredentials.googleapis.com"
+  #     sa: ""
+  #     scope: "https://www.googleapis.com/auth/cloud-platform"
+  #     tokenUrl: "https://sts.googleapis.com/v1/token"
+  #   tokenRenewer:
+  #     schedule: "*/45 * * * *"
+  #
+  # --- Examples: GitLab/Basic mode (deploy-token) ---
+  # bundle:
+  #   enabled: true
+  #   serviceName: gitlab
+  #   url: https://registry.example.com:443
+  #   resource: registry.example.com/group/project/policy-bundle:latest
+  #   credentials:
+  #     secretRef:
+  #       name: opa-bearer   # Secret with token='USERNAME:PASSWORD', scheme='Basic'
+  health:
+    liveness:
+      periodSeconds: 20
+    readiness:
+      periodSeconds: 20
   resources: {}
+
+# opaDistributedTracingEnabled enables distributed tracing with a gRPC endpoint
+opaDistributedTracingEnabled: true
+
+# If opaStatusPrometheus is true, export the status (bundle and plugin) metrics to prometheus
+opaStatusPrometheus: true
+
+# OPA policy/data configuration for Keycloak→OPA showcase
+opaPolicy:
+  # Enable console decision logs in OPA
+  logDecisions: true
+  # Default fake policy: allow-all decision object.
+  # The policies will be loaded from PIP and PAP Service (workload identity federation or secretRef)
+  policyRego: |
+    package zeta.authz
+
+    # Minimal decision object compatible with callers expecting
+    # data.zeta.authz.decision => {"allow": bool, "ttl": {"access_token": number, "refresh_token": number}}
+    decision := {
+      "allow": true,
+      "ttl": {
+        "access_token": 300,
+        "refresh_token": 86400,
+      },
+    }
+
+# If logCollectorEnabled is true, pods, services, and other resources for the log collector are added to the helm release
+logCollectorEnabled: true
+
+log-collector:
+  mode: daemonset
+  image:
+    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+  command:
+    name: otelcol-k8s
+  presets:
+    logsCollection:
+      enabled: true
+    kubernetesAttributes:
+      enabled: true
+  config:
+    exporters:
+      otlp:
+        # ToDo prefix with release name
+        endpoint: telemetry-gateway:4317
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        logs:
+          receivers: [ filelog ]
+          exporters: [ otlp ]
+        metrics:
+          receivers: [ prometheus ]
+          exporters: [ otlp ]
+        traces: null
+
+  ports:
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+
+  additionalLabels:
+    app.kubernetes.io/part-of: zeta-guards
+
+# telemetryGatewayEnabled adds the telemetry gateway to the helm release
+telemetryGatewayEnabled: true
+
+telemetry-gateway:
+  mode: deployment
+  image:
+    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+  command:
+    name: otelcol-k8s
+  presets:
+    kubernetesAttributes:
+      enabled: true
+      extractAllPodLabels: true
+      extractAllPodAnnotations: true
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: authserver
+              metrics_path: /auth-mgmt/metrics  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              scrape_interval: 5s
+              static_configs:
+                # align with KC_HTTP_MANAGEMENT_PORT
+                - targets: [ authserver:9000 ]
+
+            - job_name: opa
+              scrape_interval: 5s
+              static_configs:
+                - targets: [ opa:8181 ]
+
+            - job_name: policy-execution-point
+              scrape_interval: 5s
+              static_configs:
+                - targets: [ pep-proxy-svc:9113 ]
+
+            - job_name: telemetry-gateway
+              scrape_interval: 5s
+              static_configs:
+                - targets: [ "${env:MY_POD_IP}:8888" ]
+
+    service:
+      pipelines:
+        logs:
+          receivers: [ otlp ]
+          exporters: [ debug ]
+        metrics:
+          receivers:
+            - otlp
+            - prometheus
+          exporters: [ debug ]
+        traces:
+          receivers: [ otlp ]
+          exporters: [ debug ]
+
+  ports:
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+  additionalLabels:
+    app.kubernetes.io/part-of: zeta-guards

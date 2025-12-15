@@ -1,0 +1,7 @@
+{
+  "resource": "{{ .Values.pepproxy.wellKnownBase }}/pep/",
+  "authorization_servers": [
+    "{{ .Values.pepproxy.wellKnownBase }}/auth/realms/zeta-guard/"
+  ],
+  "zeta_asl_use": "{{ if .Values.pepproxy.asl_enabled }}required{{ else }}not_supported{{ end}}"
+}
