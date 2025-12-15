@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: testdriver
+  labels:
+    component: testdriver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: testdriver
+  template:
+    metadata:
+      labels:
+        app: testdriver
+        component: testdriver
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      securityContext:
+        fsGroup: 1000
+      imagePullSecrets:
+        - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      containers:
+        - name: testdriver
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          volumeMounts:
+            - name: smcb-keystore
+              mountPath: "/smcb-certificates.p12"
+              subPath: "smcb-certificates.p12"
+              readOnly: true
+          env:
+            - name: FACHDIENST_URL
+              value: {{ .Values.fachdienst_url }}
+            - name: DISABLE_SERVER_VALIDATION
+              value: {{ quote .Values.disableServerValidation }}
+            - name: POPP_TOKEN
+              value: {{ .Values.PoppToken | quote }}
+            - name: SMB_KEYSTORE_FILE
+              value: "/smcb-certificates.p12"
+            - name: SMB_KEYSTORE_ALIAS
+              value: "zeta.c_smcb_aut"
+            - name: SMB_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdp-smcb-keystore
+                  key: password
+            - name: SMCB_BASE_URL
+              value: {{ .Values.connector_base_url }}
+            - name: SMCB_MANDANT_ID
+              value: {{ .Values.connector_mandant_id }}
+            - name: SMCB_CLIENT_SYSTEM_ID
+              value: {{ .Values.connector_client_system_id }}
+            - name: SMCB_WORKSPACE_ID
+              value: {{ .Values.connector_workspace_id }}
+            - name: SMCB_USER_ID
+              value: {{ .Values.connector_user_id }}
+            - name: SMCB_CARD_HANDLE
+              value: {{ .Values.connector_card_handle }}
+      volumes:
+        - name: smcb-keystore
+          secret:
+            secretName: pdp-smcb-keystore
+            items:
+              - key: keystore
+                path: "smcb-certificates.p12"

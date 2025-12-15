@@ -1,0 +1,14 @@
+global:
+  image_pull_secret: nil
+  registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+
+registry_name: ""
+
+
+tokenGenerator:
+  image:
+    repository: popp-token-generator
+    tag: "1.0.1"
+    pullPolicy: IfNotPresent
+  enabled: false

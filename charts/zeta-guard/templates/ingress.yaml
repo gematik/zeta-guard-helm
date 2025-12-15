@@ -8,7 +8,7 @@ metadata:
     app: zeta-guard
   {{- if .Values.authserver.hostname }}
   annotations:
-    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt-staging" | quote }}
+    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt-cd" | quote }}
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/hsts: "true"
@@ -31,24 +31,23 @@ spec:
       {{- end }}
       http:
         paths:
-          - path: /auth
+          - path: /auth # align with KC_HTTP_RELATIVE_PATH
             pathType: Prefix
             backend:
               service:
+                {{- if .Values.routeViaTigerProxy }}
+                name: tiger-proxy
+                port:
+                  number: 80
+                {{- else }}
                 name: authserver
                 port:
-                  number: 80
-          - path: /proxy
-            pathType: Prefix
-            backend:
-              service:
-                name: testdriver
-                port:
-                  number: 80
+                  name: http
+                {{- end }}
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: pep-proxy-svc
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}pep-proxy-svc{{ end }}
                 port:
                   number: 80

@@ -1,0 +1,27 @@
+{{- $workflowUi := .Values.workflowUi | default dict }}
+{{- $tigerProxyAdminPort := dig "tigerProxyConfiguration" "adminPort" nil $workflowUi }}
+{{- if and $tigerProxyAdminPort .Values.proxyAdminService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tiger-testsuite.fullname" . }}-admin
+  labels:
+    {{- include "tiger-testsuite.labels" . | nindent 4 }}
+  {{- with .Values.proxyAdminService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- $svcType := default "NodePort" .Values.proxyAdminService.type }}
+  type: {{ default "NodePort" .Values.proxyAdminService.type }}
+  ports:
+    - name: tiger-admin
+      port: {{ default $tigerProxyAdminPort .Values.proxyAdminService.port }}
+      targetPort: tiger-admin
+      protocol: TCP
+      {{- if and (or (eq $svcType "NodePort") (eq $svcType "LoadBalancer")) .Values.proxyAdminService.nodePort }}
+      nodePort: {{ .Values.proxyAdminService.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "tiger-testsuite.selectorLabels" . | nindent 4 }}
+{{- end }}

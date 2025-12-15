@@ -1,0 +1,64 @@
+# See https://github.com/open-telemetry/opentelemetry-helm-charts/blob/opentelemetry-demo-0.38.6/charts/opentelemetry-demo/values.yaml
+opentelemetry-demo:
+
+  components:
+
+    accounting:
+      enabled: false
+
+    ad:
+      enabled: false
+
+    cart:
+      enabled: false
+
+    checkout:
+      enabled: false
+
+    currency:
+      enabled: false
+
+    email:
+      enabled: false
+
+    fraud-detection:
+      enabled: false
+
+    frontend:
+      enabled: false
+
+    image-provider:
+      enabled: false
+
+    load-generator:
+      enabled: false
+
+    payment:
+      enabled: false
+
+    product-catalog:
+      enabled: false
+
+    quote:
+      enabled: false
+
+    recommendation:
+      enabled: false
+
+    shipping:
+      enabled: false
+
+    flagd:
+      enabled: false
+
+    kafka:
+      enabled: false
+
+    postgresql:
+      enabled: false
+
+    valkey-cart:
+      enabled: false
+
+# ingressRulesHost defines the hostname for all ingress rules in this chart.
+ingressRulesHost: "test-monitoring-ingress.localhost"

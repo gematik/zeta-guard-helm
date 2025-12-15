@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tiger-testsuite
+description: Run the ZETA Tiger testsuite image inside the cluster
+type: application
+version: 0.0.1

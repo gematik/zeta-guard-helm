@@ -1,0 +1,162 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tiger-testsuite.fullname" . }}
+  labels:
+    {{- include "tiger-testsuite.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "tiger-testsuite.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tiger-testsuite.selectorLabels" . | nindent 8 }}
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      imagePullSecrets:
+        - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      {{- $workflowUi := .Values.workflowUi }}
+      {{- $workflowUiPort := $workflowUi.workflowUiPort }}
+      {{- $tigerProxyAdminPort := $workflowUi.tigerProxyConfiguration.adminPort }}
+      {{- $workflowUiAutoFetch := $workflowUi.autoFetchStatus }}
+      {{- $combinedMvnArgs := include "tiger-testsuite.mvnAdditionalArgs" . }}
+      containers:
+        - name: {{ include "tiger-testsuite.name" . }}
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if or $workflowUi.activateWorkflowUi $tigerProxyAdminPort }}
+          ports:
+            {{- if $workflowUi.activateWorkflowUi }}
+            - name: workflow-ui
+              containerPort: {{ $workflowUiPort }}
+              protocol: TCP
+            {{- end }}
+            {{- if $tigerProxyAdminPort }}
+            - name: tiger-admin
+              containerPort: {{ $tigerProxyAdminPort }}
+              protocol: TCP
+            {{- end }}
+          {{- end }}
+          {{- if and $workflowUi.activateWorkflowUi $workflowUiAutoFetch }}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    CMD=""
+                    ARGS=""
+                    if command -v wget >/dev/null 2>&1; then
+                      CMD="wget"
+                      ARGS="-qO-"
+                    elif command -v curl >/dev/null 2>&1; then
+                      CMD="curl"
+                      ARGS="-sf"
+                    fi
+                    if [ -z "${CMD}" ]; then
+                      exit 0
+                    fi
+                    i=0
+                    while [ $i -lt {{ $workflowUi.autoFetchTimeoutSeconds }} ]; do
+                      if ${CMD} ${ARGS} "http://127.0.0.1:{{ $workflowUiPort }}/status" >/dev/null 2>&1; then
+                        break
+                      fi
+                      sleep 1
+                      i=$((i + 1))
+                    done
+          {{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              DEFAULT_SERENITY_DIR={{ .Values.paths.serenityDir | quote }}
+              DEFAULT_SERENITY_PARENT="$(dirname "${DEFAULT_SERENITY_DIR}")"
+              if [ -n "${SERENITY_EXPORT_DIR:-}" ] && [ "${SERENITY_EXPORT_DIR}" != "${DEFAULT_SERENITY_DIR}" ]; then
+                mkdir -p "${SERENITY_EXPORT_DIR}"
+                mkdir -p "${DEFAULT_SERENITY_PARENT}"
+                rm -rf "${DEFAULT_SERENITY_DIR}"
+                ln -s "${SERENITY_EXPORT_DIR}" "${DEFAULT_SERENITY_DIR}"
+              else
+                mkdir -p "${DEFAULT_SERENITY_DIR}"
+              fi
+
+              MVN_GOALS="${MVN_GOALS}"
+              MVN_ADDITIONAL_ARGS="${MVN_ADDITIONAL_ARGS}"
+
+              set +e
+              mvn -o -B \
+                -Djava.awt.headless=true \
+                "-Dtiger.lib.activateWorkflowUi=${TIGER_ACTIVATE_WORKFLOW_UI}" \
+                "-Dtiger.lib.startBrowser=${TIGER_START_BROWSER}" \
+                "-Dtiger.lib.trafficVisualization=${TIGER_TRAFFIC_VISUALIZATION}" \
+                "-Dtiger.lib.workflowUiPort=${TIGER_WORKFLOW_UI_PORT}" \
+                "-Dtiger.lib.workflowUiStartTimeoutInSeconds=${TIGER_WORKFLOW_UI_START_TIMEOUT_SECONDS}" \
+                "-Dtiger.lib.enableTestSelection=${TIGER_ENABLE_TEST_SELECTION}" \
+                "-Dtiger.lib.runTestsOnStart=${TIGER_RUN_TESTS_ON_START}" \
+                {{- if $tigerProxyAdminPort }}
+                "-Dtiger.lib.tigerProxyConfiguration.adminPort=${TIGER_PROXY_CONFIGURATION_ADMIN_PORT}" \
+                "-Dtiger.tigerproxy.adminport=${TIGER_PROXY_CONFIGURATION_ADMIN_PORT}" \
+                "-Dtiger.internal.localproxy.port=${TIGER_PROXY_CONFIGURATION_ADMIN_PORT}" \
+                {{- end }}
+                -Dfailsafe.testFailureIgnore=false \
+                "-Denvironment=${TIGER_ENVIRONMENT}" \
+                "-Dzeta_base_url=${ZETA_BASE_URL}" \
+                "-Dzeta_proxy_url=${ZETA_PROXY_URL}" \
+                "-Dzeta_proxy=${ZETA_PROXY}" \
+                "-Dcucumber.filter.tags=${CUCUMBER_TAGS}" \
+                ${MVN_ADDITIONAL_ARGS} \
+                ${MVN_GOALS}
+              MVN_RESULT=$?
+              set -e
+
+              FAILSAFE_SUMMARY={{ .Values.paths.failsafeSummary | quote }}
+              if [ ${MVN_RESULT} -eq 0 ] && [ -f "${FAILSAFE_SUMMARY}" ]; then
+                if grep -Eq '<failures>[1-9]' "${FAILSAFE_SUMMARY}" || grep -Eq '<errors>[1-9]' "${FAILSAFE_SUMMARY}"; then
+                  echo "Integration tests failed according to ${FAILSAFE_SUMMARY}." >&2
+                  exit 1
+                fi
+              fi
+
+              exit ${MVN_RESULT}
+          env:
+            - name: ZETA_BASE_URL
+              value: {{ .Values.env.zetaBaseUrl | quote }}
+            - name: ZETA_PROXY_URL
+              value: {{ .Values.env.zetaProxyUrl | quote }}
+            - name: ZETA_PROXY
+              value: {{ .Values.env.zetaProxy | quote }}
+            - name: TIGER_ENVIRONMENT
+              value: {{ .Values.env.tigerEnvironment | quote }}
+            - name: CUCUMBER_TAGS
+              value: {{ .Values.env.cucumberTags | quote }}
+            - name: TIGER_ACTIVATE_WORKFLOW_UI
+              value: {{ $workflowUi.activateWorkflowUi | quote }}
+            - name: TIGER_TRAFFIC_VISUALIZATION
+              value: {{ $workflowUi.trafficVisualization | quote }}
+            - name: TIGER_START_BROWSER
+              value: {{ $workflowUi.startBrowser | quote }}
+            - name: TIGER_WORKFLOW_UI_PORT
+              value: {{ $workflowUiPort | quote }}
+            - name: TIGER_WORKFLOW_UI_START_TIMEOUT_SECONDS
+              value: {{ $workflowUi.workflowUiStartTimeoutInSeconds | quote }}
+            - name: TIGER_ENABLE_TEST_SELECTION
+              value: {{ $workflowUi.enableTestSelection | quote }}
+            - name: TIGER_RUN_TESTS_ON_START
+              value: {{ $workflowUi.runTestsOnStart | quote }}
+            {{- if $tigerProxyAdminPort }}
+            - name: TIGER_PROXY_CONFIGURATION_ADMIN_PORT
+              value: {{ $tigerProxyAdminPort | quote }}
+            {{- end }}
+            - name: MVN_GOALS
+              value: {{ .Values.env.mvnGoals | quote }}
+            - name: MVN_ADDITIONAL_ARGS
+              value: {{ $combinedMvnArgs | trim | quote }}
+            - name: SERENITY_EXPORT_DIR
+              value: {{ .Values.env.serenityExportDir | quote }}

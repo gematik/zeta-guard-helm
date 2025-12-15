@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: popp-mock
+  labels:
+    component: popp-mock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: popp-mock
+  template:
+    metadata:
+      labels:
+        app: popp-mock
+        component: popp-mock
+    spec:
+      securityContext:
+        fsGroup: 1000
+      imagePullSecrets:
+        - name: "{{ .Values.tokenGenerator.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      containers:
+        {{- if .Values.tokenGenerator.enabled }}
+        - name: popp-token-generator
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.tokenGenerator.image.registry }}{{ .Values.tokenGenerator.image.repository }}:{{ .Values.tokenGenerator.image.tag }}"
+          imagePullPolicy: "{{ .Values.tokenGenerator.image.pullPolicy }}"
+          env:
+            - name: spring_profiles_active
+              value: default,docker
+          ports:
+            - containerPort: 80
+        {{- end }}
+        - name: popp-statics
+          image: "nginxinc/nginx-unprivileged:alpine3.22-slim"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: jwks-file
+              mountPath: "/usr/share/nginx/html/jwks.json"
+              subPath: "jwks.json"
+              readOnly: true
+      volumes:
+        - name: jwks-file
+          configMap:
+            name: popp-jwks-file
+            items:
+              - key: jwks
+                path: "jwks.json"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: popp-jwks-file
+data:
+  jwks: |
+    {
+      "keys": [
+        {
+          "kty": "EC",
+          "kid": "alias",
+          "crv": "P-256",
+          "x": "cC8jes-IzhTkcHMdMjJ6yf9lxlEe2_1XG6OVtNpE-28",
+          "y": "2sqO5vyva24EQn8AgS6mONneRhII8qhRLq_VI06DxOE",
+          "alg": "ES256",
+          "use": "sig"
+        }
+      ]
+    }

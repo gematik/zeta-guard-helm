@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tiger-proxy
+  labels:
+    {{- include "tiger-proxy.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tiger-proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+      labels:
+        {{- include "tiger-proxy.selectorLabels" . | nindent 8 }}
+    spec:
+      imagePullSecrets:
+        - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # TODO - review necessity of this section or rework
+          ports:
+            - name: proxy-port
+              containerPort: {{ .Values.proxyConfig.proxyPort }}
+            - name: admin-port
+              containerPort: {{ .Values.proxyConfig.adminPort }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.startup.livenessProbe.url }}
+              port: {{ .Values.startup.livenessProbe.port }}
+            failureThreshold: {{ default .Values.startup.failureThreshold .Values.startup.livenessProbe.failureThreshold }}
+            periodSeconds: {{ default .Values.startup.startupPeriodSeconds .Values.startup.livenessProbe.periodSeconds }}
+            initialDelaySeconds: {{ default 120 .Values.startup.livenessProbe.initialDelaySeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.startup.readinessProbe.url }}
+              port: {{ .Values.startup.readinessProbe.port }}
+            failureThreshold: {{ default .Values.startup.failureThreshold .Values.startup.readinessProbe.failureThreshold }}
+            periodSeconds: {{ default .Values.startup.startupPeriodSeconds .Values.startup.readinessProbe.periodSeconds }}
+            initialDelaySeconds: {{ default 120 .Values.startup.readinessProbe.initialDelaySeconds }}
+          resources:
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+          volumeMounts:
+            - name: tiger-application-config
+              mountPath: /app/application.yaml
+              subPath: "application.yaml"
+              readOnly: true
+      volumes:
+        - name: tiger-application-config
+          configMap:
+            name: tiger-proxy
+            items:
+            - key: application.yaml
+              path: application.yaml

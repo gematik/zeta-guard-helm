@@ -1,0 +1,23 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: zeta-local
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Map host ports 80/443 to the ingress controller nodePorts (32080/32443)
+      - containerPort: 32080
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 32443
+        hostPort: 443
+        protocol: TCP
+      - containerPort: 32099
+        hostPort: 9999
+        protocol: TCP
+      - containerPort: 32010
+        hostPort: 9010
+        protocol: TCP
+      - containerPort: 32011
+        hostPort: 9011
+        protocol: TCP
+  - role: worker

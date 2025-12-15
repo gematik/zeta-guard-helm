@@ -1,0 +1,67 @@
+global:
+  image_pull_secret: nil
+  registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+
+registry_name: ""
+
+replicaCount: 1
+
+# When enabled, injects a changing annotation to force pod rollouts
+# on each helm upgrade/apply even if image tag is unchanged.
+devMode: false
+
+image:
+  tag: latest
+  pullPolicy: Always
+  repository: testproxy
+
+resources:
+  limits:
+    cpu: 900m
+
+proxyConfig:
+  proxyPort: 8080
+  adminPort: 9999
+  proxyLogLevel: INFO
+  activateRbelParsing: true
+  parsingShouldBlockCommunication: false
+  fileSaveInfo:
+    writeToFile: false
+    fileName: "tiger.log"
+
+  proxyRoutes: 
+    - from: /testfachdienst
+      to: https://testfachdienst:443
+    - from: /auth
+      to: http://authserver/auth
+    - from: /proxy
+      to: http://testdriver/proxy
+    - from: /
+      to: http://pep-proxy-svc
+  tls: {}
+
+startup:
+  livenessProbe:
+    url: /actuator/health
+    port: 9999
+    initialDelaySeconds: 60
+  readinessProbe:
+    url: /actuator/health
+    port: 9999
+    initialDelaySeconds: 60
+  failureThreshold: 30
+  startupPeriodSeconds: 30
+
+service:
+  type: ClusterIP
+  annotations: {}
+  ports:
+    proxy: 80
+    admin: 9999
+  nodePorts:
+    proxy: null
+    admin: null
+  tls: []
+
+

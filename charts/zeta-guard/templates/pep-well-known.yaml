@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pep-well-known
+data:
+# {{ .Values.authserver.hostname }}
+{{- range $path, $file := .Files.Glob "files/well-known/*" }}
+  {{ base $path }}: |-
+{{ tpl ($file | toString) $ | indent 4 }}
+{{- end }}
