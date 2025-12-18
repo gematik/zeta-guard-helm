@@ -1,0 +1,48 @@
+{{- if .Values.issuers.local.enabled }}
+{{- $local := .Values.issuers.local }}
+{{- $issuerName := default "local-selfsigned" $local.issuerName }}
+{{- $certName := default (printf "%s-cert" $issuerName) $local.certificateName }}
+{{- $secretName := default "zeta-guard-tls" $local.secretName }}
+{{- $dnsNames := default (list) $local.dnsNames }}
+{{- $duration := default "8760h" $local.duration }}
+{{- $commonName := default "" $local.commonName }}
+{{- if and (eq $commonName "") (gt (len $dnsNames) 0) }}
+{{- $commonName = index $dnsNames 0 }}
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuerName }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $certName }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ $secretName }}
+  duration: {{ $duration | quote }}
+{{- if $commonName }}
+  commonName: {{ $commonName | quote }}
+{{- end }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+{{- if gt (len $dnsNames) 0 }}
+  dnsNames:
+    {{- range $dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+{{- end }}
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  issuerRef:
+    kind: Issuer
+    name: {{ $issuerName }}
+{{- end }}
