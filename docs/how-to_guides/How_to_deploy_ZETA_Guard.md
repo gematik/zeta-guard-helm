@@ -71,7 +71,7 @@ When all deployments have completed,
 you can randomly verify the Keycloak deployment using
 `open http://localhost/auth/`.
 
-## How to deploy ZETA Guard to non-local Stage
+## How to deploy ZETA Guard to a non-local Stage
 
 - Ensure the operator and CRDs are installed via Terraform before deploying.
 - The first rollout may need a longer timeout to allow the operator to create

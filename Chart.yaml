@@ -30,7 +30,7 @@ dependencies:
     tags:
       - exauthsim
   - name: zeta-guard
-    version: 0.2.3
+    version: 0.2.5
     repository: file://charts/zeta-guard
     tags:
       - zeta-guard

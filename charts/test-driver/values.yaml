@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: testdriver-image
-  tag: 0.1.2
+  tag: v0.2.6
   pullPolicy: Always
 
 containerPort: 8080

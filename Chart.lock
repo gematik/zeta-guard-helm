@@ -16,7 +16,7 @@ dependencies:
   version: 0.0.1
 - name: zeta-guard
   repository: file://charts/zeta-guard
-  version: 0.2.3
+  version: 0.2.5
 - name: testdriver
   repository: file://charts/test-driver
   version: 0.0.1
@@ -26,5 +26,5 @@ dependencies:
 - name: tiger-testsuite
   repository: file://charts/tiger-testsuite
   version: 0.0.1
-digest: sha256:9911906afa4293ca245a58ae97b824f4f8a2afa14d28a69047004eb2b4da15e3
-generated: "2025-12-12T19:29:22.662943264+01:00"
+digest: sha256:af0d9c6e13bab6141d94ce417922d9222b64299a7d0136e28b36ac92ab554c69
+generated: "2025-12-19T12:39:22.512088819+01:00"

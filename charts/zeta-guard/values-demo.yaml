@@ -28,6 +28,7 @@ pepproxy:
       location / {
         root /usr/share/nginx/html;
         pep on;
+        pep_require_popp off;
       }
       # Proxy OAuth Authorization Server metadata to Keycloak (demo)
       # Served as: http://<host>/.well-known/oauth-authorization-server

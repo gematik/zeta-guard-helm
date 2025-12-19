@@ -8,7 +8,7 @@ registry_name: ""
 authserver:
   image:
     repository: keycloak-zeta
-    tag: 0.2.3
+    tag: 0.2.4
     pullPolicy: Always
   smcb_keystore:
     # base64 encoded PKCS#12 keystore containing the CA certs to trust for signing SMC-B AUT certs
@@ -53,7 +53,7 @@ authServerTracingEnabled: true
 pepproxy:
   image:
     repository: ngx_pep
-    tag: 0.2.3
+    tag: 0.2.4
     pullPolicy: Always
   wellKnownBase: http://localhost
   # boolean that controls if ASL should be enabled (true) or not (false)
