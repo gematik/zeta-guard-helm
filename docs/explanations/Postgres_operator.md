@@ -1,7 +1,7 @@
 # Postgres Operator (Terraform-managed)
 
 - We use the Zalando Postgres Operator to manage PostgreSQL clusters for
-  non-local environments (e.g. cd/dev/staging/prod).
+  non-local environments (e.g., cd/dev/staging/prod).
 - The operator is cluster-scoped (installs CRDs and cluster-wide controllers),
   so it should be installed once per cluster — not per app release.
 - Installation is handled outside this repo via a Terraform module using the

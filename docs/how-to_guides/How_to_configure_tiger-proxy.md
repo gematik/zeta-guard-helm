@@ -15,7 +15,7 @@
 
 Set the following values in the `values.yaml` file for the respective environment to activate routing via Tiger proxy:
 
-```
+```yaml
 tags:
   tiger-proxy: true
 
@@ -28,23 +28,32 @@ tiger-proxy:
         to: http://authserver/auth
       - from: /proxy
         to: http://testdriver/proxy
+      - from: /opa
+        to: http://opa:8181
       - from: /
         to: http://pep-proxy-svc
 
 zeta-guard:
   routeViaTigerProxy: true
+  authserver:
+    provider:
+      smcB:
+        opaBaseUrl: "http://tiger-proxy/opa"
   pepproxy:
     nginxConf:
       fachdienstUrl: https://tiger-proxy:80/testfachdienst
+
+testdriver:
+  routeViaTigerProxy: true
 ```
 
-After setting these values the Tiger proxy chart will be deployed when running `make deploy stage=<target-stage>`. 
+After setting these values the Tiger proxy chart will be deployed when running `make deploy stage=<target-stage>`.
 
 ## Deactivate routing via tiger proxy
 
 Set the following values in the `values.yaml` file for the respective environment to deactivate routing via Tiger proxy:
 
-```
+```yaml
 tags:
   tiger-proxy: false
 
@@ -52,21 +61,28 @@ tiger-proxy: {}
 
 zeta-guard:
   routeViaTigerProxy: false
+  authserver:
+    provider:
+      smcB:
+        opaBaseUrl: "http://opa:8181"
   pepproxy:
     nginxConf:
-      fachdienstUrl: http://testfachdienst:443
+      fachdienstUrl: https://testfachdienst:443
+
+testdriver:
+  routeViaTigerProxy: false
 ```
 
-After setting these values the Tiger proxy chart will be ignored when running `make deploy stage=<target-stage>`. 
+After setting these values the Tiger proxy chart will be ignored when running `make deploy stage=<target-stage>`.
 
 
 ## Enable TLS for the testfachdienst route
 
-When `testfachdienst` is configured to serve HTTPS (for example by setting `SERVER_SSL_ENABLED=true`), the Tiger proxy must
+When `testfachdienst` is configured to serve HTTPS (for example, by setting `SERVER_SSL_ENABLED=true`), the Tiger proxy must
 both forward traffic via HTTPS to the backend and present its own certificate to the callers. Configure the TLS support
 in the chart values:
 
-```
+```yaml
 testfachdienst:
   env:
     - name: SERVER_SSL_ENABLED

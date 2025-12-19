@@ -8,6 +8,6 @@ provider "keycloak" {
   realm                    = "master"
   client_id                = "admin-cli"
   client_secret            = ""
-  username                 = data.kubernetes_secret.keycloak_admin.data["username"]
-  password                 = var.keycloak_password != "" ? var.keycloak_password : data.kubernetes_secret.keycloak_admin.data["password"]
+  username                 = data.kubernetes_secret_v1.keycloak_admin.data["username"]
+  password                 = var.keycloak_password != "" ? var.keycloak_password : data.kubernetes_secret_v1.keycloak_admin.data["password"]
 }

@@ -84,7 +84,6 @@ PEP).
 
 - Policy decision: `POST /v1/data/zeta/authz/allow` with JSON body
   `{ "input": { ... } }`.
-- Request/response contract: see `docs/explanations/Keycloak_OPA_Contract.md`.
 
 ## Troubleshooting
 
@@ -185,5 +184,4 @@ Notes
   - If `bundle.enabled=true`, then `serviceName` and `resource` are required (non-empty).
   - If `workloadIdentityFederation.enabled=true`, `bundle.credentials.secretRef.name` must not be set (mutually exclusive with WIF).
 - Environment strategy:
-  - Non-jza envs typically disable verification via values overlay: `verification.enabled: false`.
-  - jza enables verification (WIF + GAR) and provides `keyId`, `algorithm`, and `publicKey`.
+  - enable verification (WIF + GAR) and provide `keyId`, `algorithm` and `publicKey`.

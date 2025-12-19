@@ -1,4 +1,4 @@
-# Values for the umbrella chart (local environment e.g. KIND)
+# Values for the umbrella chart (local environment with KIND)
 
 global:
   registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
@@ -25,7 +25,7 @@ exauthsim:
     tag: 0.2.1
 
 popp-mocks:
-  enabled: disable
+  enabled: true
   tokenGenerator:
     enabled: false
   registry_name: zeta/devops/ci-images
@@ -45,12 +45,12 @@ testdriver:
   connector_user_id: ""
   connector_card_handle: ""
   image:
-    tag: v0.2.3
+    tag: v0.2.6
 
 tiger-testsuite:
   devMode: true
   image:
-    tag: 0.2.2
+    tag: 0.2.3
   env:
     zetaBaseUrl: zeta-kind.local
     zetaProxyUrl: zeta-kind.local:9999
@@ -89,6 +89,8 @@ tiger-proxy:
         to: http://authserver/auth
       - from: /proxy
         to: http://testdriver/proxy
+      - from: /opa
+        to: http://opa:8181
       - from: /
         to: http://pep-proxy-svc
     tls:
@@ -106,15 +108,11 @@ tiger-proxy:
 zeta-guard:
   devMode: true
   routeViaTigerProxy: true
-  # Revert to default component enablement
-  opa:
-    bundle:
-      enabled: false
   authserver:
     hostname: zeta-kind.local
     http_enabled: true
     image:
-      tag: 0.2.3
+      tag: 0.2.4
       pullPolicy: IfNotPresent
     admin:
       username: admin
@@ -124,7 +122,11 @@ zeta-guard:
     provider:
       smcB:
         opa:
-          enabled: false
+          enabled: true
+        # opaBaseUrl value has to be aligned with tags.tiger-proxy state
+        # see docs/How_to_configure_tiger-proxy.md for reference
+        # opaBaseUrl: "http://tiger-proxy/opa"
+        opaBaseUrl: "http://opa:8181"
     log:
       level: "INFO,de.gematik.zeta.zetaguard:debug"
   ingressClassName: nginx
@@ -133,19 +135,29 @@ zeta-guard:
       exporters:
         otlp:
           endpoint: local-telemetry-gateway:4317
+  opa:
+    serviceAccountName: opa
+    bundle:
+      enabled: false
+      serviceName: gar
+      url: https://europe-west3-docker.pkg.dev
+      resource: "<PROJECT_ID>/opa-bundles/zeta-authz:latest"
+    workloadIdentityFederation:
+      enabled: false
+      sts:
+        audience: "//iam.googleapis.com/projects/<PROJECT_NUM>/locations/global/workloadIdentityPools/aks-pool/providers/aks-provider"
+        tokenUrl: https://sts.googleapis.com/v1/token
+      gar:
+        host: europe-west3-docker.pkg.dev
   pepproxy:
     image:
-      tag: 0.2.3
+      tag: 0.2.4
     wellKnownBase: https://zeta-kind.local
     asl_enabled: false
     nginxConf:
       generateConfigMap: true
-
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard
       requiredAudience: https://zeta-kind.local
-
-      poppIssuer: http://popp-statics
-
   postgresql:
     image:
       repository: bitnamilegacy/postgresql
