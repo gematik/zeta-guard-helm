@@ -1,6 +1,5 @@
 resource "terraform_data" "max_user_clients_policy" {
   triggers_replace = {
-    realm     = var.realm_name
     namespace = var.keycloak_namespace
   }
 
@@ -31,7 +30,7 @@ resource "terraform_data" "max_user_clients_policy" {
 
       POD=$(kubectl -n ${var.keycloak_namespace} get pods -l app=authserver -o jsonpath='{.items[0].metadata.name}')
 
-      echo "Applying Max Clients Limit Policy for realm '${var.realm_name}'..."
+      echo "Applying Max Clients Limit Policy for realm zeta-guard..."
 
       kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh config credentials \
         --server http://localhost:8080/auth \
@@ -41,19 +40,19 @@ resource "terraform_data" "max_user_clients_policy" {
 
       POLICY_NAME="𝛇-Guard user clients limit"
       PROVIDER_ID="zeta-client-registration-policy"
-      POLICY_ID=$(kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh get components -r "${var.realm_name}" \
+      POLICY_ID=$(kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh get components -r zeta-guard \
         | jq -r ".[] | select(.providerId==\"$PROVIDER_ID\" and .name==\"$POLICY_NAME\") | .id")
 
       if [ -n "$POLICY_ID" ]; then
         echo "Policy exists (ID $POLICY_ID), updating"
-        kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh update components/$POLICY_ID -r "${var.realm_name}" \
+        kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh update components/$POLICY_ID -r zeta-guard \
           -s name="$POLICY_NAME" \
           -s providerId="$PROVIDER_ID" \
           -s subType="anonymous" \
           -s providerType="org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy"
       else
         echo "Policy does not exist, creating"
-        kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh create components -r "${var.realm_name}" \
+        kubectl -n ${var.keycloak_namespace} exec $POD -- /opt/keycloak/bin/kcadm.sh create components -r zeta-guard \
           -s name="$POLICY_NAME" \
           -s providerId="$PROVIDER_ID" \
           -s subType="anonymous" \

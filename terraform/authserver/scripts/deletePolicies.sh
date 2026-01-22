@@ -4,7 +4,6 @@ set -euo pipefail
 # input from terraform external data source
 input=$(cat)
 namespace=$(echo "$input" | jq -r '.namespace')
-realm=$(echo "$input" | jq -r '.realm')
 policy_names=$(echo "$input" | jq -r '.policy_names | fromjson')
 password=$(echo "$input" | jq -r '.password // ""')
 
@@ -42,7 +41,7 @@ for (( i=0; i<policy_count; i++ )); do
   set +e
   # fetch policy by name
   POLICY_JSON=$(kubectl -n "$namespace" exec "$POD" -- /opt/keycloak/bin/kcadm.sh \
-    get components -r "$realm" -F id,name -q name="$policy_name" 2>/dev/null)
+    get components -r zeta-guard -F id,name -q name="$policy_name" 2>/dev/null)
   STATUS=$?
   set -e
 
@@ -52,7 +51,7 @@ for (( i=0; i<policy_count; i++ )); do
     POLICY_ID=$(echo "$POLICY_JSON" | jq -r '.[0].id')
     if [ -n "$POLICY_ID" ] && [ "$POLICY_ID" != "null" ]; then
       kubectl -n "$namespace" exec "$POD" -- /opt/keycloak/bin/kcadm.sh \
-        delete components/"$POLICY_ID" -r "$realm"
+        delete components/"$POLICY_ID" -r zeta-guard
       result="$policy_name Policy deleted successfully."
     else
       result="No $policy_name Policy found, skipping."

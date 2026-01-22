@@ -21,8 +21,13 @@ spec:
     spec:
       securityContext:
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+      volumes:
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: testfachdienst
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -36,3 +41,13 @@ spec:
           {{- end }}
           ports:
             - containerPort: {{ .Values.containerPort }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp

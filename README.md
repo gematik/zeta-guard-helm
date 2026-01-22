@@ -197,7 +197,6 @@ Render checks:
     * [How to configure ZETA Guard Authserver](docs/how-to_guides/How_to_configure_authserver.md)
     * [How to create a docker-registry type secret for accessing the GitLab container registry](docs/how-to_guides/How_to_create_a_docker_registry_secret.md)
     * [How to deploy ZETA Guard](docs/how-to_guides/How_to_deploy_ZETA_Guard.md)
-    * [How to deploy ZETA Guard from a GitLab Pipeline](docs/how-to_guides/How_to_deploy_ZETA_Guard_from_a_GitLab_pipeline.md)
     * [How to install cert-manager](docs/how-to_guides/How_to_install_cert-manager.md)
     * [How to manage Postgres operator](docs/how-to_guides/How_to_manage_Postgres_operator.md)
     * [How to set up TLS](docs/how-to_guides/How_to_set_up_TLS.md)

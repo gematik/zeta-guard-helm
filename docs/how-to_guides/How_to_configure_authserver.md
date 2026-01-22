@@ -13,15 +13,17 @@ without the need to deploy it from scratch.
 > 
 > Customizable properties:
 > - Authserver URL
+> - Kubernetes namespace
 > - TLS configuration (self-signed certificates are supported)
-> - ZETA Guard realm
-> - PDP scopes
+> - Additional PDP scopes
 > 
 > Predefined settings:
 > - PDP scopes `zero:manage` and `zero:register` are automatically created
 > - Realm token encryption is set to ES256
 > - Trusted Hosts, Max Clients Limit, Consent Required Policies are removed
 > - ZETA Max Clients Limit Policy added
+
+> The name of the ZETA Guard realm is `zeta-guard` and must be kept unchanged.
 
 ---
 
@@ -70,18 +72,22 @@ Use the Makefile to manage Terraform operations. The Makefile now performs the f
 
 #### Basic usage
 
-To configure an environment, run:
+To configure an environment, export the keycloak password in your shell:
 
+```shell
+export TF_VAR_keycloak_password=your_password
+```
+and run:
 ```shell
 make config stage=demo
 ```
 
 #### Passing admin password (optional)
 
-If the Keycloak admin password is **not** stored in the Kubernetes secret, pass it as an environment variable:
+If the Keycloak admin password is **not** stored in the Kubernetes secret, either pass it as an environment variable:
 
 ```shell
-make config stage=cd TF_VAR_keycloak_password=your_password
+make config stage=demo TF_VAR_keycloak_password=your_password
 ```
 
 > If using the terminal the default path to the kubeconfig is `~/.kube/config`. 
@@ -97,6 +103,8 @@ The `config` target in the Makefile performs the following:
 - Initialize the Terraform backend
 - Check changes against the terraform state within the cluster
 - Apply the terraform configuration to create, update and delete resources
+
+In case you want a dry-run of the Terraform operations, use `config-plan` instead. This will not change your settings but priont the differences between the current state and the desired state.
 
 ---
 
@@ -116,6 +124,7 @@ The `config` target in the Makefile performs the following:
 - Terraform state is stored in a Kubernetes Secret within the environment namespace.
 - Secret name format: `tfstate-<workspace>-state` (e.g., `tfstate-default-state`).
 - The Makefile and Terraform configurations are designed for seamless CI/CD integration.
+- In some cases when starting from scratch, deleting the Terraform state may be required.
 
 ---
 

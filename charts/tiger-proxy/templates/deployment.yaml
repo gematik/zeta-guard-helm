@@ -18,12 +18,21 @@ spec:
       labels:
         {{- include "tiger-proxy.selectorLabels" . | nindent 8 }}
     spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           # TODO - review necessity of this section or rework
@@ -54,6 +63,10 @@ spec:
               mountPath: /app/application.yaml
               subPath: "application.yaml"
               readOnly: true
+            - name: maven-target
+              mountPath: /app/target
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: tiger-application-config
           configMap:
@@ -61,3 +74,7 @@ spec:
             items:
             - key: application.yaml
               path: application.yaml
+        - name: maven-target
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

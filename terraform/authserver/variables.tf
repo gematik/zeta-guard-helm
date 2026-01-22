@@ -40,16 +40,6 @@ variable "smc_b_client_secret" {
   sensitive   = true
 }
 
-variable "realm_name" {
-  description = "PDP realm name"
-  type        = string
-}
-
-variable "realm_display_name" {
-  description = "Descriptive name of the realm"
-  type        = string
-}
-
 variable "pdp_scopes" {
   description = "List of additional PDP scopes"
   type        = list(string)

@@ -2,6 +2,35 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 0.2.8
+
+### changed:
+- authserver and testdriver/exauthsim now have separate keystores/truststores.
+  This chart now includes an RU based truststore for the authserver. For the
+  testdriver/exauthsim you still need to bring your own cert&key. 
+- The values for the SMCB keystore have changed slightly. Now they are
+  `smcb_keystore.keystore` and `smcb_keystore.password` with the same semantics.
+  No changes are needed when using the makefile for the test setup.
+
+## Release 0.2.7
+
+### added:
+- ability to configure external DBs. See helm values authserverDb.* in zeta-guard subchart
+- improvements for better compliance with some kubernetes security policies
+
+### changed:
+- Makefile: streamlined stage/namespace/values selection; safer templating; clearer help
+- Enforce admin-password of Authserver on initial deployment
+
+## Release 0.2.6
+
+### added:
+- config for ASL test mode
+- improved Betriebsdatenlieferung
+
+### changed:
+- updated versions of several subcomponents
+
 ## Release 0.2.5
 
 ### changed:

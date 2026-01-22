@@ -4,16 +4,35 @@
 # Global defaults used by subcharts; keep safe empties
 global:
   image_pull_secret: nil
-  registry_host: ""
   registry: ""
+  registry_host: ""
 
 # Keep tags empty by default; env files can enable as needed
 tags: { }
 
-testfachdienst: { }
+exauthsim: { }
+
+ingress-nginx:
+  enabled: false
+
+# Safe defaults for cert-manager issuers to avoid nil pointer lookups
+issuers:
+  local:
+    enabled: false
+    issuerName: local-selfsigned
+    certificateName: zeta-guard-local-tls
+    secretName: zeta-guard-tls
+    commonName: ""
+    dnsNames: [ ]
+    duration: 8760h
 
 popp-mocks:
   enabled: false
+  # Needed when poppIssuer points to popp-statics (JWKS), or adjust /popp target + poppIssuer to your JWKS endpoint.
+
+testdriver: { }
+
+testfachdienst: { }
 
 # If testMonitoringServiceEnabled is true, observability backends are added to the deployment.
 testMonitoringServiceEnabled: false
@@ -29,9 +48,6 @@ testMonitoringService:
           limits:
             memory: 600Mi
 
-exauthsim: { }
-testdriver: { }
-
 zeta-guard:
   authserver:
     image:
@@ -39,7 +55,15 @@ zeta-guard:
   authServerLogConsoleOutput: default
   authServerMetricsEnabled: true
   authServerTracingEnabled: true
-  logCollectorEnabled: false
+  logCollectorEnabled: true
+  log-collector:
+    config:
+      receivers:
+        filelog:
+          exclude:
+            - /var/log/pods/*log-collector*/log-collector/*.log
+            - /var/log/pods/*telemetry-gateway*/telemetry-gateway/*.log
+            - /var/log/pods/*test-monitoring-collector*/opentelemetry-collector/*.log
   opaDistributedTracingEnabled: true
   opaStatusPrometheus: false
   pepproxy:
@@ -54,7 +78,12 @@ zeta-guard:
       # fachdienstUrl: "https://testfachdienst:443"
 
       httpClientAcceptInvalidCerts: true
-      poppIssuer: http://popp-statics
+      aslTestmode: true
+
+      # poppIssuer value has to be aligned with tags.tiger-proxy state
+      # see docs/How_to_configure_tiger-proxy.md for reference
+      poppIssuer: "http://tiger-proxy/popp"
+      # poppIssuer: http://popp-statics
 
       locations: |-
         location / {
@@ -123,31 +152,21 @@ zeta-guard:
   telemetryGatewayEnabled: true
   telemetry-gateway:
     config:
-      # if testMonitoringServiceEnabled
       exporters:
-        otlp/test-monitoring:
+        # if testMonitoringServiceEnabled
+        otlp/test-monitoring-service:
           endpoint: otel-collector:4317
           tls:
             insecure: true
       service:
         pipelines:
           logs:
-            exporters: [ otlp/test-monitoring ]
+            exporters: [ otlp/test-monitoring-service ]
           metrics:
-            exporters: [ otlp/test-monitoring ]
+            exporters: [ otlp/test-monitoring-service ]
           traces:
-            exporters: [ otlp/test-monitoring ]
+            exporters: [ otlp/test-monitoring-service ]
 
-ingress-nginx:
-  enabled: false
-
-# Safe defaults for cert-manager issuers to avoid nil pointer lookups
-issuers:
-  local:
-    enabled: false
-    issuerName: local-selfsigned
-    certificateName: zeta-guard-local-tls
-    secretName: zeta-guard-tls
-    commonName: ""
-    dnsNames: [ ]
-    duration: 8760h
+smcb_keystore:
+  keystore: "please set me"
+  password: "please set me"

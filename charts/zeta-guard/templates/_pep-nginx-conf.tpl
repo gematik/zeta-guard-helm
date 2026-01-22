@@ -11,7 +11,7 @@ load_module modules/ngx_otel_module.so;
 {{- end }}
 
 error_log  /dev/stdout debug;
-pid        /run/nginx.pid;
+pid        /var/run/nginx.pid;
 
 events {
   worker_connections 16384;
@@ -57,14 +57,18 @@ http {
 
   # override global default, can still be toggled on per-location
   pep_require_popp    off;
-  {{- if $.Values.pepproxy.nginxConf.poppIssuer }}
-  pep_popp_issuer     {{ $.Values.pepproxy.nginxConf.poppIssuer }};
-  {{- end }}
+  pep_popp_issuer     {{  required "pepproxy.nginxConf.poppIssuer is require" $.Values.pepproxy.nginxConf.poppIssuer }};
+  pep_asl_testing {{ .aslTestmode | ternary "on" "off" }};
 
   server {
-    listen 80;
+    listen 8081;
     server_name  pep-proxy-svc;
     {{- tpl $.Values.pepproxy.nginxConf.locations $ | nindent 4 }}
+    client_body_temp_path /dev/shm;
+    proxy_temp_path /dev/shm;
+    fastcgi_temp_path /dev/shm;
+    uwsgi_temp_path /dev/shm;
+    scgi_temp_path /dev/shm;
   }
   server {
     listen 8080;
@@ -72,6 +76,11 @@ http {
       access_log off;
       stub_status;
     }
+    client_body_temp_path /dev/shm;
+    proxy_temp_path /dev/shm;
+    fastcgi_temp_path /dev/shm;
+    uwsgi_temp_path /dev/shm;
+    scgi_temp_path /dev/shm;
   }
 }
 {{- end }}

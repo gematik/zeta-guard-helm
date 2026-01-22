@@ -60,5 +60,31 @@ opentelemetry-demo:
     valkey-cart:
       enabled: false
 
+  opentelemetry-collector:
+    config:
+      processors:
+        # this is a workaround for https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45428
+        resource/delete_k8s_labels:
+          attributes:
+            - key: app
+              action: delete
+
+      service:
+        pipelines:
+          logs:
+            processors:
+              - k8sattributes
+              - memory_limiter
+              - resourcedetection
+              - resource
+              - resource/delete_k8s_labels
+              - batch
+          metrics:
+            receivers:
+              - otlp
+              - spanmetrics
+          traces:
+            receivers:
+              - otlp
 # ingressRulesHost defines the hostname for all ingress rules in this chart.
 ingressRulesHost: "test-monitoring-ingress.localhost"

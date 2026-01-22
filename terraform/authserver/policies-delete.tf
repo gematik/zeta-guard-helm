@@ -8,7 +8,6 @@ data "external" "delete_policies" {
 
   query = {
     namespace    = var.keycloak_namespace
-    realm        = var.realm_name
     password     = var.keycloak_password
     policy_names = jsonencode(["Trusted Hosts", "Max Clients Limit", "Consent Required"])
   }

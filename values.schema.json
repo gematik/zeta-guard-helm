@@ -3,6 +3,20 @@
   "properties": {
     "testMonitoringServiceEnabled": {
       "type": "boolean"
+    },
+    "smcb_keystore": {
+      "type": "object",
+      "description": "Keystore and password containing SMC-B cert and key for the testdriver and",
+      "properties": {
+        "keystore": {
+          "type": "string",
+          "description": "Base64 encoded keystore file"
+        },
+        "password": {
+          "type": "string",
+          "description": "plain (i.e. no additional encoding) password for the keystore"
+        }
+      }
     }
   },
   "required": [

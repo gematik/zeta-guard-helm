@@ -17,6 +17,8 @@ spec:
     spec:
       securityContext:
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: "{{ .Values.tokenGenerator.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       containers:
@@ -29,6 +31,12 @@ spec:
               value: default,docker
           ports:
             - containerPort: 80
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
         {{- end }}
         - name: popp-statics
           image: "nginxinc/nginx-unprivileged:alpine3.22-slim"
@@ -36,11 +44,25 @@ spec:
           ports:
             - containerPort: 8080
           volumeMounts:
+            - name: nginx-tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
             - name: jwks-file
               mountPath: "/usr/share/nginx/html/jwks.json"
               subPath: "jwks.json"
               readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
       volumes:
+        - name: nginx-tmp
+          emptyDir: { }
+        - name: nginx-cache
+          emptyDir: { }
         - name: jwks-file
           configMap:
             name: popp-jwks-file

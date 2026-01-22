@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-guard
 description: ZETA Guard
 type: application
-version: 0.2.5
+version: 0.2.8
 dependencies:
   - name: opentelemetry-collector
     version: "~0.99.0"

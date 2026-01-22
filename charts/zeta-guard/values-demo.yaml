@@ -21,6 +21,7 @@ pepproxy:
 
     fachdienstUrl: https://fachdienst
     pepIssuer: http://authserver/auth/realms/zeta-guard
+    poppIssuer: "http://localhost"
     requiredAudience: "test"
     requiredScopes: [ ]
 
@@ -39,8 +40,12 @@ pepproxy:
       }
 
 # DB mode switch:
-# - bitnami: local using Bitnami subchart service/secret
+# - bitnami: local using Bitnami subchart service/secret only for demo purposes – no support at all
 # - operator: staging/dev/prod using Zalando Postgres Operator
+# - external: use external db by providing filling values db.kcDb, db.kcDbUrl, db.kcDbSchema, db.kcDbUsername,
+#       db.kcDbPasswordSecretName
+#       the db password is pulled from the "password" field of a secret going by the provided name. The other properties
+#       behave according to the keycloak environment variables. See https://www.keycloak.org/server/db
 databaseMode: bitnami
 postgresql:
   image:

@@ -1,22 +1,34 @@
-{{- $wif := .Values.opa.workloadIdentityFederation -}}
-{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) }}
+{{- if .Values.gematikConnectionEnabled }}
+
+{{- /* This CronJob is based on example Job from
+     * https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-kubernetes#deploy
+     */}}
+
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: opa-token-renewer-cronjob
+  name: gematik-oidc-token-renewer-cronjob
   labels:
-    app: opa
-    component: opa
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: zeta-guard
+    app.kubernetes.io/component: gematik
 spec:
-  schedule: {{ $wif.tokenRenewer.schedule | quote }}
+  failedJobsHistoryLimit: 2
+  schedule: "*/30 * * * *"
+  successfulJobsHistoryLimit: 2
   jobTemplate:
     spec:
-      backoffLimit: {{ default 5 $wif.tokenRenewer.backoffLimit }}
+      backoffLimit: 5
       template:
         metadata:
           labels:
-            app: opa
-            component: opa
+            app.kubernetes.io/name: opa
+            app.kubernetes.io/managed-by: {{ .Release.Service }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/part-of: zeta-guard
+            app.kubernetes.io/component: gematik
           {{- if $.Values.devMode }}
           annotations:
             zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
@@ -52,6 +64,11 @@ spec:
                   K8S_TOKEN=$(cat /var/run/secrets/sts.googleapis.com/serviceaccount/token)
 
                   # 2. Token beim GCP Security Token Service (STS) gegen ein GCP Access Token tauschen
+                  {{- /* Authenticate a workload using the REST API
+                       * See https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-other-clouds#rest
+                       * REST API reference: https://docs.cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token
+                       */}}
+
                   # JSON-Payload für STS aufbauen
                   {{- $resourceNameOfIdentityProvider := include "gematik.full-resource-name-of-identity-provider" . }}
                   GCP_STS_SCOPE="https://www.googleapis.com/auth/cloud-platform"
@@ -91,15 +108,20 @@ spec:
                   fi
 
                   # 3. GSA-Impersonation: STS Access Token gegen GSA Access Token tauschen (GAR-kompatibel)
-                  IAM_CRED_URL="https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{{ .Values.opa.workloadIdentityFederation.sts.sa }}:generateAccessToken"
+                  {{- /* Generate an OIDC ID token for Identity-Aware Proxy
+                       * See https://docs.cloud.google.com/iap/docs/authentication-howto#obtain_an_oidc_token_by_using_service_account_impersonation
+                       * See https://docs.cloud.google.com/iam/docs/create-short-lived-credentials-direct#create-id
+                       * REST API reference: https://docs.cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateIdToken
+                       */}}
+                  IAM_CRED_URL="https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{{ .Values.gematik.serviceAccountEmailAddress }}:generateIdToken"
                   echo "used url for impersonation: $IAM_CRED_URL"
 
                   IMP_HTTP_CODE=$(curl -s -o /tmp/imp.json -w "%{http_code}" -X POST \
                     "$IAM_CRED_URL" \
                     -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
                     -H "Content-Type: application/json" \
-                    -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"],"lifetime":"3600s"}')
-                  IMP_TOKEN=$(jq -r '.accessToken' /tmp/imp.json 2>/dev/null || echo "")
+                    -d '{"audience": "{{ .Values.gematik.clientId }}", "includeEmail": true}')
+                  IMP_TOKEN=$(jq -r '.token' /tmp/imp.json 2>/dev/null || echo "")
 
                   if [ "$IMP_HTTP_CODE" != "200" ] || [ -z "$IMP_TOKEN" ] || [ "$IMP_TOKEN" = "null" ]; then
                     echo "FEHLER: GSA-Impersonation fehlgeschlagen (HTTP $IMP_HTTP_CODE)." >&2
@@ -108,17 +130,18 @@ spec:
                     exit 1
                   fi
 
-                  # 4. Das Secret 'opa-gcp-token' mit dem neuen, base64-kodierten Token patchen
-                  # Für GAR via Basic muss der Dateiinhalt exakt "oauth2accesstoken:<ACCESS_TOKEN>" sein.
+                  # 4. Das Secret 'gematik-oidc-token' mit dem neuen, base64-kodierten Token patchen
                   # Zuerst die Klartext-Datei, dann base64-kodiere den Dateiinhalt.
-                  echo -n "oauth2accesstoken:${IMP_TOKEN}" > /tmp/gar_basic.txt
+                  echo -n "${IMP_TOKEN}" > /tmp/gar_basic.txt
                   ENCODED_TOKEN=$(base64 -w0 /tmp/gar_basic.txt 2>/dev/null || base64 /tmp/gar_basic.txt | tr -d '\n')
 
-                  kubectl patch secret opa-gcp-token \
+                  kubectl patch secret gematik-oidc-token \
                     --type='json' \
                     -p="[{\"op\": \"replace\", \"path\": \"/data/token\", \"value\": \"${ENCODED_TOKEN}\"}]"
+                  kubectl annotate --overwrite secret gematik-oidc-token last-updated="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-                  echo "Kubernetes Secret 'opa-gcp-token' aktualisiert (Basic-Präfix gesetzt)."
+                  echo "Kubernetes Secret 'gematik-oidc-token' aktualisiert (Basic-Präfix gesetzt)."
+
               volumeMounts:
                 - name: gcp-sa-token
                   mountPath: /var/run/secrets/sts.googleapis.com/serviceaccount
@@ -127,6 +150,7 @@ spec:
               projected:
                 sources:
                   - serviceAccountToken:
-                      path: token
                       audience: "{{ include "gematik.token-audience" . }}"
+                      expirationSeconds: 3600
+                      path: token
 {{- end }}
