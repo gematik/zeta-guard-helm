@@ -30,13 +30,17 @@ proxyConfig:
     writeToFile: false
     fileName: "tiger.log"
 
-  proxyRoutes: 
+  proxyRoutes:
     - from: /testfachdienst
       to: https://testfachdienst:443
     - from: /auth
       to: http://authserver/auth
     - from: /proxy
       to: http://testdriver/proxy
+    - from: /opa
+      to: http://opa:8181
+    - from: /popp
+      to: http://popp-statics
     - from: /
       to: http://pep-proxy-svc
   tls: {}

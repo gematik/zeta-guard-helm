@@ -1,6 +1,6 @@
 resource "keycloak_realm" "zeta_realm" {
-  realm                       = var.realm_name
-  display_name                = var.realm_display_name
+  realm                       = "zeta-guard"
+  display_name                = "ζ Guard"
   enabled                     = true
   default_signature_algorithm = "ES256"
   login_with_email_allowed    = true

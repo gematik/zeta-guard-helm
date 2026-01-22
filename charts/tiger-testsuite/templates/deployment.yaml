@@ -18,6 +18,10 @@ spec:
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
       {{- end }}
     spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       {{- $workflowUi := .Values.workflowUi }}
@@ -91,7 +95,7 @@ spec:
               MVN_ADDITIONAL_ARGS="${MVN_ADDITIONAL_ARGS}"
 
               set +e
-              mvn -o -B \
+              mvn -B \
                 -Djava.awt.headless=true \
                 "-Dtiger.lib.activateWorkflowUi=${TIGER_ACTIVATE_WORKFLOW_UI}" \
                 "-Dtiger.lib.startBrowser=${TIGER_START_BROWSER}" \
@@ -126,6 +130,10 @@ spec:
 
               exit ${MVN_RESULT}
           env:
+            - name: MAVEN_USER_HOME
+              value: /tmp/.m2
+            - name: MAVEN_OPTS
+              value: "-Dmaven.repo.local=/tmp/.m2/repository -Djava.io.tmpdir=/tmp"
             - name: ZETA_BASE_URL
               value: {{ .Values.env.zetaBaseUrl | quote }}
             - name: ZETA_PROXY_URL
@@ -160,3 +168,24 @@ spec:
               value: {{ $combinedMvnArgs | trim | quote }}
             - name: SERENITY_EXPORT_DIR
               value: {{ .Values.env.serenityExportDir | quote }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: maven-target
+              mountPath: /app/target
+            - name: maven-repo
+              mountPath: /tmp/.m2
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: maven-target
+          emptyDir: {}
+        - name: maven-repo
+          emptyDir: { }
+        - name: tmp
+          emptyDir: {}

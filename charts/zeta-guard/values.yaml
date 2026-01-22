@@ -10,11 +10,6 @@ authserver:
     repository: keycloak-zeta
     tag: 0.2.4
     pullPolicy: Always
-  smcb_keystore:
-    # base64 encoded PKCS#12 keystore containing the CA certs to trust for signing SMC-B AUT certs
-    keystore: ""
-    # password for the keystore
-    password: ""
   # Provider configuration for ZETA SMC-B token-exchange implementation
   provider:
     smcB:
@@ -53,7 +48,7 @@ authServerTracingEnabled: true
 pepproxy:
   image:
     repository: ngx_pep
-    tag: 0.2.4
+    tag: 0.2.5
     pullPolicy: Always
   wellKnownBase: http://localhost
   # boolean that controls if ASL should be enabled (true) or not (false)
@@ -64,8 +59,17 @@ pepproxy:
 
     httpClientAcceptInvalidCerts: false
 
+    # enables ASL test mode. This will practically disable encryption! NEVER USE IN PRODUCTION!
+    aslTestmode: false
+
     # fachdienstUrl defines the fachdienst url to be used for the pep-proxy.
     fachdienstUrl: ""
+
+    # JWKS issuer for PoPP key validation.
+    poppIssuer: ""
+
+    # OIDC issuer (iss) of the authorization server (e.g., zeta-guard-realm).
+    pepIssuer: ""
 
     # requiredAudience defines the audience required for a valid access token.
     requiredAudience: ""
@@ -89,9 +93,13 @@ devMode: false
 
 
 # DB mode switch:
-# - bitnami: local using Bitnami subchart service/secret
-# - operator: cd/staging/dev/prod using Zalando Postgres Operator
-databaseMode: bitnami
+# - bitnami: local using Bitnami subchart service/secret only for demo purposes – no support at all
+# - operator: staging/dev/prod using Zalando Postgres Operator
+# - external: use external db by providing filling values db.kcDb, db.kcDbUrl, db.kcDbSchema, db.kcDbUsername,
+#       db.kcDbPasswordSecretName
+#       the db password is pulled from the "password" field of a secret going by the provided name. The other properties
+#       behave according to the keycloak environment variables. See https://www.keycloak.org/server/db
+databaseMode: operator
 postgresql:
   enabled: false
 
@@ -138,14 +146,8 @@ opa:
   workloadIdentityFederation:
     enabled: false
     sts:
-      # Full STS audience for the WI provider
-      audience: ""
-      iamUrl: ""
       # GPC service-account (email format)
       sa: ""
-      scope: ""
-      # STS token endpoint
-      tokenUrl: ""
 
     tokenRenewer:
       enabled: true
@@ -245,20 +247,28 @@ log-collector:
       enabled: true
   config:
     exporters:
-      otlp:
+      otlp/telemetry-gateway:
         # ToDo prefix with release name
         endpoint: telemetry-gateway:4317
         tls:
           insecure: true
 
+    receivers:
+      filelog:
+        exclude:
+          - /var/log/pods/*log-collector*/log-collector/*.log
+          - /var/log/pods/*telemetry-gateway*/telemetry-gateway/*.log
+
     service:
       pipelines:
         logs:
           receivers: [ filelog ]
-          exporters: [ otlp ]
+          exporters:
+            - otlp/telemetry-gateway
         metrics:
           receivers: [ prometheus ]
-          exporters: [ otlp ]
+          exporters:
+            - otlp/telemetry-gateway
         traces: null
 
   ports:
@@ -346,3 +356,5 @@ telemetry-gateway:
       enabled: false
   additionalLabels:
     app.kubernetes.io/part-of: zeta-guards
+
+gematikConnectionEnabled: false   # will be enabled by default in a future release

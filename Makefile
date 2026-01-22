@@ -1,18 +1,28 @@
-RELEASE ?= zeta-testenv
-NAMESPACE ?= zeta
 # Prefer private/ if it exists; otherwise fallback to local-test/
 ifeq ($(wildcard private/),)
   VALUES_DIR := local-test/
 else
   VALUES_DIR := private/
 endif
-VALUES ?= $(VALUES_DIR)values.yaml
-# Optional single-parameter env selection: `make deploy stage=cd`
-# Derives: RELEASE=zeta-testenv-<stage>, NAMESPACE=zeta-<stage>, VALUES=values.<stage>.yaml
-STAGE := $(strip $(stage))
-ifneq ($(STAGE),)
-  RELEASE := $(RELEASE)-$(STAGE)
+
+# Optional single-parameter env selection: `make deploy stage=<env>`
+# If not provided, default to 'local'.
+STAGE := $(strip $(if $(stage),$(stage),local))
+
+# Release name is always derived from STAGE; ignore overrides silently
+override RELEASE := zeta-testenv-$(STAGE)
+
+# Namespace: if provided as 'namespace', use it; else default to zeta-<stage>
+ifdef namespace
+  NAMESPACE := $(namespace)
+else
   NAMESPACE := zeta-$(STAGE)
+endif
+
+# Values file: if provided as 'values', use it; else select values.<stage>.yaml in VALUES_DIR
+ifdef values
+  VALUES := $(values)
+else
   VALUES := $(VALUES_DIR)values.$(STAGE).yaml
 endif
 LOCK ?= Chart.lock
@@ -28,14 +38,17 @@ ifeq ($(strip $(SMB_KEYSTORE_FILE_B64)),)
 $(error SMB_KEYSTORE_FILE_B64 must not be empty)
 endif
 
-HELM_EXTRA_VALUES_PARAMS=--set-file "zeta-guard.authserver.smcb_keystore.password=${SMB_KEYSTORE_PW_FILE}" --set-file "zeta-guard.authserver.smcb_keystore.keystore=${SMB_KEYSTORE_FILE_B64}"
+HELM_EXTRA_VALUES_PARAMS=--set-file "smcb_keystore.password=${SMB_KEYSTORE_PW_FILE}" --set-file "smcb_keystore.keystore=${SMB_KEYSTORE_FILE_B64}"
 
 .PHONY: help deps install-cert-manager lint yamllint status uninstall clean
 
-help: ## Show available targets and variables
-	@awk 'BEGIN {FS=":.*## "}; /^[a-zA-Z0-9_.-]+:.*## /{printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help: ## Show available targets, usage, and effective vars
+	@awk 'BEGIN {FS=":.*## "}; /^[a-zA-Z0-9_.-]+:.*## /{printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Vars (default-values):\n RELEASE=$(RELEASE)\n NAMESPACE=$(NAMESPACE)\n VALUES=$(VALUES)\n STAGE=$(STAGE)"
+	@echo "Usage: make <target> [stage=<env>] [namespace=<ns>] [values=<path>]"
+	@echo "       stage defaults to 'local' when omitted"
+	@echo
+	@echo "Vars (effective):\n RELEASE=$(RELEASE)\n NAMESPACE=$(NAMESPACE)\n VALUES=$(VALUES)\n STAGE=$(STAGE)"
 
 
 $(LOCK): Chart.yaml $(SUBCHARTS) ## Refresh vendored deps + lock when chart specs change
@@ -66,12 +79,14 @@ lint: ## Helm lint subcharts and umbrella
 
 ### RENDERING ###
 template: $(LOCK) ## Render manifests to stdout
-	helm template $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS)
+	helm template $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) \
+	--set-string "zeta-guard.authserver.admin.password=__template__"
 
 render: rendered.yaml ## Generate rendered.yaml from the chart
 
 rendered.yaml:
-	helm template $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) > $@
+	helm template $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) \
+ 	--set-string "zeta-guard.authserver.admin.password=__rendered__" \ > $@
 
 yamllint: rendered.yaml ## Lint rendered.yaml with yamllint
 	yamllint -c .yamllint.yaml rendered.yaml
@@ -79,7 +94,9 @@ yamllint: rendered.yaml ## Lint rendered.yaml with yamllint
 
 ### DRY-RUN ###
 dry-run: ## Server-side dry-run apply of rendered manifests
-	helm template $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) --namespace $(NAMESPACE) | kubectl apply --dry-run=server -n $(NAMESPACE) -f -
+	helm template $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) --namespace $(NAMESPACE) \
+ 	--set-string "zeta-guard.authserver.admin.password=__dryrun__" \
+ 	| kubectl apply --dry-run=server -n $(NAMESPACE) -f -
 
 
 ### DEPLOYMENT ###
@@ -89,24 +106,23 @@ ifeq ($(STAGE),local)
 endif
 	# Ensure local subchart changes are packaged
 	$(MAKE) deps
-	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE)  --wait --atomic --timeout 10m
+	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE) --wait --atomic --timeout 10m
 
 ### DEPLOYMENT ###
 deploy-debug: $(LOCK) ## Install/upgrade the release (atomic + wait + timeout)
-	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_ARGS) -n $(NAMESPACE) --wait --atomic --timeout 10m --debug
+	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE) --wait --atomic --timeout 10m --debug
 
 ### CONFIGURATION ###
 config: ## Configure deployed authserver through terraform
 	# initialise terraform backend
 	@echo "config_path = \"$(TF_VAR_config_path)\"" > terraform/authserver/environments/$(STAGE).backend.hcl
-	@echo "namespace   = \"zeta-$(STAGE)\"" >> terraform/authserver/environments/$(STAGE).backend.hcl
+	@echo "namespace   = \"$(NAMESPACE)\"" >> terraform/authserver/environments/$(STAGE).backend.hcl
 	terraform -chdir=$(TF_PATH) init \
 		-backend-config=environments/$(STAGE).backend.hcl \
 		-reconfigure
 
 	# apply
 	terraform -chdir=$(TF_PATH) apply \
-		-var-file=environments/common.tfvars \
 		-var-file=../../$(VALUES_DIR)$(STAGE).tfvars \
 		-var="keycloak_password=$(TF_VAR_keycloak_password)" \
 		-auto-approve
@@ -114,21 +130,20 @@ config: ## Configure deployed authserver through terraform
 config-plan: ## List changes that would be made to the stage (by make config)
 	# initialise terraform backend
 	@echo "config_path = \"$(TF_VAR_config_path)\"" > terraform/authserver/environments/$(STAGE).backend.hcl
-	@echo "namespace   = \"zeta-$(STAGE)\"" >> terraform/authserver/environments/$(STAGE).backend.hcl
+	@echo "namespace   = \"$(NAMESPACE)\"" >> terraform/authserver/environments/$(STAGE).backend.hcl
 	terraform -chdir=$(TF_PATH) init \
 		-backend-config=environments/$(STAGE).backend.hcl \
 		-reconfigure
 
 	# plan (list changes against current tf-state; skip external scripts)
 	terraform -chdir=$(TF_PATH) plan \
-		-var-file=environments/common.tfvars \
     	-var-file=../../$(VALUES_DIR)$(STAGE).tfvars \
     	-var="keycloak_password=$(TF_VAR_keycloak_password)" \
     	-var="skip_external_resources=true"
 
 config-import: ## for development and troubleshooting only - imports configuration not yet managed by terraform
 	@echo "config_path = \"$(TF_VAR_config_path)\"" > terraform/authserver/environments/$(STAGE).backend.hcl
-	@echo "namespace   = \"zeta-$(STAGE)\"" >> terraform/authserver/environments/$(STAGE).backend.hcl
+	@echo "namespace   = \"$(NAMESPACE)\"" >> terraform/authserver/environments/$(STAGE).backend.hcl
 
 	terraform -chdir=$(TF_PATH) init \
            -backend-config=environments/$(STAGE).backend.hcl \
@@ -136,7 +151,6 @@ config-import: ## for development and troubleshooting only - imports configurati
 
 	terraform -chdir=$(TF_PATH) import \
 		  -var-file=../../$(VALUES_DIR)$(STAGE).tfvars \
-		  -var-file=environments/common.tfvars \
 		  -var "keycloak_password=$(TF_VAR_keycloak_password)" \
 		  -var="skip_external_resources=true" \
 		  keycloak_realm.pdp_realm zeta-guard \

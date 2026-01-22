@@ -25,6 +25,9 @@ spec:
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
       {{- end }}
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: "{{ .Values.authserver.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       {{- with .Values.authserver.hostAlias }}
@@ -87,7 +90,7 @@ spec:
             - name: SMCB_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: pdp-smcb-keystore
+                  name: pdp-smcb-truststore
                   key: password
             {{- if .Values.devMode }}
             # Enable remote debugging in devMode
@@ -164,8 +167,8 @@ spec:
                   key: password
             - name: KC_DB_SCHEMA
               value: "public"
-            {{- else }}
-            # Simplest wiring: DB settings for local (Bitnami)
+            {{- else if eq .Values.databaseMode "bitnami" }}
+            # DB settings for local (Bitnami)
             - name: KC_DB
               value: "postgres"
             - name: KC_DB_URL
@@ -179,6 +182,21 @@ spec:
                   key: password
             - name: KC_DB_SCHEMA
               value: "public"
+            {{- else }}
+            # DB settings for external DB
+            - name: KC_DB
+              value: {{ .Values.authserverDb.kcDb | quote }}
+            - name: KC_DB_URL
+              value: {{ .Values.authserverDb.kcDbUrl | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.authserverDb.kcDbUsername | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.authserverDb.kcDbPasswordSecretName | quote }}
+                  key: password
+            - name: KC_DB_SCHEMA
+              value: {{ .Values.authserverDb.kcDbSchema | quote }}
             {{- end }}
           ports:
             - containerPort: 8080 # align with KC_HTTP_PORT
@@ -189,10 +207,16 @@ spec:
             - containerPort: 5005
               name: jdwp
             {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
       volumes:
         - name: smcb-keystore
           secret:
-            secretName: pdp-smcb-keystore
+            secretName: pdp-smcb-truststore
             items:
               - key: keystore
                 path: "smcb-certificates.p12"

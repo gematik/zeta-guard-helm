@@ -38,8 +38,8 @@ spec:
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.pepproxy.image.registry }}{{ .Values.pepproxy.image.repository }}:{{ .Values.pepproxy.image.tag }}"
           imagePullPolicy: "{{ .Values.pepproxy.image.pullPolicy }}"
           ports:
-            - name: http
-              containerPort: 80
+            - name: http-main
+              containerPort: 8081
             - name: status
               containerPort: 8080
           livenessProbe:
@@ -58,6 +58,12 @@ spec:
             - name: nginx-conf
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
             {{- /* use subPath to only project intended files, not ..data etc. */ -}}
             {{- $files := .Files.Glob "files/well-known/*" }}
             {{- range $path, $_ := $files }}
@@ -65,6 +71,13 @@ spec:
               mountPath: /srv/.well-known/{{ base $path }}
               subPath: {{ base $path }}
             {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
 
       {{- if .Values.pepproxyMetricsEnabled }}
         - name: metrics
@@ -92,8 +105,17 @@ spec:
             httpGet:
               path: /metrics
               port: metrics
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
       {{- end }}
-
       volumes:
         - name: nginx-conf
           configMap:
@@ -102,10 +124,20 @@ spec:
             items:
               - key: nginx.conf
                 path: nginx.conf
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: well-known
           configMap:
             name: pep-well-known
             defaultMode: 0444
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+
 ---
 {{- if .Values.pepproxy.nginxConf.generateConfigMap }}
 {{- $nginxConf := include "zeta-guard.pep-nginx-conf" . }}
@@ -135,7 +167,7 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: http
+      targetPort: http-main
     {{- if .Values.pepproxyMetricsEnabled }}
     - name: metrics
       port: 9113

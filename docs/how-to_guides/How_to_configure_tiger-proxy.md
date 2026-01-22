@@ -30,6 +30,8 @@ tiger-proxy:
         to: http://testdriver/proxy
       - from: /opa
         to: http://opa:8181
+      - from: /popp
+        to: http://popp-statics
       - from: /
         to: http://pep-proxy-svc
 
@@ -42,10 +44,14 @@ zeta-guard:
   pepproxy:
     nginxConf:
       fachdienstUrl: https://tiger-proxy:80/testfachdienst
+      poppIssuer: "http://tiger-proxy/popp"
 
 testdriver:
   routeViaTigerProxy: true
 ```
+
+Note: The `/popp` route points to the `popp-statics` Service from the `popp-mocks` chart.
+Ensure `popp-mocks.enabled: true` (or adjust the `/popp` target and `poppIssuer` to your JWKS endpoint).
 
 After setting these values the Tiger proxy chart will be deployed when running `make deploy stage=<target-stage>`.
 
@@ -68,6 +74,7 @@ zeta-guard:
   pepproxy:
     nginxConf:
       fachdienstUrl: https://testfachdienst:443
+      poppIssuer: http://popp-statics
 
 testdriver:
   routeViaTigerProxy: false

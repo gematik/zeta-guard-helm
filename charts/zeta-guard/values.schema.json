@@ -1,6 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "properties": {
+    "authserver": {
+      "type": "object",
+      "properties": {
+        "admin": {
+          "type": "object",
+          "properties": {
+            "username": { "type": "string", "minLength": 1 },
+            "password": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
     "authServerLogConsoleOutput": {
       "type": "string",
       "enum": [
@@ -12,6 +24,49 @@
       "type": "boolean"
     },
     "authServerTracingEnabled": {
+      "type": "boolean"
+    },
+    "gematik": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serviceAccountEmailAddress": {
+          "type": "string",
+          "minLength": 5
+        },
+        "workloadIdentityFederation": {
+          "type": "object",
+          "properties": {
+            "projectNumber": {
+              "type": "string",
+              "minLength": 1
+            },
+            "poolId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workloadIdentityProvider": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "projectNumber",
+            "poolId",
+            "workloadIdentityProvider"
+          ]
+        }
+      },
+      "required": [
+        "clientId",
+        "serviceAccountEmailAddress",
+        "workloadIdentityFederation"
+      ]
+    },
+    "gematikConnectionEnabled": {
       "type": "boolean"
     },
     "global": {
@@ -37,6 +92,37 @@
     "opaStatusPrometheus": {
       "type": "boolean"
     },
+    "databaseMode": {
+      "type": "string",
+      "enum": ["operator", "external", "bitnami"],
+      "description": "Where the database credentials are sourced from. If 'operator' then nothing else needs to be done. If 'external', also see value 'authserverDb'."
+    },
+    "authserverDb": {
+      "type": "object",
+      "description": "Relevant only for databaseMode=external . This is how you can configure your own DB.",
+      "properties": {
+        "kcDb": {
+          "type": "string",
+          "description": "See environment variable KC_DB in keycloak config https://www.keycloak.org/server/db"
+        },
+        "kcDbUrl": {
+          "type": "string",
+          "description": "See environment variable KC_DB_URL in keycloak config https://www.keycloak.org/server/db"
+        },
+        "kcDbUsername": {
+          "type": "string",
+          "description": "See environment variable KC_DB_USERNAME in keycloak config https://www.keycloak.org/server/db"
+        },
+        "kcDbPasswordSecretName": {
+          "type": "string",
+          "description": "Name of a secret that contains the database password in its field 'password'. Will be passed into environment variable KC_DB_PASSWORD. See keycloak config https://www.keycloak.org/server/db"
+        },
+        "kcDbSchema": {
+          "type": "string",
+          "description": "See environment variable KC_DB_SCHEMA in keycloak config https://www.keycloak.org/server/db"
+        }
+      }
+    },
     "pepproxy": {
       "type": "object",
       "properties": {
@@ -58,10 +144,16 @@
             "httpClientAcceptInvalidCerts": {
               "type": "boolean"
             },
+            "aslTestmode": {
+              "type": "boolean"
+            },
             "locations": {
               "type": "string"
             },
             "pepIssuer": {
+              "type": "string"
+            },
+            "poppIssuer": {
               "type": "string"
             },
             "requiredAudience": {
@@ -76,7 +168,9 @@
           },
           "required": [
             "configMapName",
-            "generateConfigMap"
+            "generateConfigMap",
+            "pepIssuer",
+            "poppIssuer"
           ],
           "allOf": [
             {
@@ -131,24 +225,44 @@
         "bundle": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "serviceName": { "type": "string" },
-            "url": { "type": "string" },
-            "resource": { "type": "string" },
+            "enabled": {
+              "type": "boolean"
+            },
+            "serviceName": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "resource": {
+              "type": "string"
+            },
             "polling": {
               "type": "object",
               "properties": {
-                "min_delay_seconds": { "type": "integer" },
-                "max_delay_seconds": { "type": "integer" }
+                "min_delay_seconds": {
+                  "type": "integer"
+                },
+                "max_delay_seconds": {
+                  "type": "integer"
+                }
               }
             },
             "verification": {
               "type": "object",
               "properties": {
-                "enabled": { "type": "boolean" },
-                "keyId": { "type": "string" },
-                "algorithm": { "type": "string" },
-                "publicKey": { "type": "string" }
+                "enabled": {
+                  "type": "boolean"
+                },
+                "keyId": {
+                  "type": "string"
+                },
+                "algorithm": {
+                  "type": "string"
+                },
+                "publicKey": {
+                  "type": "string"
+                }
               }
             },
             "credentials": {
@@ -157,7 +271,9 @@
                 "secretRef": {
                   "type": "object",
                   "properties": {
-                    "name": { "type": "string" }
+                    "name": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -167,7 +283,9 @@
         "workloadIdentityFederation": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" }
+            "enabled": {
+              "type": "boolean"
+            }
           }
         }
       },
@@ -177,7 +295,11 @@
             "properties": {
               "workloadIdentityFederation": {
                 "type": "object",
-                "properties": { "enabled": { "const": true } }
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                }
               }
             }
           },
@@ -193,9 +315,14 @@
                         "secretRef": {
                           "type": "object",
                           "properties": {
-                            "name": { "type": "string", "minLength": 1 }
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            }
                           },
-                          "required": ["name"]
+                          "required": [
+                            "name"
+                          ]
                         }
                       }
                     }
@@ -211,7 +338,9 @@
               "bundle": {
                 "type": "object",
                 "properties": {
-                  "enabled": { "const": true }
+                  "enabled": {
+                    "const": true
+                  }
                 }
               }
             }
@@ -220,10 +349,17 @@
             "properties": {
               "bundle": {
                 "properties": {
-                  "serviceName": { "minLength": 1 },
-                  "resource": { "minLength": 1 }
+                  "serviceName": {
+                    "minLength": 1
+                  },
+                  "resource": {
+                    "minLength": 1
+                  }
                 },
-                "required": ["serviceName", "resource"]
+                "required": [
+                  "serviceName",
+                  "resource"
+                ]
               }
             }
           }
@@ -235,6 +371,7 @@
     "authServerLogConsoleOutput",
     "authServerMetricsEnabled",
     "authServerTracingEnabled",
+    "gematikConnectionEnabled",
     "global",
     "logCollectorEnabled",
     "opaDistributedTracingEnabled",
@@ -243,6 +380,22 @@
     "pepproxyMetricsEnabled",
     "pepproxyTracingEnabled",
     "telemetryGatewayEnabled"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "gematikConnectionEnabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "gematik"
+        ]
+      }
+    }
   ],
   "title": "Values",
   "type": "object"

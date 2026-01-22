@@ -21,14 +21,30 @@ spec:
     spec:
       securityContext:
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       containers:
         - name: testdriver
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 10
           ports:
             - containerPort: {{ .Values.containerPort }}
+              name: http
           volumeMounts:
             - name: smcb-keystore
               mountPath: "/smcb-certificates.p12"
@@ -39,6 +55,8 @@ spec:
               value: {{ .Values.fachdienst_url }}
             - name: DISABLE_SERVER_VALIDATION
               value: {{ quote .Values.disableServerValidation }}
+            - name: ASL_PROD
+              value: {{ quote .Values.aslProdEnv }}
             - name: POPP_TOKEN
               value: {{ .Values.PoppToken | quote }}
             - name: SMB_KEYSTORE_FILE
@@ -48,7 +66,7 @@ spec:
             - name: SMB_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: pdp-smcb-keystore
+                  name: test-smcb-keystore
                   key: password
             - name: SMCB_BASE_URL
               value: {{ .Values.connector_base_url }}
@@ -65,7 +83,7 @@ spec:
       volumes:
         - name: smcb-keystore
           secret:
-            secretName: pdp-smcb-keystore
+            secretName: test-smcb-keystore
             items:
               - key: keystore
                 path: "smcb-certificates.p12"

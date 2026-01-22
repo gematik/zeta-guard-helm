@@ -12,8 +12,21 @@ helm install test-monitoring-service . \
   --rollback-on-failure
 ```
 
-The chart `zeta-guard` should send all observability signals to the correct
-address (`otel-collector.test-monitoring.svc.cluster.local`) by default.
+You may need to adjust the receiving collector's host name in the sending
+collector's configuration in `zeta-guard` values:
+
+```yaml
+telemetry-gateway:
+  config:
+    exporters:
+      otlp/test-monitoring-service:
+        # endpoint: SERVICE.NAMESPACE.svc.cluster.local:4317
+        endpoint: opentelemetry-collector.test-monitoring.svc.cluster.local:4317
+```
+
+And finally, you need to set up a port-forward from your cluster to your
+development machine. The deployed instances of Jaeger and Grafana require no
+authentication.
 
 ## How to view logs
 

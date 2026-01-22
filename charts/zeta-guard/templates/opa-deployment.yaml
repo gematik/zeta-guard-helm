@@ -35,6 +35,10 @@ spec:
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
       {{- end }}
     spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       {{- $wif := .Values.opa.workloadIdentityFederation }}
       {{- if .Values.opa.serviceAccountName }}
       serviceAccountName: {{ .Values.opa.serviceAccountName | quote }}
@@ -43,12 +47,18 @@ spec:
         - name: "{{ .Values.opa.image.image_pull_secret | default .Values.global.image_pull_secret }}"
       containers:
         - name: opa
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.opa.image.registry }}{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
           imagePullPolicy: "{{ .Values.opa.image.pullPolicy }}"
           env:
             - name: CHECKSUM_OPA
               value: "{{ list $inlinePolicy (include "opa.configYaml" .) $bundleCfg | toJson | sha256sum }}"
-            
+
           args:
             - "run"
             - "--server"
@@ -97,7 +107,7 @@ spec:
               mountPath: /var/run/secrets/gcp
               readOnly: true
             {{- end }}
-            
+
             - name: opa-persistence
               mountPath: /var/opa
       volumes:
