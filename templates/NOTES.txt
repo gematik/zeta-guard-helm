@@ -1,0 +1,24 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your Fachdienst is at
+
+    {{
+        .Subcharts.testdriver.Values.fachdienst_url
+            | default "http://localhost/pep/"
+    }}
+
+and your administration frontend is at
+
+    {{
+        (index .Subcharts "zeta-guard").Values.authserver.hostname
+            | default "http://localhost"
+    }}/auth
+
+{{ if .Values.testMonitoringServiceEnabled -}}
+- All monitoring services are available via the frontend proxy after running this command:
+     kubectl --namespace {{ .Release.Namespace }} port-forward svc/frontend-proxy 8080:8080
+
+  Then, the following services are available at these paths:
+  Jaeger UI    http://localhost:8080/jaeger/ui/
+  Grafana      http://localhost:8080/grafana/
+{{- end }}
