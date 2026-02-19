@@ -1,31 +1,46 @@
+{{/*
+  Helper: telemetryGateway.hostname
+  Used by:
+    - pep/_pep-nginx-conf.tpl (OTLP exporter endpoint)
+    - opa/_opa.tpl (OTLP address)
+    - authserver/authserver-deployment.yaml (OTLP endpoint env var)
+*/}}
 {{- define "telemetryGateway.hostname" -}}
 {{- $telemetryGateway := get .Values "telemetry-gateway" }}
 {{- $defaultHostname := tpl "telemetry-gateway-{{ .Release.Name }}" . }}
 {{- $telemetryGateway.fullnameOverride | default $defaultHostname }}
 {{- end -}}
 
-{{/* The full resource name of the identity provider. Required when exchanging
-     an external credential for a Google access token.
-     See https://docs.cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token#request-body */}}
-{{ define "gematik.full-resource-name-of-identity-provider" -}}
-{{ list
-    "//iam.googleapis.com"
-    "projects" .Values.gematik.workloadIdentityFederation.projectNumber
-    "locations" "global"
-    "workloadIdentityPools" .Values.gematik.workloadIdentityFederation.poolId
-    "providers" .Values.gematik.workloadIdentityFederation.workloadIdentityProvider
-   | join "/" }}
-{{- end }}
+{{/*
+  Helper: zeta-guard.baseLabels
+  Minimal shared labels; set name/component/version inline per resource for clarity.
+*/}}
+{{- define "zeta-guard.baseLabels" -}}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+app.kubernetes.io/part-of: zeta-guard
+{{- end -}}
 
-{{/* Audience for Kubernetes service account tokens recommended by Google Workload Identity Federation
-   * See https://docs.cloud.google.com/iam/docs/best-practices-for-using-workload-identity-federation#provider-audience
-   */}}
-{{ define "gematik.token-audience" -}}
-{{ list
-    "https://iam.googleapis.com"
-    "projects" .Values.gematik.workloadIdentityFederation.projectNumber
-    "locations" "global"
-    "workloadIdentityPools" .Values.gematik.workloadIdentityFederation.poolId
-    "providers" .Values.gematik.workloadIdentityFederation.workloadIdentityProvider
-   | join "/" }}
-{{- end }}
+{{/*
+  Helper: authserver.image
+  Builds the full image reference including registry, repository and tag.
+  Used by: authserver/authserver-deployment.yaml
+*/}}
+{{- define "authserver.image" -}}
+{{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.authserver.image.registry -}}
+{{- printf "%s%s:%s" $registry .Values.authserver.image.repository .Values.authserver.image.tag -}}
+{{- end -}}
+
+{{/*
+  Helper: authserver.kcDb
+  Resolves the KC_DB value depending on databaseMode.
+  Used by: authserver/authserver-deployment.yaml
+*/}}
+{{- define "authserver.kcDb" -}}
+{{- if or (eq .Values.databaseMode "operator") (eq .Values.databaseMode "bitnami") -}}
+postgres
+{{- else -}}
+{{ .Values.authserverDb.kcDb }}
+{{- end -}}
+{{- end -}}

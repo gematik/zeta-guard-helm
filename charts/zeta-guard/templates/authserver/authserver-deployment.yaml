@@ -4,7 +4,10 @@ metadata:
   name: authserver
   labels:
     app: authserver
-    component: authserver
+    app.kubernetes.io/name: authserver
+    app.kubernetes.io/component: pdp
+    app.kubernetes.io/version: {{ .Values.authserver.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
@@ -15,11 +18,8 @@ spec:
       labels:
         app: authserver
         app.kubernetes.io/name: authserver
-        app.kubernetes.io/managed-by: {{ .Release.Service }}
-        app.kubernetes.io/instance: {{ .Release.Name }}
-        app.kubernetes.io/part-of: zeta-guard
-        app.kubernetes.io/component: authserver
-        component: authserver
+        app.kubernetes.io/component: pdp
+        {{- include "zeta-guard.baseLabels" . | nindent 8 }}
       {{- if .Values.devMode }}
       annotations:
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
@@ -36,13 +36,58 @@ spec:
           hostnames:
             - {{ .name | quote }}
       {{- end }}
+      initContainers:
+        - name: keycloak-build
+          image: "{{ include "authserver.image" . }}"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              set -e
+              /opt/keycloak/bin/kc.sh build
+              cp -r /opt/keycloak/* /work/
+          env:
+            - name: SMCB_KEYSTORE_LOCATION
+              value: "/opt/keycloak/conf/smcb-certificates.p12"
+            - name: SMCB_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdp-smcb-truststore
+                  key: password
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_METRICS_ENABLED
+              value: {{ quote .Values.authServerMetricsEnabled }}
+            - name: KC_TRACING_ENABLED
+              value: {{ quote .Values.authServerTracingEnabled }}
+            - name: KC_DB
+              value: "{{ include "authserver.kcDb" . }}"
+            - name: KC_HTTP_RELATIVE_PATH
+              value: "/auth"
+            - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              value: "/auth-mgmt"
+            # Configure ZETA SMC-B token-exchange provider and OPA toggle
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
+              value: "{{ .Values.authserver.provider.smcB.opa.enabled }}"
+          volumeMounts:
+            - name: keycloak-home
+              mountPath: /work
+          securityContext:
+            runAsUser: 1000
+            runAsNonRoot: true
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ "ALL" ]
       containers:
         - name: keycloak
-          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.authserver.image.registry }}{{ .Values.authserver.image.repository }}:{{ .Values.authserver.image.tag }}"
+          image: "{{ include "authserver.image" . }}"
           imagePullPolicy: "{{ .Values.authserver.image.pullPolicy }}"
           args:
             - start
-            - --http-relative-path=/auth
+            - --optimized
             - --hostname-strict=false
             - --proxy-headers=xforwarded
             - --hostname={{ .Values.authserver.hostname }}
@@ -67,11 +112,6 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 10
-          volumeMounts:
-            - name: smcb-keystore
-              mountPath: "/opt/keycloak/conf/smcb-certificates.p12"
-              subPath: "smcb-certificates.p12"
-              readOnly: true
           env:
             # Environment variable 'KEYCLOAK_ADMIN' is deprecated, use 'KC_BOOTSTRAP_ADMIN_USERNAME' instead
             - name: KEYCLOAK_ADMIN
@@ -111,21 +151,14 @@ spec:
               value: "-Duser.timezone=Europe/Berlin"
             - name: JAVA_OPTS_APPEND
               value: "-ea"
-            - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
-              value: "/auth-mgmt"
             - name: KC_LOG_CONSOLE_JSON_FORMAT
               value: "ecs"
             - name: KC_LOG_CONSOLE_OUTPUT
               value: {{ quote .Values.authServerLogConsoleOutput }}
             - name: KC_METRICS_ENABLED
               value: {{ quote .Values.authServerMetricsEnabled }}
-            - name: KC_TRACING_ENABLED
-              value: {{ quote .Values.authServerTracingEnabled }}
             - name: KC_TRACING_ENDPOINT
               value: "http://{{ include "telemetryGateway.hostname" . }}:4317"
-            # Configure ZETA SMC-B token-exchange provider and OPA toggle
-            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
-              value: "{{ .Values.authserver.provider.smcB.opa.enabled }}"
             # OPA endpoints and behavior
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_BASE_URL
               value: "{{ .Values.authserver.provider.smcB.opaBaseUrl }}"
@@ -144,8 +177,13 @@ spec:
             - name: CLIENT_REGISTRATION_SCHEDULER_INTERVAL
               value: "{{ .Values.authserver.config.clientRegistrationSchedulerInterval }}"
 
+            # https://ey-fp-dev.atlassian.net/browse/ZETAP-793
+            # TODO: Delete me when client is ready
+            - name: CHECK_CLIENT_ATTESTATION_ENABLED
+              value: {{ .Values.authserver.config.clientAttestationEnabled | default "false" | quote }}
+
             # Initial hash for admin events log
-            # TODO: should be generated upon first startup
+            # TODO: should be retrieved from secret
             - name: GENESIS_HASH
               value: 4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c
               # DB wiring switches by databaseMode value (operator|bitnami)
@@ -207,16 +245,30 @@ spec:
             - containerPort: 5005
               name: jdwp
             {{- end }}
+          volumeMounts:
+            - name: keycloak-home
+              mountPath: /opt/keycloak
+            - name: smcb-keystore
+              mountPath: "/opt/keycloak/conf/smcb-certificates.p12"
+              subPath: "smcb-certificates.p12"
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
       volumes:
+        - name: keycloak-home
+          emptyDir: { }
         - name: smcb-keystore
           secret:
             secretName: pdp-smcb-truststore
             items:
               - key: keystore
                 path: "smcb-certificates.p12"
+        - name: tmp
+          emptyDir: { }

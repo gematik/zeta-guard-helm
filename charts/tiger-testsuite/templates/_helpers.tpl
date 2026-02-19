@@ -52,11 +52,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "tiger-testsuite.mvnAdditionalArgs" -}}
 {{- $userArgs := tpl (default "" .Values.env.mvnAdditionalArgs) . | trim -}}
 {{- $workflowUiArgs := include "tiger-testsuite.workflowUiArgs" . | trim -}}
-{{- if and $userArgs $workflowUiArgs }}
-{{- printf "%s %s" $userArgs $workflowUiArgs | trim -}}
-{{- else if $userArgs }}
-{{- $userArgs -}}
-{{- else }}
-{{- $workflowUiArgs -}}
+{{- $args := list -}}
+{{- if $userArgs -}}
+{{- $args = append $args $userArgs -}}
 {{- end -}}
+{{- if $workflowUiArgs -}}
+{{- $args = append $args $workflowUiArgs -}}
+{{- end -}}
+{{- $featuresDirArg := "-Dtiger.featuresDir=/app/src/test/resources/features" -}}
+{{- $hasFeaturesDir := or (regexMatch ".*-Dtiger\\.featuresDir=.*" $userArgs) (regexMatch ".*-Dtiger\\.featuresDir=.*" $workflowUiArgs) -}}
+{{- if not $hasFeaturesDir -}}
+{{- $args = append $args $featuresDirArg -}}
+{{- end -}}
+{{- $rbelAnsiArg := "-Dtiger.lib.rbelAnsiColors=false" -}}
+{{- $hasRbelAnsi := or (regexMatch ".*-Dtiger\\.lib\\.rbelAnsiColors=.*" $userArgs) (regexMatch ".*-Dtiger\\.lib\\.rbelAnsiColors=.*" $workflowUiArgs) -}}
+{{- if not $hasRbelAnsi -}}
+{{- $args = append $args $rbelAnsiArg -}}
+{{- end -}}
+{{- join " " $args | trim -}}
 {{- end -}}

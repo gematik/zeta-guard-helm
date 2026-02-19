@@ -12,8 +12,8 @@ helm install test-monitoring-service . \
   --rollback-on-failure
 ```
 
-You may need to adjust the receiving collector's host name in the sending
-collector's configuration in `zeta-guard` values:
+You need to add an exporter to the telemetry gateway's configuration in
+`zeta-guard` values:
 
 ```yaml
 telemetry-gateway:

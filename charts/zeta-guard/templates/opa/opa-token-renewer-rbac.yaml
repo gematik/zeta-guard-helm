@@ -5,8 +5,10 @@ kind: Role
 metadata:
   name: opa-secret-patcher
   labels:
-    app: opa
-    component: opa
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/component: pdp
+    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 rules:
   - apiGroups: [ "" ]
     resources: [ "secrets" ]
@@ -20,8 +22,10 @@ kind: RoleBinding
 metadata:
   name: opa-token-renewer-secret-patcher
   labels:
-    app: opa
-    component: opa
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/component: pdp
+    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: opa-token-renewer

@@ -6,24 +6,12 @@ metadata:
   name: testdriver
   labels:
     app: testdriver
-  {{- if .Values.hostname }}
+    app.kubernetes.io/name: testdriver
   annotations:
-    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt-cd" | quote }}
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/hsts: "true"
-    nginx.ingress.kubernetes.io/hsts-max-age: "31536000"
-    nginx.ingress.kubernetes.io/hsts-include-subdomains: "true"
-    nginx.ingress.kubernetes.io/hsts-preload: "true"
-  {{- end }}
+    nginx.org/mergeable-ingress-type: "minion"
+    nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver"{{ else }}"testdriver"{{ end }}
 spec:
-  ingressClassName: {{ .Values.ingressClassName | default "nginx" }}
-  {{- if .Values.hostname }}
-  tls:
-    - hosts:
-        - {{ .Values.hostname | quote }}
-      secretName: "zeta-guard-tls"
-  {{- end }}
+  ingressClassName: {{ .Values.ingressClassName }}
   rules:
     # do not set host when working with local-cluster
     - {{- if .Values.hostname }}

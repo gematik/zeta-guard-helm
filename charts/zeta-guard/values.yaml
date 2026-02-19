@@ -8,7 +8,7 @@ registry_name: ""
 authserver:
   image:
     repository: keycloak-zeta
-    tag: 0.2.4
+    tag: 0.3.2
     pullPolicy: Always
   # Provider configuration for ZETA SMC-B token-exchange implementation
   provider:
@@ -48,7 +48,7 @@ authServerTracingEnabled: true
 pepproxy:
   image:
     repository: ngx_pep
-    tag: 0.2.5
+    tag: 0.3.0
     pullPolicy: Always
   wellKnownBase: http://localhost
   # boolean that controls if ASL should be enabled (true) or not (false)
@@ -93,19 +93,57 @@ devMode: false
 
 
 # DB mode switch:
-# - bitnami: local using Bitnami subchart service/secret only for demo purposes – no support at all
-# - operator: staging/dev/prod using Zalando Postgres Operator
-# - external: use external db by providing filling values db.kcDb, db.kcDbUrl, db.kcDbSchema, db.kcDbUsername,
-#       db.kcDbPasswordSecretName
-#       the db password is pulled from the "password" field of a secret going by the provided name. The other properties
+# - bitnami: using Bitnami subchart service/secret only for demo purposes – no support at all
+# - operator: using Zalando Postgres Operator
+# - external: use external db by providing filling values authserverDb.kcDb, authserverDb.kcDbUrl,
+#       authserverDb.kcDbSchema, authserverDb.kcDbUsername, authserverDb.kcDbPasswordSecretName
+#       The db password is pulled from the "password" field of a secret going by the provided name. The other properties
 #       behave according to the keycloak environment variables. See https://www.keycloak.org/server/db
 databaseMode: operator
 postgresql:
   enabled: false
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
-clusterIssuer: "letsencrypt-cd"
+clusterIssuer: ""
 
+# IngressClass used by the generated Ingress.
+# - With the bundled NIC: keep equal to nginx-ingress.controller.ingressClass.name.
+# - With an external controller: disable the bundled NIC and set this to your class (e.g., gce, openshift-default).
+ingressClassName: "nginx"
+
+# Ingress configuration extensions
+ingress:
+  annotations: {}
+
+nginx-ingress:
+  enabled: true
+  controller:
+    # We use standard Kubernetes Ingress; disable NIC CRDs to avoid CRD install requirement
+    enableCustomResources: false
+    ingressClass:
+      name: nginx
+    service:
+      # Default for standalone/cloud installs.
+      type: LoadBalancer
+      externalTrafficPolicy: Cluster
+    config:
+      entries:
+        # AFOs: GS-A_5035, GS-A_4387, A_18464, GS-A_4385, A_18467
+        ssl-protocols: "TLSv1.2 TLSv1.3"
+        # AFOs: A_17322, A_21275-01, A_17124-03, GS-A_5016; (GS-A_4384-03 omitted)
+        ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384"
+        # AFOs: GS-A_4359-02, GS-A_4357-02
+        ssl-ecdh-curve: "prime256v1:secp384r1:brainpoolP256r1:brainpoolP384r1"
+        # AFOs: GS-A_5322 - disable server side cache, use client tickets only
+        ssl-session-cache: "none"
+        # ssl_session_ticket_key (not specified, default) - use random generated keys with hourly rotation
+        ssl-session-tickets: "on"
+        ssl-session-timeout: "5m"
+        # ssl_stapling off (default) - A_26964 omitted, since LetsEncrypt does not provide OCSP anymore
+        ssl-stapling: "off"
+        # AFOs: A_17775 - use client order
+        ssl-prefer-server-ciphers: "false"
+        # AFOs: GS-A_5526 - renegotiation disabled by default since v0.8.23
 opa:
   enabled: true
   replicaCount: 1
@@ -299,6 +337,93 @@ telemetry-gateway:
       extractAllPodLabels: true
       extractAllPodAnnotations: true
   config:
+    processors:
+      redaction/betreiber:
+        # by default, keep all attributes
+        allow_all_keys: true
+        # remove attributes with keys matching these patterns
+        blocked_key_patterns:
+          - ".*token.*"
+        # redact these patterns inside attribute values
+        blocked_values:
+          ### A_25744 - ZETA Guard - Datenschutzkonformes Logging und Monitoring
+          # taken from https://github.com/stefanboeck/privacylight/blob/main/privacylight/detection.py
+          # email addresses
+          - '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
+          # IBAN
+          - '[A-Z]{2}\d{2}[A-Z0-9]{10,30}'
+          # credit card numbers
+          - '\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}'
+          # German phone numbers
+          - '(?:\+49|0049|0)[\s-]?1[5-7]\d[\s-]?\d{7,8}'
+
+          ### A_25745 - ZETA Guard - Keine medizinischen Informationen in Logging und Monitoring
+
+          ### A_25746 - ZETA Guard - Keine sicherheitsrelevanten Daten in Logging und Monitoring
+          # JWT
+#          - '([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_\-\+\/=]*)'
+          # The following patterns are taken from https://help.nightfall.ai/detection_platform/regex_library
+          # ECDSA Private Key
+          - '^-----BEGIN ECDSA PRIVATE KEY-----\s.*,ENCRYPTED(?:.|\s)+?-----END ECDSA PRIVATE KEY-----$'
+          # SSL Certificate
+          - '^-----BEGIN CERTIFICATE-----(?:.|\n)+?\s-----END CERTIFICATE-----$'
+
+          ### mixed bag of patterns
+          - '^[a-zA-Z0-9_+&*-]+(?:\.[a-zA-Z0-9_+&*-]+)*@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,7}$'
+          - '^([0-9a-zA-Z\-=_]{20,})\.([0-9a-zA-Z\-_=]{3,})\.([0-9a-zA-Z\-_=]*)$'
+          - 'eyJ[A-Za-z0-9-_=]+?\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*'
+          - >
+            client_(id|secret)['"\s:=]+[a-zA-Z0-9\-_.~]{10,100}
+          - 'AKIA[0-9A-Z]{16}'
+          - >
+            aws(.{0,20})?(?-i)['"]?[0-9A-Za-z\/+]{40}['"]?
+          - 'AIza[0-9A-Za-z\-_]{35}'
+          - 'ghp_[0-9a-zA-Z]{36}'
+          - 'glpat-[0-9a-zA-Z-_]{20}'
+          - 'xox[baprs]-([0-9a-zA-Z]{10,48})?'
+          - 'sk_live_[0-9a-zA-Z]{24}'
+          - 'pk_live_[0-9a-zA-Z]{24}'
+          - 'SK[0-9a-fA-F]{32}'
+          - 'SG\.[\w\d\-_]{22}\.[\w\d\-_]{43}'
+          - 'sl\.[A-Za-z0-9_-]{20,100}'
+          - 'shpat_[0-9a-fA-F]{32}'
+          - 'EAACEdEose0cBA[0-9A-Za-z]+'
+          - >
+            [ hH ]eroku['"][0-9a-f]{32}['"]
+          - 'dop_v1_[a-z0-9]{64}'
+          - '0/[0-9a-z]{32}'
+          - 'lin_api_[a-zA-Z0-9]{40}'
+          - '\d{9}:[a-zA-Z0-9_-]{35}'
+          - >
+            mongodb(\+srv)?:\/\/[^\s'"/]+
+          - >
+            postgres(?:ql)?:\/\/[^\s'"/]+
+          - >
+            mysql:\/\/[^\s'"/]+
+          - >
+            redis:\/\/[^\s'"/]+
+          - >
+            elasticsearch:\/\/[^\s'"/]+
+          - >
+            jdbc:\w+:\/\/[^\s'"/]+
+          - '[A-Za-z]:\\(?:[^\\\n\r]+\\)*[^\\\n\r\.]+\.[\w]+'
+          - >
+            (username|user|email)['"\s:=]+[^\s'"@]{1,100}['"].*?(password|pwd)['"\s:=]+[^\s'" ]{4,100}
+          - '\b\d{1,5}\s*(?:[A-Za-zÀ-ÿ0-9.-]+\s+)*(?:Straße|Str\.|Strasse|Street|St\.|Road|Rd\.|Avenue|Ave\.|Boulevard|Blvd\.|Lane|Ln\.|Weg|Alle[e]?|Gasse|Place|Pl\.|Drive|Dr\.|Court|Ct\.|Square|Sq\.|Parkway|Pkwy\.)\b'
+        # don't change attributes with keys matching these patterns
+        ignored_key_patterns:
+          - '^app\.kubernetes\.io\/.+'
+          - '^container\..+'
+          - '^k8s\..+'
+          - '^net\..+'
+          - '^log\..+'
+          - '^otel\..+'
+          - '^service\..+'
+        ignored_keys:
+          - http.user_agent
+        redact_all_types: true
+        summary: info
+
     receivers:
       otlp:
         protocols:

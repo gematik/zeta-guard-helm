@@ -27,10 +27,10 @@ spec:
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"

@@ -86,5 +86,6 @@ opentelemetry-demo:
           traces:
             receivers:
               - otlp
+ingressClassName: "nginx"
 # ingressRulesHost defines the hostname for all ingress rules in this chart.
 ingressRulesHost: "test-monitoring-ingress.localhost"

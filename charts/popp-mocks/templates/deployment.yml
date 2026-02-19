@@ -32,9 +32,10 @@ spec:
           ports:
             - containerPort: 80
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
         {{- end }}
@@ -53,9 +54,10 @@ spec:
               subPath: "jwks.json"
               readOnly: true
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
       volumes:

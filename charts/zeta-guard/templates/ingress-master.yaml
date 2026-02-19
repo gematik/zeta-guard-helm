@@ -1,0 +1,35 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* NIC mergeable master for zeta-guard */ -}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeta-guard
+  labels:
+    app.kubernetes.io/name: zeta-guard
+    app.kubernetes.io/component: ingress
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+  annotations:
+    nginx.org/mergeable-ingress-type: "master"
+    {{- if .Values.authserver.hostname }}
+    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt" | quote }}
+    ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.org/hsts: "true"
+    nginx.org/hsts-max-age: "31536000"
+    nginx.org/hsts-include-subdomains: "true"
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.authserver.hostname }}
+  tls:
+    - hosts:
+        - {{ .Values.authserver.hostname | quote }}
+      secretName: "zeta-guard-tls"
+  {{- end }}
+  rules:
+    - {{- if .Values.authserver.hostname }}
+      host: {{ .Values.authserver.hostname | quote }}
+      {{- end }}
