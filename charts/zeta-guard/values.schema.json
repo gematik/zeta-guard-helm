@@ -7,8 +7,16 @@
         "admin": {
           "type": "object",
           "properties": {
-            "username": { "type": "string", "minLength": 1 },
-            "password": { "type": ["string", "null"] }
+            "username": {
+              "type": "string",
+              "minLength": 1
+            },
+            "password": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         }
       }
@@ -94,7 +102,11 @@
     },
     "databaseMode": {
       "type": "string",
-      "enum": ["operator", "external", "bitnami"],
+      "enum": [
+        "operator",
+        "external",
+        "bitnami"
+      ],
       "description": "Where the database credentials are sourced from. If 'operator' then nothing else needs to be done. If 'external', also see value 'authserverDb'."
     },
     "authserverDb": {
@@ -365,6 +377,115 @@
           }
         }
       ]
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "routeViaTigerProxy": {
+      "type": "boolean"
+    },
+    "ingressClassName": {
+      "type": "string"
+    },
+    "clusterIssuer": {
+      "type": "string"
+    },
+    "nginx-ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "controller": {
+          "type": "object",
+          "properties": {
+            "ingressClass": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "entries": {
+                  "type": "object",
+                  "properties": {
+                    "ssl-protocols": {
+                      "type": "string"
+                    },
+                    "ssl-ciphers": {
+                      "type": "string"
+                    },
+                    "ssl-ciphersuites": {
+                      "type": "string"
+                    },
+                    "ssl-ecdh-curve": {
+                      "type": "string"
+                    },
+                    "ssl-session-cache": {
+                      "type": "string"
+                    },
+                    "ssl-session-tickets": {
+                      "type": "string"
+                    },
+                    "ssl-session-timeout": {
+                      "type": "string"
+                    },
+                    "ssl-stapling": {
+                      "type": "string"
+                    },
+                    "ssl-prefer-server-ciphers": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "enableCustomResources": {
+              "type": "boolean"
+            },
+            "service": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "externalTrafficPolicy": {
+                  "type": "string"
+                },
+                "httpPort": {
+                  "type": "object"
+                },
+                "httpsPort": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "devMode": {
+      "type": "boolean"
+    },
+    "registry_name": {
+      "type": "string"
     }
   },
   "required": [

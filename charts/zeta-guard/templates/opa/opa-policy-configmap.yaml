@@ -14,8 +14,9 @@ kind: ConfigMap
 metadata:
   name: opa-policy
   labels:
-    app: opa
-    component: opa
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/component: opa
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 data:
   authz.rego: |
 {{ include "opa.policyRego" . | indent 4 }}
@@ -27,8 +28,9 @@ kind: {{ ternary "Secret" "ConfigMap" $renderConfigAsSecret }}
 metadata:
   name: opa-config
   labels:
-    app: opa
-    component: opa
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/component: opa
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 {{- if $renderConfigAsSecret }}
 type: Opaque
 stringData:

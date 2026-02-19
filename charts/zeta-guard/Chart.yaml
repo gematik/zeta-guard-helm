@@ -2,15 +2,20 @@ apiVersion: v2
 name: zeta-guard
 description: ZETA Guard
 type: application
-version: 0.2.8
+version: 0.3.2
 dependencies:
+  - name: nginx-ingress
+    # F5 NGINX Ingress Controller (NIC)
+    version: 2.4.2
+    repository: oci://ghcr.io/nginx/charts
+    condition: nginx-ingress.enabled
   - name: opentelemetry-collector
-    version: "~0.99.0"
+    version: "~0.144.0"
     repository: https://open-telemetry.github.io/opentelemetry-helm-charts
     condition: logCollectorEnabled
     alias: log-collector
   - name: opentelemetry-collector
-    version: "~0.99.0"
+    version: "~0.144.0"
     repository: https://open-telemetry.github.io/opentelemetry-helm-charts
     condition: telemetryGatewayEnabled
     alias: telemetry-gateway

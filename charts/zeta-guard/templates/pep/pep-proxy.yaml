@@ -4,7 +4,10 @@ kind: Deployment
 metadata:
   name: pep-deployment
   labels:
-    component: pep
+    app.kubernetes.io/name: pep-proxy
+    app.kubernetes.io/component: pep
+    app.kubernetes.io/version: {{ .Values.pepproxy.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
@@ -15,11 +18,8 @@ spec:
       labels:
         app: pep-proxy
         app.kubernetes.io/name: pep-proxy
-        app.kubernetes.io/managed-by: {{ .Release.Service }}
-        app.kubernetes.io/instance: {{ .Release.Name }}
-        app.kubernetes.io/part-of: zeta-guard
         app.kubernetes.io/component: pep
-        component: pep
+        {{- include "zeta-guard.baseLabels" . | nindent 8 }}
       {{- if or .Values.devMode .Values.pepproxy.nginxConf.generateConfigMap }}
       annotations:
         {{- if .Values.pepproxy.nginxConf.generateConfigMap }}
@@ -72,10 +72,10 @@ spec:
               subPath: {{ base $path }}
             {{- end }}
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
 
@@ -106,10 +106,10 @@ spec:
               path: /metrics
               port: metrics
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
           volumeMounts:
@@ -146,12 +146,9 @@ kind: ConfigMap
 metadata:
   name: "{{ .Values.pepproxy.nginxConf.configMapName }}"
   labels:
-    app: "pep-proxy"
     app.kubernetes.io/name: pep-proxy
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/part-of: zeta-guard
     app.kubernetes.io/component: pep
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 data:
   nginx.conf: |-
     {{- $nginxConf | nindent 4 }}
@@ -161,6 +158,11 @@ apiVersion: v1
 kind: Service
 metadata:
   name: pep-proxy-svc
+  labels:
+    app.kubernetes.io/name: pep-proxy
+    app.kubernetes.io/component: pep
+    app.kubernetes.io/version: {{ .Values.pepproxy.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 spec:
   selector:
     app: pep-proxy

@@ -4,7 +4,10 @@ kind: Service
 metadata:
   name: opa
   labels:
-    app: opa
+    app.kubernetes.io/name: opa
+    app.kubernetes.io/component: pdp
+    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 spec:
   selector:
     app: opa
@@ -14,4 +17,3 @@ spec:
       targetPort: http
   type: ClusterIP
 {{- end }}
-

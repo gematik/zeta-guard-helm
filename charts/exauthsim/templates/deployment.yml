@@ -50,10 +50,10 @@ spec:
                   name: test-smcb-keystore
                   key: password
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
       volumes:

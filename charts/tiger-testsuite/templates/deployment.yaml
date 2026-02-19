@@ -93,6 +93,10 @@ spec:
 
               MVN_GOALS="${MVN_GOALS}"
               MVN_ADDITIONAL_ARGS="${MVN_ADDITIONAL_ARGS}"
+              MVN_PROFILE_ARGS=""
+              if [ -n "${PROFILE:-}" ]; then
+                MVN_PROFILE_ARGS="-P${PROFILE}"
+              fi
 
               set +e
               mvn -B \
@@ -115,6 +119,7 @@ spec:
                 "-Dzeta_proxy_url=${ZETA_PROXY_URL}" \
                 "-Dzeta_proxy=${ZETA_PROXY}" \
                 "-Dcucumber.filter.tags=${CUCUMBER_TAGS}" \
+                ${MVN_PROFILE_ARGS} \
                 ${MVN_ADDITIONAL_ARGS} \
                 ${MVN_GOALS}
               MVN_RESULT=$?
@@ -140,6 +145,10 @@ spec:
               value: {{ .Values.env.zetaProxyUrl | quote }}
             - name: ZETA_PROXY
               value: {{ .Values.env.zetaProxy | quote }}
+            {{- if and .Values.env.zetaProxy (ne .Values.env.zetaProxy "no-proxy") }}
+            - name: PROFILE
+              value: {{ .Values.env.zetaProxy | quote }}
+            {{- end }}
             - name: TIGER_ENVIRONMENT
               value: {{ .Values.env.tigerEnvironment | quote }}
             - name: CUCUMBER_TAGS
@@ -169,10 +178,10 @@ spec:
             - name: SERENITY_EXPORT_DIR
               value: {{ .Values.env.serenityExportDir | quote }}
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
           volumeMounts:

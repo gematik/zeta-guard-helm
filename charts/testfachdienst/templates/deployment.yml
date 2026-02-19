@@ -42,10 +42,10 @@ spec:
           ports:
             - containerPort: {{ .Values.containerPort }}
           securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
           volumeMounts:

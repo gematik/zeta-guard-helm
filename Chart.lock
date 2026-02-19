@@ -1,7 +1,4 @@
 dependencies:
-- name: ingress-nginx
-  repository: https://kubernetes.github.io/ingress-nginx
-  version: 4.11.5
 - name: testfachdienst
   repository: file://charts/testfachdienst
   version: 0.0.1
@@ -16,7 +13,7 @@ dependencies:
   version: 0.0.1
 - name: zeta-guard
   repository: file://charts/zeta-guard
-  version: 0.2.8
+  version: 0.3.2
 - name: testdriver
   repository: file://charts/test-driver
   version: 0.0.1
@@ -26,5 +23,5 @@ dependencies:
 - name: tiger-testsuite
   repository: file://charts/tiger-testsuite
   version: 0.0.1
-digest: sha256:965f4029480a38a424844779e2ff5d00013cc0ff654fd3e8f1579afeb3dc40a2
-generated: "2026-01-20T14:04:42.187567387+01:00"
+digest: sha256:60e7e2f988f40e3955189e5af41abfa13eab7797aec53798929f1e0920338b67
+generated: "2026-02-12T12:13:18.683596+01:00"

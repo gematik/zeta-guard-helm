@@ -58,9 +58,9 @@ can [enable Kubernetes in Docker Desktop](https://docs.docker.com/desktop/featur
 Kind is the recommended provisioning method. Docker Desktop will also install
 `kubectl` if missing.
 
-- Database: Bitnami PostgreSQL subchart is used, wired via service
-  `<release>-postgresql`.
-- Ingress host: omitted by default; matches any host on the local controller.
+- Database: Bitnami PostgreSQL subchart is used, exposed via service `<release>-postgresql`.
+- Ingress controller: the zeta-guard chart bundles the F5 NGINX Ingress Controller (NIC) and enables it by default.
+- Ingress host: omitted by default; matches any host on the controller.
 
 ```shell
 make deps
@@ -77,4 +77,8 @@ you can randomly verify the Keycloak deployment using
 - The first rollout may need a longer timeout to allow the operator to create
   the DB Secret before Keycloak starts:
     - Example:
-      `helm upgrade --install <rel> . -f values.my-stage.yaml -n <ns> --wait --atomic --timeout 10m`
+      `helm upgrade --install <rel> . -f values.my-stage.yaml -n <ns> --rollback-on-failure --timeout 10m`
+- IngressClass selection for non-local:
+  - Set `zeta-guard.ingressClassName` to the name of the IngressClass that the cluster's controller serves. This must match an existing `IngressClass.metadata.name`.
+  - Discover available classes: `kubectl get ingressclass` and use the value from the NAME column (examples: `nginx`, `nginx-dev`, `nginx-cd`, or a platform class like `gce`, `openshift-default`).
+  - When using the bundled F5 NIC dependency, set `zeta-guard.nginx-ingress.controller.ingressClass.name` to the same value so the controller watches that class.

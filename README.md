@@ -2,15 +2,14 @@
 
 # ZETA Guard Helm Charts
 
-Compact umbrella chart to deploy ZETA Guard (Keycloak + PEP) and simple test apps. The NGINX Ingress Controller is used by default.
+Compact umbrella chart to deploy ZETA Guard (Keycloak + PEP) and simple test apps. The zeta-guard chart bundles the F5 NGINX Ingress Controller (NIC) by default.
 TLS via Let’s Encrypt is supported (requires cert-manager installed cluster-wide).
 
 Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
 
 ## What’s Included
 - Umbrella chart: `zeta-testenv` with subcharts:
-  - `ingress-nginx` (controller)
-  - `charts/zeta-guard` (Keycloak + nginx PEP)
+  - `charts/zeta-guard` (Keycloak + nginx PEP + OPA + DB)
   - `charts/test-monitoring-service`,
   - `charts/testfachdienst`,
   - `charts/exauthsim`,
@@ -66,7 +65,7 @@ Given that kubectl is using the correct context, you can install the helm chart 
 
 ```shell
     cd charts/zeta-guard
-    helm upgrade --install zeta-guard . -f values-demo.yaml --wait --atomic
+    helm upgrade --install zeta-guard . -f values-demo.yaml --rollback-on-failure
 ```
 
 ### During development
@@ -185,7 +184,7 @@ Render checks:
 
 ## Troubleshooting
 - Check resources: `kubectl -n <ns> get pod,svc,ingress`
-- DNS/IP mismatch: `nslookup <dns-label>` must match `kubectl -n <ns> get svc -l app.kubernetes.io/name=ingress-nginx -o wide` EXTERNAL-IP.
+- DNS/IP mismatch: `nslookup <dns-label>` must match `kubectl -n <ns> get svc -l app.kubernetes.io/name=ingress-nginx -o wide` EXTERNAL-IP (bundled NIC uses this label).
 - Ingress issue: confirm `ingressClassName` in Ingress matches the controller’s `ingressClass`.
 - OPA: Health check via port-forward `kubectl -n <ns> port-forward svc/opa 8181:8181`
 
@@ -198,16 +197,16 @@ Render checks:
     * [How to create a docker-registry type secret for accessing the GitLab container registry](docs/how-to_guides/How_to_create_a_docker_registry_secret.md)
     * [How to deploy ZETA Guard](docs/how-to_guides/How_to_deploy_ZETA_Guard.md)
     * [How to install cert-manager](docs/how-to_guides/How_to_install_cert-manager.md)
-    * [How to manage Postgres operator](docs/how-to_guides/How_to_manage_Postgres_operator.md)
+    * [How to manage authserver DB](docs/how-to_guides/How_to_manage_authserver_DB.md)
     * [How to set up TLS](docs/how-to_guides/How_to_set_up_TLS.md)
     * [How to trigger the Tiger testsuite inside the cluster](docs/how-to_guides/How_to_run_tiger_testsuite.md)
 * Reference
-    * [Ingress configuration](docs/reference/Ingress_configuration.md)
+* [How to configure Ingress](docs/how-to_guides/How_to_configure_Ingress.md)
     * [Makefile reference](docs/reference/Makefile_reference.md)
 
 ## License
 
-(C) akquinet tech@Spree GmbH, 2025, licensed for gematik GmbH
+(C) tech@Spree GmbH, 2026, licensed for gematik GmbH
 
 Apache License, Version 2.0
 

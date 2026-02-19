@@ -2,6 +2,11 @@ apiVersion: v1
 kind: Service
 metadata:
   name: authserver
+  labels:
+    app.kubernetes.io/name: authserver
+    app.kubernetes.io/component: pdp
+    app.kubernetes.io/version: {{ .Values.authserver.image.tag | quote }}
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 spec:
   selector:
     app: authserver

@@ -3,6 +3,10 @@ apiVersion: acid.zalan.do/v1
 kind: postgresql
 metadata:
   name: keycloak-db
+  labels:
+    app.kubernetes.io/name: authserver
+    app.kubernetes.io/component: pdp
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
 spec:
   teamId: zeta
   numberOfInstances: 1

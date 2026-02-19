@@ -28,8 +28,8 @@ you need them instead of only during a Helm upgrade.
    tiger-testsuite:
      registry_name: zeta/testing
      env:
-       zetaBaseUrl: https://zeta-kind.local
-       zetaProxyUrl: http://tiger-proxy:80
+       zetaBaseUrl: zeta-kind.local
+       zetaProxyUrl: zeta-kind.local:9999
        zetaProxy: proxy
        cucumberTags: "@smoke"
      workflowUi:
@@ -98,13 +98,10 @@ All Maven/Tiger parameters are exposed via `tiger-testsuite.env`:
    ```yaml
    tiger-testsuite:
      env:
-       zetaBaseUrl: https://zeta-kind.local
-       zetaProxyUrl: https://proxy-kind.local
+       zetaBaseUrl: zeta-kind.local
+       zetaProxyUrl: zeta-kind.local:9999
        zetaProxy: proxy
        cucumberTags: "@smoke and not @perf"
-       mvnAdditionalArgs: "-Dzeta_base_url=https://zeta-kind.local \
-                           -Dzeta_proxy_url=https://proxy-kind.local \
-                           -Dtiger.lib.runTestsOnStart=true"
        serenityExportDir: /reports
        # Default (tiger:setup-testenv) keeps the Workflow UI alive. Switch to verify for one-off runs.
        mvnGoals: "tiger:setup-testenv"
