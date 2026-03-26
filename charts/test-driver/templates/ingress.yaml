@@ -33,3 +33,17 @@ spec:
                 name: testdriver
                 port:
                   number: 80
+          - path: /load
+            pathType: Prefix
+            backend:
+              service:
+                name: testdriver
+                port:
+                  number: 80
+          - path: /loaddriver-api
+            pathType: Prefix
+            backend:
+              service:
+                name: testdriver
+                port:
+                  number: 80

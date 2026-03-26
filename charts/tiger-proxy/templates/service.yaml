@@ -27,5 +27,17 @@ spec:
       {{- if and (or (eq $svcType "NodePort") (eq $svcType "LoadBalancer")) .Values.service.nodePorts.admin }}
       nodePort: {{ .Values.service.nodePorts.admin }}
       {{- end }}
+    # - name: otlp-grpc-port
+    #   port: 4137
+    #   protocol: TCP
+    #   targetPort: otlp-grpc-port
+    - name: otlp-http-port
+      port: 4138
+      protocol: TCP
+      targetPort: otlp-http-port
+    # - name: admin-grpc-port
+    #   port: 19999
+    #   targetPort: admin-grpc-port
+    #   protocol: TCP
   selector:
     {{- include "tiger-proxy.selectorLabels" . | nindent 4 }}

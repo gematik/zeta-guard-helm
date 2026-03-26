@@ -8,4 +8,8 @@ rules:
   comments: disable
   document-start: disable
   indentation:
-    indent-sequences: consistent
+    indent-sequences: whatever
+  # vendored subcharts (nginx-ingress, opentelemetry-collector) emit duplicate
+  # app.kubernetes.io/part-of keys and trailing spaces that we cannot fix in tgz archives
+  key-duplicates: disable
+  trailing-spaces: disable

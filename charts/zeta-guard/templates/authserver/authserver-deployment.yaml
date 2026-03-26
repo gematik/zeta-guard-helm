@@ -3,33 +3,40 @@ kind: Deployment
 metadata:
   name: authserver
   labels:
-    app: authserver
-    app.kubernetes.io/name: authserver
-    app.kubernetes.io/component: pdp
-    app.kubernetes.io/version: {{ .Values.authserver.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "authserver.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.authserver.replicaCount }}
   selector:
     matchLabels:
-      app: authserver
+      {{- include "authserver.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: authserver
-        app.kubernetes.io/name: authserver
-        app.kubernetes.io/component: pdp
-        {{- include "zeta-guard.baseLabels" . | nindent 8 }}
-      {{- if .Values.devMode }}
+        {{- include "authserver.labels" . | nindent 8 }}
+        {{- with .Values.authserver.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if .Values.authserver.podAnnotations | or .Values.devMode }}
       annotations:
+        {{- with .Values.authserver.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.devMode }}
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+        {{- end }}
       {{- end }}
     spec:
+      {{- with .Values.authserver.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.authserver.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        - name: "{{ .Values.authserver.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.authserver.hostAlias }}
       hostAliases:
         - ip: {{ .ip | quote }}
@@ -38,16 +45,17 @@ spec:
       {{- end }}
       initContainers:
         - name: keycloak-build
-          image: "{{ include "authserver.image" . }}"
-          imagePullPolicy: IfNotPresent
+          image: "{{ include "authserver.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.authserver.imagePullPolicy }}"
           command:
             - /bin/sh
             - -c
           args:
             - |
               set -e
-              /opt/keycloak/bin/kc.sh build
-              cp -r /opt/keycloak/* /work/
+              cp -r /opt/keycloak/. /work/
+              cd /work
+              ./bin/kc.sh build
           env:
             - name: SMCB_KEYSTORE_LOCATION
               value: "/opt/keycloak/conf/smcb-certificates.p12"
@@ -55,6 +63,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: pdp-smcb-truststore
+                  key: password
+            - name: TPM_KEYSTORE_LOCATION
+              value: "/opt/keycloak/conf/ms-tpm-certificates.p12"
+            - name: TPM_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdp-tpm-truststore
                   key: password
             - name: KC_HEALTH_ENABLED
               value: "true"
@@ -68,35 +83,44 @@ spec:
               value: "/auth"
             - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
               value: "/auth-mgmt"
-            # Configure ZETA SMC-B token-exchange provider and OPA toggle
-            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
-              value: "{{ .Values.authserver.provider.smcB.opa.enabled }}"
+            {{- if .Values.global.infinispanExternal.enabled }}
+            - name: KC_FEATURES
+              value: clusterless
+            - name: KC_FEATURES_DISABLED
+              value: persistent-user-sessions
+            {{- end }}
           volumeMounts:
             - name: keycloak-home
               mountPath: /work
+          {{- with .Values.authserver.initContainerSecurityContext }}
           securityContext:
-            runAsUser: 1000
-            runAsNonRoot: true
-            readOnlyRootFilesystem: false
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ "ALL" ]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
       containers:
         - name: keycloak
-          image: "{{ include "authserver.image" . }}"
-          imagePullPolicy: "{{ .Values.authserver.image.pullPolicy }}"
+          image: "{{ include "authserver.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.authserver.imagePullPolicy }}"
+          {{- with .Values.authserver.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - start
             - --optimized
+            - --db-pool-min-size={{ .Values.authserver.dbPool.minSize }}
+            - --db-pool-max-size={{ .Values.authserver.dbPool.maxSize }}
+            - --http-pool-max-threads={{ .Values.authserver.httpPool.maxThreads }}
             - --hostname-strict=false
             - --proxy-headers=xforwarded
             - --hostname={{ .Values.authserver.hostname }}
+            - --http-access-log-enabled=true
           livenessProbe:
             httpGet:
               path: /auth-mgmt/health/live/ # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
               port: http-mgmt-port
-            initialDelaySeconds: 30
-            periodSeconds: 10
+            initialDelaySeconds: 0
+            periodSeconds: 15
             failureThreshold: 5
           readinessProbe:
             httpGet:
@@ -104,14 +128,14 @@ spec:
               port: http-mgmt-port
             initialDelaySeconds: 30
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 5
           startupProbe:
             httpGet:
               path: /auth-mgmt/health/ready/  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
               port: http-mgmt-port
             initialDelaySeconds: 30
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 20
           env:
             # Environment variable 'KEYCLOAK_ADMIN' is deprecated, use 'KC_BOOTSTRAP_ADMIN_USERNAME' instead
             - name: KEYCLOAK_ADMIN
@@ -132,10 +156,19 @@ spec:
                 secretKeyRef:
                   name: pdp-smcb-truststore
                   key: password
+            - name: TPM_KEYSTORE_LOCATION
+              value: "/opt/keycloak/conf/ms-tpm-certificates.p12"
+            - name: TPM_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdp-tpm-truststore
+                  key: password
             {{- if .Values.devMode }}
             # Enable remote debugging in devMode
-            - name: JAVA_OPTS
-              value: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+            - name: KC_DEBUG
+              value: "true"
+            - name: KC_DEBUG_PORT
+              value: "*:5005"
             {{- end }}
             - name: KC_LOG_LEVEL
               value: "{{ .Values.authserver.log.level }}"
@@ -143,14 +176,22 @@ spec:
               value: "true"
             - name: KC_HTTP_ENABLED
               value: "true"
-            - name: KC_DEBUG
-              value: "true"
-            - name: KC_DEBUG_PORT
-              value: "*:8787"
+            - name: KC_HTTP_RELATIVE_PATH
+              value: "/auth"
+            - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
+              value: "/auth-mgmt"
             - name: JAVA_LOCALE
               value: "-Duser.timezone=Europe/Berlin"
             - name: JAVA_OPTS_APPEND
-              value: "-ea"
+              value: >
+                -ea
+                -XX:MaxRAMPercentage=70
+                -XX:MinRAMPercentage=70
+                -XX:InitialRAMPercentage=50
+                -XX:MetaspaceSize=96M
+                -XX:MaxMetaspaceSize=256m
+                -XX:+UseG1GC
+                -XX:MaxGCPauseMillis=200
             - name: KC_LOG_CONSOLE_JSON_FORMAT
               value: "ecs"
             - name: KC_LOG_CONSOLE_OUTPUT
@@ -160,8 +201,13 @@ spec:
             - name: KC_TRACING_ENDPOINT
               value: "http://{{ include "telemetryGateway.hostname" . }}:4317"
             # OPA endpoints and behavior
+            # Configure ZETA SMC-B token-exchange provider and OPA toggle
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
+              value: "{{ .Values.authserver.provider.smcB.opa.enabled }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_BASE_URL
               value: "{{ .Values.authserver.provider.smcB.opaBaseUrl }}"
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_SIMULATION_BASE_URL
+              value: "{{ .Values.authserver.provider.smcB.opaSimulationBaseUrl }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_DECISION_PATH
               value: "{{ .Values.authserver.provider.smcB.decisionPath }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_CONNECTION_TIMEOUT_MS
@@ -176,47 +222,33 @@ spec:
               value: "{{ .Values.authserver.config.clientRegistrationTTL }}"
             - name: CLIENT_REGISTRATION_SCHEDULER_INTERVAL
               value: "{{ .Values.authserver.config.clientRegistrationSchedulerInterval }}"
-
-            # https://ey-fp-dev.atlassian.net/browse/ZETAP-793
-            # TODO: Delete me when client is ready
-            - name: CHECK_CLIENT_ATTESTATION_ENABLED
-              value: {{ .Values.authserver.config.clientAttestationEnabled | default "false" | quote }}
-
             # Initial hash for admin events log
-            # TODO: should be retrieved from secret
             - name: GENESIS_HASH
-              value: 4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c
-              # DB wiring switches by databaseMode value (operator|bitnami)
-            {{- if eq .Values.databaseMode "operator" }}
-            # Operator-backed DB
+              valueFrom:
+                secretKeyRef:
+                  name: genesis-hash
+                  key: hash
+            - name: SMCB_HASHING_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: smcb-hashing-pepper
+                  key: pepper
+            # DB wiring switches by databaseMode value (cloudnative|external)
+            {{- if eq .Values.databaseMode "cloudnative" }}
+            # CloudNativePG-backed DB
             - name: KC_DB
               value: "postgres"
             - name: KC_DB_URL
-              value: "jdbc:postgresql://keycloak-db:5432/keycloak"
+              value: "jdbc:postgresql://keycloak-db-rw:5432/keycloak"
             - name: KC_DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "keycloak.keycloak-db.credentials.postgresql.acid.zalan.do"
+                  name: "keycloak-db-app"
                   key: username
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "keycloak.keycloak-db.credentials.postgresql.acid.zalan.do"
-                  key: password
-            - name: KC_DB_SCHEMA
-              value: "public"
-            {{- else if eq .Values.databaseMode "bitnami" }}
-            # DB settings for local (Bitnami)
-            - name: KC_DB
-              value: "postgres"
-            - name: KC_DB_URL
-              value: "jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/keycloak?sslmode=disable"
-            - name: KC_DB_USERNAME
-              value: "keycloak"
-            - name: KC_DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: "{{ .Release.Name }}-postgresql"
+                  name: "keycloak-db-app"
                   key: password
             - name: KC_DB_SCHEMA
               value: "public"
@@ -227,20 +259,64 @@ spec:
             - name: KC_DB_URL
               value: {{ .Values.authserverDb.kcDbUrl | quote }}
             - name: KC_DB_USERNAME
-              value: {{ .Values.authserverDb.kcDbUsername | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.authserverDb.kcDbSecretName | quote }}
+                  key: username
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.authserverDb.kcDbPasswordSecretName | quote }}
+                  name: {{ .Values.authserverDb.kcDbSecretName | quote }}
                   key: password
             - name: KC_DB_SCHEMA
               value: {{ .Values.authserverDb.kcDbSchema | quote }}
+            {{- end }}
+            {{- if .Values.global.infinispanExternal.enabled }}
+            {{- if and .Values.global.infinispanExternal.remote.host .Values.global.infinispanExternal.remote.port }}
+            - name: KC_CACHE_REMOTE_HOST
+              value: {{ .Values.global.infinispanExternal.remote.host }}
+            - name: KC_CACHE_REMOTE_PORT
+              value: {{ .Values.global.infinispanExternal.remote.port }}
+            {{- else}}
+            - name: KC_CACHE_REMOTE_HOST
+              value: infinispan
+            - name: KC_CACHE_REMOTE_PORT
+              value: "11222"
+            {{- end }}
+            - name: KC_CACHE_REMOTE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.global.infinispanExternal.admin.secretName }}
+                  name: {{ .Values.global.infinispanExternal.admin.secretName }}
+                  {{- else }}
+                  name: infinispan-admin
+                  {{- end }}
+                  key: username
+            - name: KC_CACHE_REMOTE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.global.infinispanExternal.admin.secretName }}
+                  name: {{ .Values.global.infinispanExternal.admin.secretName }}
+                  {{- else }}
+                  name: infinispan-admin
+                  {{- end }}
+                  key: password
+            - name: KC_CACHE_REMOTE_TLS_ENABLED
+              value: "false"
+            - name: KC_FEATURES
+              value: clusterless
+            - name: KC_FEATURES_DISABLED
+              value: persistent-user-sessions
             {{- end }}
           ports:
             - containerPort: 8080 # align with KC_HTTP_PORT
               name: http-port
             - containerPort: 9000 # align with KC_HTTP_MANAGEMENT_PORT
               name: http-mgmt-port
+            - containerPort: 7800
+              name: jgroups
+            - containerPort: 57800
+              name: jgroups-fd
             {{- if .Values.devMode }}
             - containerPort: 5005
               name: jdwp
@@ -254,16 +330,14 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          {{- with .Values.authserver.containerSecurityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-            capabilities:
-              drop: ["ALL"]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
       volumes:
         - name: keycloak-home
-          emptyDir: { }
+          emptyDir: {}
         - name: smcb-keystore
           secret:
             secretName: pdp-smcb-truststore
@@ -271,4 +345,12 @@ spec:
               - key: keystore
                 path: "smcb-certificates.p12"
         - name: tmp
-          emptyDir: { }
+          emptyDir: {}
+      {{- with .Values.authserver.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.authserver.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

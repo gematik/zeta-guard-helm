@@ -27,6 +27,11 @@ opentelemetry-demo:
     frontend:
       enabled: false
 
+    frontend-proxy:
+      resources:
+        limits:
+          memory: 250Mi
+
     image-provider:
       enabled: false
 

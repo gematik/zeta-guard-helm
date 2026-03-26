@@ -1,16 +1,23 @@
 {{- /* vim: set ft=helm: */ -}}
 {{- /* NIC mergeable minion for zeta-guard rules */ -}}
+{{- if .Values.ingressEnabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: zeta-guard-minion
   labels:
-    app.kubernetes.io/name: zeta-guard
-    app.kubernetes.io/component: ingress
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "ingress.labels" . | nindent 4 }}
   annotations:
+    {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "minion"
-    nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy"{{ else }}"pep-proxy-svc"{{ end }}
+    nginx.org/websocket-services: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "pep-proxy-svc" }}
+    {{- if .Values.pepproxy.sessionAffinity.enabled }}
+    nginx.org/lb-method: "hash $http_x_forwarded_for consistent"
+    {{- end }}
+    {{- end }}
+    {{- with .Values.ingressMinionAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
   rules:
@@ -36,6 +43,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}pep-proxy-svc{{ end }}
+                name: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "pep-proxy-svc" }}
                 port:
                   number: 80
+{{- end }}

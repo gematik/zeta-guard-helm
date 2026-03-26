@@ -1,5 +1,5 @@
 global:
-  image_pull_secret: nil
+  imagePullSecrets: []
   registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
 
@@ -8,9 +8,39 @@ registry_name: ""
 image:
   repository: testfachdienst
   tag: "latest"
-  pullPolicy: Always
+imagePullPolicy: Always
 
 containerPort: 8080
+managementPort: 8081
+
+startupProbe:
+  httpGet:
+    path: /actuator/health
+    port: management
+    scheme: HTTPS
+  periodSeconds: 5
+  timeoutSeconds: 1
+  failureThreshold: 24
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: management
+    scheme: HTTPS
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 1
+  failureThreshold: 3
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: management
+    scheme: HTTPS
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 1
+  failureThreshold: 3
 
 env: []
 

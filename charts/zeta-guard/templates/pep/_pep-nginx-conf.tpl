@@ -60,27 +60,50 @@ http {
   pep_popp_issuer     {{  required "pepproxy.nginxConf.poppIssuer is require" $.Values.pepproxy.nginxConf.poppIssuer }};
   pep_asl_testing {{ .aslTestmode | ternary "on" "off" }};
 
+  {{- if $.Values.pepproxy.asl_enabled }}
+  pep_asl_signer_cert /etc/nginx/signer_cert.pem;
+  pep_asl_signer_key /etc/nginx/signer_key.pem;
+  pep_asl_ca_cert /etc/nginx/issuer_cert.pem;
+
+  pep_asl_roots_json /etc/nginx/roots.json;
+
+  {{- if $.Values.pepproxy.aslRootCA }}
+  pep_asl_root_ca {{ $.Values.pepproxy.aslRootCA | quote }};
+  {{- end }}
+
+  {{- if $.Values.pepproxy.aslOcspUrl }}
+  pep_asl_ocsp_url {{ $.Values.pepproxy.aslOcspUrl | quote }};
+  {{- end }}
+
+  {{- end }}
+
   server {
     listen 8081;
     server_name  pep-proxy-svc;
+
+    if ($server_protocol = "") {
+        return 444; # HTTP/0.9 or unknown protocol version
+    }
+    if ($server_protocol ~* "HTTP/1.0") {
+        return 444; # A_26920: HTTP/1.0 not supported
+    }
+
     {{- tpl $.Values.pepproxy.nginxConf.locations $ | nindent 4 }}
-    client_body_temp_path /dev/shm;
-    proxy_temp_path /dev/shm;
-    fastcgi_temp_path /dev/shm;
-    uwsgi_temp_path /dev/shm;
-    scgi_temp_path /dev/shm;
+
+    location /doc/ {
+      pep    off;
+      root   /usr/share/nginx/html;
+      index  index.html;
+    }
+
   }
   server {
     listen 8080;
+
     location = /status {
       access_log off;
       stub_status;
     }
-    client_body_temp_path /dev/shm;
-    proxy_temp_path /dev/shm;
-    fastcgi_temp_path /dev/shm;
-    uwsgi_temp_path /dev/shm;
-    scgi_temp_path /dev/shm;
   }
 }
 {{- end }}

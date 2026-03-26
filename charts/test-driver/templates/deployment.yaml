@@ -20,22 +20,20 @@ spec:
       {{- end }}
     spec:
       securityContext:
-        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: testdriver
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          {{- with .Values.containerSecurityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-            capabilities:
-              drop: ["ALL"]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /health
@@ -48,8 +46,8 @@ spec:
               name: http
           volumeMounts:
             - name: smcb-keystore
-              mountPath: "/smcb-certificates.p12"
-              subPath: "smcb-certificates.p12"
+              mountPath: "/{{ .Values.smcbCertificateFileName }}"
+              subPath: {{ .Values.smcbCertificateFileName | quote }}
               readOnly: true
           env:
             - name: FACHDIENST_URL
@@ -61,9 +59,11 @@ spec:
             - name: POPP_TOKEN
               value: {{ .Values.PoppToken | quote }}
             - name: SMB_KEYSTORE_FILE
-              value: "/smcb-certificates.p12"
+              value: "/{{ .Values.smcbCertificateFileName }}"
+            - name: SMB_KEYSTORE_B64
+              value: {{ .Values.smcbCertificateB64 | quote }}
             - name: SMB_KEYSTORE_ALIAS
-              value: "zeta.c_smcb_aut"
+              value: {{ .Values.smcbCertificateAlias | quote }}
             - name: SMB_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -87,4 +87,4 @@ spec:
             secretName: test-smcb-keystore
             items:
               - key: keystore
-                path: "smcb-certificates.p12"
+                path: {{ .Values.smcbCertificateFileName | quote }}

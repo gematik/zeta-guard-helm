@@ -12,10 +12,14 @@ PEP).
 
 ## What’s Deployed
 
-- `Deployment/Service`: `opa` listening on `8181` (HTTP API).
+- `Deployment/Service`: `opa` (active) and `opa-simulation` (simulation), both on `8181` (HTTP API, ClusterIP/internal-only).
+- Simulation is enabled by default (`zeta-guard.opa.simulation.enabled: true`).
 - Config resources:
     - Bundle disabled: `ConfigMap/opa-policy` with `authz.rego` rendered from `policyRego`.
-    - Bundle enabled: `Secret|ConfigMap/opa-config` with `opa.yaml` pointing OPA at a remote OCI bundle. Secret is used when credentials are present.
+    - Bundle enabled:
+      - Active: `Secret|ConfigMap/opa-config`
+      - Simulation: `Secret|ConfigMap/opa-simulation-config`
+      Both point OPA at remote bundles; Secret is used when credentials are present.
 - Container args:
     - `opa run --server --addr=0.0.0.0:8181 [--config-file=/config/opa.yaml] [/policies/authz.rego]`
 - Mounts:
@@ -23,12 +27,26 @@ PEP).
     - Bundle mode: `/config/opa.yaml`
 - Rollout trigger: `CHECKSUM_OPA` env var changes when policy/data/logging
   change, forcing a Deployment rollout.
+- Active bundle path: `zeta-guard.opa.bundle.resource` (typically `.../latest`).
+- Simulation bundle path: derived automatically from active (`.../latest` -> `.../latest-sim`).
+
+## Simulation Settings
+
+- `zeta-guard.opa.simulation.enabled` (bool, default: `true`):
+  deploys `opa-simulation` Deployment/Service.
+- `zeta-guard.opa.simulation.replicaCount` (int, default: `1`):
+  replica count for simulation Deployment.
+- `zeta-guard.opa.simulation.bundle.resource` (string, optional):
+  explicit simulation bundle resource. If empty, chart derives from active
+  `opa.bundle.resource` by appending `-sim`.
+- `opa-simulation-config` is rendered only when simulation is enabled and
+  either bundle mode or decision logging requires `opa.yaml`.
 
 ## Values (Inline Policy Mode)
 
 - `zeta-guard.opaPolicy.policyRego` (required): Rego v1 policy text. Example:
   ```rego
-  package zeta.authz
+  package policies.zeta.authz
   default allow := false
   allow if {
     allowed := data.zeta.allowed_scopes[input.client_id]
@@ -55,7 +73,7 @@ PEP).
        allowedScopesMap:
          zeta-client: [zeta]
        policyRego: |
-         package zeta.authz
+         package policies.zeta.authz
          default allow := false
          allow if {
            allowed := data.zeta.allowed_scopes[input.client_id]
@@ -69,20 +87,17 @@ PEP).
 ## Verify
 
 - Port-forward: `kubectl -n <ns> port-forward svc/opa 8181:8181`
-- Data present:
+- Port-forward simulation: `kubectl -n <ns> port-forward svc/opa-simulation 8182:8181`
+- Update the payload for different instances (opa-active vs. opa-simulation):
   ```bash
-  curl -sS http://localhost:8181/v1/data/zeta/allowed_scopes | jq .
-  ```
-- Decision (expected true):
-  ```bash
-  curl -sS -H 'Content-Type: application/json' \
-    -d '{"input":{"client_id":"zeta-client","requested_scopes":["zeta"]}}' \
-    http://localhost:8181/v1/data/zeta/authz/allow
+  PAYLOAD='{"input":{"authorization_request":{"scopes":["test_scope_read"],"audience":["https://example.com/testresource"],"grant_type":"urn:ietf:params:oauth:grant-type:token-exchange","ip_address":"172.18.0.4"},"user_info":{"professionOID":"1.2.276.0.76.4.50"},"client_assertion":{"posture":{"product_id":"ZETA-Test-Client","product_version":"1.0.0"}}}}'
+  curl -sS -H 'Content-Type: application/json' -d "$PAYLOAD" http://localhost:8181/v1/data/policies/zeta/authz/decision
+  curl -sS -H 'Content-Type: application/json' -d "$PAYLOAD" http://localhost:8182/v1/data/policies/zeta/authz/decision
   ```
 
 ## Endpoints
 
-- Policy decision: `POST /v1/data/zeta/authz/allow` with JSON body
+- Policy decision: `POST /v1/data/policies/zeta/authz/decision` with JSON body
   `{ "input": { ... } }`.
 
 ## Troubleshooting
@@ -120,6 +135,12 @@ zeta-guard:
         secretRef:
           name: opa-bearer
     logLevel: info
+    simulation:
+      enabled: true
+      replicaCount: 1
+      bundle:
+        # optional; when empty, active resource + "-sim" is used
+        resource: ""
 ```
 
 Credentials via Secret (per namespace):
@@ -131,7 +152,8 @@ kubectl -n zeta-<env> create secret generic opa-bearer \
 
 Notes
 - Helm looks up the Secret during render and injects the token into `opa.yaml`; CI no longer passes tokens.
-- When credentials are present, `opa-config` is rendered as a Secret to avoid exposing tokens in plain text.
+- When credentials are present, `opa-config` and `opa-simulation-config` are rendered as Secrets to avoid exposing tokens in plain text.
+- Bundle polling defaults: `min_delay_seconds: 60`, `max_delay_seconds: 60`.
 - If the Secret is missing or empty, OPA will try anonymous pulls and likely fail with 401/403. There is no automatic fallback; set `zeta-guard.opa.bundle.enabled=false` to use inline policy.
 - The status plugin may log 404/502 when pointed at a registry; this is benign. To silence, set `opaStatusPrometheus: false`.
 
@@ -179,6 +201,7 @@ Notes
   - `zeta-guard.opa.bundle.verification.keyId`
   - `zeta-guard.opa.bundle.verification.algorithm` (e.g., `ES256`)
   - `zeta-guard.opa.bundle.verification.publicKey` (PEM)
+- `zeta-guard.opa.bundle.verification.scope` (string, optional): when set, OPA enforces that the bundle signature was created with this scope value. Must match the scope embedded in the bundle's `.signatures.json`. Leave empty (default) if the bundle was signed without a scope — omitting it skips scope validation entirely.
 - Schema guards:
   - If `verification.enabled=true`, then `keyId` and `publicKey` are required.
   - If `bundle.enabled=true`, then `serviceName` and `resource` are required (non-empty).

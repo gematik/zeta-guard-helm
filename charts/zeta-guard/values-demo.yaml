@@ -1,21 +1,34 @@
-ingress_controller:
-  enabled: false
-
-management_service:
-  enabled: false
-
-service_mesh:
-  enabled: false
-
 authserver:
-  hostname: ""
-  http_enabled: true
   config:
     maxClients: "256"
+  hostname: ""
+  initContainerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
 
 pepproxy:
-  image:
-    pullPolicy: Always
+  replicaCount: 2
+  sessionAffinity:
+    enabled: true
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
+  imagePullPolicy: Always
   nginxConf:
     generateConfigMap: true
 
@@ -40,35 +53,35 @@ pepproxy:
       }
 
 # DB mode switch:
-# - bitnami: local using Bitnami subchart service/secret only for demo purposes – no support at all
-# - operator: staging/dev/prod using Zalando Postgres Operator
-# - external: use external db by providing filling values authserverDb.kcDb, authserverDb.kcDbUrl,
-#       authserverDb.kcDbSchema, authserverDb.kcDbUsername, authserverDb.kcDbPasswordSecretName
-#       the db password is pulled from the "password" field of a secret going by the provided name. The other properties
-#       behave according to the keycloak environment variables. See https://www.keycloak.org/server/db
-databaseMode: bitnami
-postgresql:
-  image:
-    repository: bitnamilegacy/postgresql
-  enabled: true
-  auth:
-    username: keycloak
-    password: devpassword
-    database: keycloak
-  primary:
-    persistence:
-      enabled: false
+# - cloudnative: using CloudNativePG operator
+# - external: use external db by providing values in authserverDb.*
+databaseMode: cloudnative
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
 clusterIssuer: "letsencrypt-cd"
 
 opa:
-  logLevel: info
   enabled: true
   # For demo, use inline policy by default so no registry credentials are required.
   bundle:
     # use Workload Identity Federation or secretRef when enabling bundle mode
     enabled: false
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
+  # set if Workload Identity Federation is enabled
+  cronjobSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
+  logLevel: info
   workloadIdentityFederation:
     enabled: false
 # Decision logs toggle used by both inline and bundle configs
@@ -77,10 +90,10 @@ opaPolicy:
   # Example fake policy: allow-all decision object.
   # The policies should be loaded from PIP-PAP Service (workload identity federation or secretRef)
   policyRego: |
-    package zeta.authz
+    package policies.zeta.authz
 
     # Minimal decision object compatible with callers expecting
-    # data.zeta.authz.decision => {"allow": bool, "ttl": {"access_token": number, "refresh_token": number}}
+    # data.policies.zeta.authz.decision => {"allow": bool, "ttl": {"access_token": number, "refresh_token": number}}
     decision := {
       "allow": true,
       "ttl": {
@@ -89,6 +102,5 @@ opaPolicy:
       },
     }
 
-admissionWebhooks:
-  certManager:
-    enabled: true
+openshiftRoute:
+  enabled: false

@@ -5,7 +5,7 @@ This chart uses F5 NGINX Ingress Controller (NIC) mergeable Ingresses by default
 - Minions (`zeta-guard-minion`, `testdriver`, `test-monitoring-ingress`) hold routing rules for the same host/class
 
 ## Prerequisites
-- NIC installed/enabled (bundled by default): `zeta-guard.nginx-ingress.enabled: true`, or an external NIC compatible with `nginx.org/mergeable-ingress-type`.
+- NIC installed/enabled (bundled by default): `zeta-guard.nginxIngressEnabled: true`, or an external NIC compatible with `nginx.org/mergeable-ingress-type`.
 - A host for the environment (required for mergeable): set `zeta-guard.authserver.hostname`.
 - Consistent class across master and minions: set `zeta-guard.ingressClassName` and align subcharts (e.g., `testdriver.ingressClassName`).
 - cert-manager installed when using TLS via ClusterIssuer.
@@ -44,7 +44,7 @@ This chart uses F5 NGINX Ingress Controller (NIC) mergeable Ingresses by default
 
 ## Notes
 - Azure Load Balancer: set `service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /healthz` on the NIC Service for healthy probes.
-- External controller: disable bundled NIC via `zeta-guard.nginx-ingress.enabled: false` and set only `zeta-guard.ingressClassName` to the cluster’s class.
+- External controller: disable bundled NIC via `zeta-guard.nginxIngressEnabled: false` and set only `zeta-guard.ingressClassName` to the cluster’s class.
 - Minions must not duplicate the same path+host across Ingresses; define each path in exactly one minion.
 
 ## Troubleshooting

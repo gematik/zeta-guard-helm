@@ -14,9 +14,7 @@ kind: ConfigMap
 metadata:
   name: opa-policy
   labels:
-    app.kubernetes.io/name: opa
-    app.kubernetes.io/component: opa
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "opa.labels" . | nindent 4 }}
 data:
   authz.rego: |
 {{ include "opa.policyRego" . | indent 4 }}
@@ -28,9 +26,7 @@ kind: {{ ternary "Secret" "ConfigMap" $renderConfigAsSecret }}
 metadata:
   name: opa-config
   labels:
-    app.kubernetes.io/name: opa
-    app.kubernetes.io/component: opa
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "opa.labels" . | nindent 4 }}
 {{- if $renderConfigAsSecret }}
 type: Opaque
 stringData:
@@ -45,4 +41,29 @@ data:
 {{ include "opa.configYaml" . | indent 4 }}
 {{- end }}
 {{- end }}
+
+{{- if and .Values.opa.simulation.enabled (or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled) }}
+---
+apiVersion: v1
+kind: {{ ternary "Secret" "ConfigMap" $renderConfigAsSecret }}
+metadata:
+  name: opa-simulation-config
+  labels:
+    {{- include "opaSimulation.labels" . | nindent 4 }}
+{{- if $renderConfigAsSecret }}
+type: Opaque
+stringData:
+  opa.yaml: |
+{{- else }}
+data:
+  opa.yaml: |
+{{- end }}
+{{- if .Values.opa.bundle.enabled }}
+{{ include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .)) | indent 4 }}
+{{- else }}
+{{ include "opa.configYaml" . | indent 4 }}
+{{- end }}
+
+{{- end }}
+
 {{- end }}

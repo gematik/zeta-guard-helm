@@ -20,15 +20,16 @@ spec:
       {{- end }}
     spec:
       securityContext:
-        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        - name:  "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: exauthsim
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
           ports:
             - name: {{ .Values.service.portName }}
               containerPort: {{ .Values.containerPort }}
@@ -49,13 +50,10 @@ spec:
                 secretKeyRef:
                   name: test-smcb-keystore
                   key: password
+          {{- with .Values.containerSecurityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-            capabilities:
-              drop: ["ALL"]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: smcb-keystore
           secret:

@@ -28,6 +28,8 @@ tiger-proxy:
         to: http://authserver/auth
       - from: /proxy
         to: http://testdriver/proxy
+      - from: /telemetry/gateway
+        to: http://test-monitoring-collector-local:4318
       - from: /opa
         to: http://opa:8181
       - from: /popp
@@ -48,10 +50,23 @@ zeta-guard:
 
 testdriver:
   routeViaTigerProxy: true
+
+testMonitoringService:
+  opentelemetry-demo:
+    opentelemetry-collector:
+      config:
+        exporters:
+          otlp_http/test-monitoring-service:
+            endpoint: http://tiger-proxy:4138
 ```
 
 Note: The `/popp` route points to the `popp-statics` Service from the `popp-mocks` chart.
 Ensure `popp-mocks.enabled: true` (or adjust the `/popp` target and `poppIssuer` to your JWKS endpoint).
+
+For telemetry, the switch works the same way as for the other Tiger routes: keep the
+`/telemetry/gateway` entry in `tiger-proxy.proxyConfig.proxyRoutes` and point the OTLP HTTP exporter to
+`http://tiger-proxy:4138` instead of the real collector. The dedicated Tiger OTLP entrypoint on port `4138`
+forwards to the Tiger route `/telemetry/gateway`, which then forwards to the configured backend target.
 
 After setting these values the Tiger proxy chart will be deployed when running `make deploy stage=<target-stage>`.
 
@@ -78,9 +93,20 @@ zeta-guard:
 
 testdriver:
   routeViaTigerProxy: false
+
+testMonitoringService:
+  opentelemetry-demo:
+    opentelemetry-collector:
+      config:
+        exporters:
+          otlp_http/test-monitoring-service:
+            endpoint: http://test-monitoring-collector-local:4318
 ```
 
 After setting these values the Tiger proxy chart will be ignored when running `make deploy stage=<target-stage>`.
+
+If the Tiger proxy chart stays enabled but telemetry should bypass it, remove the `/telemetry/gateway` route
+from `tiger-proxy.proxyConfig.proxyRoutes` and point the exporter directly to the real collector.
 
 
 ## Enable TLS for the testfachdienst route

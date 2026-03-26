@@ -19,22 +19,64 @@ spec:
         {{- include "tiger-proxy.selectorLabels" . | nindent 8 }}
     spec:
       securityContext:
-        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        - name: "{{ .Values.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # initContainers:
+      #   - name: iptables-init
+      #     image: alpine:3.20
+      #     # Needs NET_ADMIN (and often privileged) to modify iptables
+      #     securityContext:
+      #       privileged: true
+      #       capabilities:
+      #         add:
+      #           - NET_ADMIN
+      #     command:
+      #       - /bin/sh
+      #       - -c
+      #       - |
+      #         set -e
+
+      #         # Install iptables
+      #         apk add --no-cache iptables
+
+      #         # Traffic coming from outside the pod (to this pod IP:4138)
+      #         iptables -t nat -A PREROUTING -p tcp --dport 4138 -j REDIRECT --to-ports 8080
+
+      #         # Traffic originating from inside the pod going to :80 (localhost)
+      #         # iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
+
+      #         # Done - exit and let main containers start
+      #         echo "iptables rules configured"
+
       containers:
-        - name: {{ .Chart.Name }}
+        - name: nginx-sidecar
+          image: "docker.io/nginxinc/nginx-unprivileged:alpine3.22-slim"
+          ports:
+            - name: otlp-http-port
+              containerPort: 4138
+          {{- with .Values.containerSecurityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-            capabilities:
-              drop: ["ALL"]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tiger-application-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: nginx-tmp
+              mountPath: /tmp
+
+        - name: {{ .Chart.Name }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           # TODO - review necessity of this section or rework
           ports:
             - name: proxy-port
@@ -74,7 +116,13 @@ spec:
             items:
             - key: application.yaml
               path: application.yaml
+            - key: application.grpc.yaml
+              path: application.grpc.yaml
+            - key: nginx.conf
+              path: nginx.conf
         - name: maven-target
+          emptyDir: {}
+        - name: nginx-tmp
           emptyDir: {}
         - name: tmp
           emptyDir: {}

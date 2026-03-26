@@ -8,7 +8,7 @@ output "pdp_supported_optional_scopes" {
   value       = keycloak_realm_optional_client_scopes.pdp_optional_scopes.optional_scopes
 }
 
-output "policy_deletion_results" {
-  description = "Policies deletion script output"
-  value       = try(data.external.delete_policies[0].result, "No result for terraform plan")
+output "policy_management_results" {
+  description = "Policy management script output"
+  value       = try(data.external.manage_policies[0].result, "No result for terraform plan")
 }

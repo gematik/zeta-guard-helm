@@ -1,14 +1,11 @@
 {{- $wif := .Values.opa.workloadIdentityFederation -}}
-{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) }}
+{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) | or .Values.gematikConnectionEnabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: opa-secret-patcher
   labels:
-    app.kubernetes.io/name: opa
-    app.kubernetes.io/component: pdp
-    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "opa.labels" . | nindent 4 }}
 rules:
   - apiGroups: [ "" ]
     resources: [ "secrets" ]
@@ -22,10 +19,7 @@ kind: RoleBinding
 metadata:
   name: opa-token-renewer-secret-patcher
   labels:
-    app.kubernetes.io/name: opa
-    app.kubernetes.io/component: pdp
-    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "opa.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: opa-token-renewer

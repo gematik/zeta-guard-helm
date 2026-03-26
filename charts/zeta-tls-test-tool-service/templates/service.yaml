@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zeta-tls-test-tool-server
+spec:
+  selector:
+    app.kubernetes.io/name: zeta-tls-test-tool-service
+  ports:
+    - name: tls-test-tool
+      port: {{ default 4433 .Values.service.ports.tlsTestToolServer }}
+      targetPort: tls-test-tool
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zeta-tls-test-tool-service
+spec:
+  selector:
+    app.kubernetes.io/name: zeta-tls-test-tool-service
+  type: {{ default "ClusterIP" .Values.service.type }}
+  {{- $svcType := default "ClusterIP" .Values.service.type }}
+  ports:
+    - name: service-mgmt
+      port: {{ default 80 .Values.service.ports.serviceMgmt }}
+      targetPort: service-mgmt
+      protocol: TCP
+      {{- if and (or (eq $svcType "NodePort") (eq $svcType "LoadBalancer")) .Values.service.nodePorts.serviceMgmtNodePort }}
+      nodePort: {{ .Values.service.nodePorts.serviceMgmtNodePort }}
+      {{- end }}

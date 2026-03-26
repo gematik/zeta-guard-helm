@@ -5,6 +5,7 @@ provider "registry.terraform.io/hashicorp/external" {
   version = "2.3.5"
   hashes = [
     "h1:FnUk98MI5nOh3VJ16cHf8mchQLewLfN1qZG/MqNgPrI=",
+    "h1:smKSos4zs57pJjQrNuvGBpSWth2el9SgePPbPHo0aps=",
     "zh:6e89509d056091266532fa64de8c06950010498adf9070bf6ff85bc485a82562",
     "zh:78d5eefdd9e494defcb3c68d282b8f96630502cac21d1ea161f53cfe9bb483b3",
     "zh:86868aec05b58dc0aa1904646a2c26b9367d69b890c9ad70c33c0d3aa7b1485a",
@@ -25,6 +26,7 @@ provider "registry.terraform.io/hashicorp/kubernetes" {
   constraints = ">= 2.38.0"
   hashes = [
     "h1:P0c8knzZnouTNFIRij8IS7+pqd0OKaFDYX0j4GRsiqo=",
+    "h1:vyHdH0p6bf9xp1NPePObAJkXTJb/I09FQQmmevTzZe0=",
     "zh:02d55b0b2238fd17ffa12d5464593864e80f402b90b31f6e1bd02249b9727281",
     "zh:20b93a51bfeed82682b3c12f09bac3031f5bdb4977c47c97a042e4df4fb2f9ba",
     "zh:6e14486ecfaee38c09ccf33d4fdaf791409f90795c1b66e026c226fad8bc03c7",
@@ -44,6 +46,7 @@ provider "registry.terraform.io/keycloak/keycloak" {
   version     = "5.5.0"
   constraints = ">= 5.5.0"
   hashes = [
+    "h1:RLA8lhkI2RRjATxtugbTNXjQ+lEUqMQfkO/Abtl/mQo=",
     "h1:m/LrRonkMUGs5QJG8mw6PQ5xzqfEYnnO50ERVGElN6A=",
     "zh:2c645fe37ad8a4e0285a6e6e11997df4128de378fab947bb199711c4845d0088",
     "zh:3aa285795fdec20b761f23f62937baf9a771879e8e0a946e21dd999bd323122d",

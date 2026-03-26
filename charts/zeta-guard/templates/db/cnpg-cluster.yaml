@@ -1,0 +1,21 @@
+{{- if eq .Values.databaseMode "cloudnative" }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-db
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  instances: {{ .Values.cloudnativePg.instances }}
+  imageName: {{ .Values.cloudnativePg.imageName | quote }}
+  storage:
+    size: {{ .Values.cloudnativePg.storage.size | quote }}
+  {{- with .Values.cloudnativePg.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: zeta-guard
+{{- end }}

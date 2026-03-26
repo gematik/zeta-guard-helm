@@ -1,0 +1,9 @@
+{{- if and .Values.global.infinispanExternal.enabled (not .Values.global.infinispanExternal.remote.host) (not .Values.global.infinispanExternal.remote.port)}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infinispan-config
+data:
+  infinispan-config.xml: |
+  {{- required "infinispan config is missing" .Values.global.infinispanExternal.config | nindent 4 }}
+{{- end}}

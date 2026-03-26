@@ -9,10 +9,15 @@ Your Fachdienst is at
 
 and your administration frontend is at
 
-    {{
-        (index .Subcharts "zeta-guard").Values.authserver.hostname
-            | default "http://localhost"
-    }}/auth
+    {{- $host := (index .Subcharts "zeta-guard").Values.authserver.hostname -}}
+    {{- if $host }}
+
+    https://{{ $host }}/auth
+    {{- else }}
+
+    http://localhost/auth
+    {{- end }}
+
 
 {{ if .Values.testMonitoringServiceEnabled -}}
 - All monitoring services are available via the frontend proxy after running this command:
@@ -22,3 +27,4 @@ and your administration frontend is at
   Jaeger UI    http://localhost:8080/jaeger/ui/
   Grafana      http://localhost:8080/grafana/
 {{- end }}
+

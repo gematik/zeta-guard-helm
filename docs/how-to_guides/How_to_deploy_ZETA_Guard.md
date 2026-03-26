@@ -21,6 +21,8 @@ Before deploying ZETA Guard, configure credentials for your initial Keycloak
 administrator account
 at [charts/zeta-guard/values.yaml](../../charts/zeta-guard/values.yaml),
 `authserver.admin.username` and `authserver.admin.password`.
+Additionally, `authserver.genesisHash` and `authserver.smcbHashingPepper` need 
+to be set on the initial deployment.
 
 ### OPA bundle registry credentials (optional)
 
@@ -50,6 +52,42 @@ zeta-guard:
 Notes:
 - The chart looks up the Secret during render; CI no longer passes bearer tokens.
 - If the Secret is missing, OPA will attempt anonymous pulls and likely fail. To use inline policy instead, set `zeta-guard.opa.bundle.enabled=false`.
+
+## Scaling pods via replicaCount
+
+All main components support horizontal scaling. Set `replicaCount` in the environment values
+file (default is `1` for all components):
+
+```yaml
+zeta-guard:
+  authserver:
+    replicaCount: 2
+  pepproxy:
+    replicaCount: 3
+  opa:
+    replicaCount: 2
+    simulation:
+      replicaCount: 2
+```
+
+**PEP (`pepproxy.replicaCount > 1`):** Sticky sessions are mandatory — enable
+`sessionAffinity` alongside `replicaCount`:
+
+```yaml
+zeta-guard:
+  pepproxy:
+    replicaCount: 3
+    sessionAffinity:
+      enabled: true  # must be true when replicaCount > 1
+```
+
+NGINX-Ingress-Controller routes requests using `hash $http_x_forwarded_for consistent` — the real
+client IP from the `X-Forwarded-For` header ensures each client always reaches the same PEP pod.
+
+**Authserver (`authserver.replicaCount > 1`):** All instances must reach the same PostgreSQL
+database. With `databaseMode: cloudnative` (default) this is provided by the CloudNativePG
+cluster. Session sharing via Infinispan works out of the box up to ~4 replicas; above that,
+consider tuning the Infinispan cache.
 
 ## How to deploy ZETA Guard for local development
 

@@ -1,5 +1,5 @@
 global:
-  image_pull_secret: nil
+  imagePullSecrets: []
   registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
 
@@ -13,8 +13,8 @@ devMode: false
 
 image:
   tag: latest
-  pullPolicy: Always
   repository: testproxy
+imagePullPolicy: Always
 
 resources:
   limits:
@@ -23,6 +23,7 @@ resources:
 proxyConfig:
   proxyPort: 8080
   adminPort: 9999
+  otlpHttpClientMaxBodySize: 64m
   proxyLogLevel: INFO
   activateRbelParsing: true
   parsingShouldBlockCommunication: false
@@ -67,5 +68,3 @@ service:
     proxy: null
     admin: null
   tls: []
-
-

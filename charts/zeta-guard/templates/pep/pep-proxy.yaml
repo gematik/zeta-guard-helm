@@ -4,24 +4,24 @@ kind: Deployment
 metadata:
   name: pep-deployment
   labels:
-    app.kubernetes.io/name: pep-proxy
-    app.kubernetes.io/component: pep
-    app.kubernetes.io/version: {{ .Values.pepproxy.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "pep-proxy.labels" . | nindent 4 }}
 spec:
+  replicas: {{ .Values.pepproxy.replicaCount }}
   selector:
     matchLabels:
-      app: pep-proxy
-  replicas: 1
+      {{- include "pep-proxy.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: pep-proxy
-        app.kubernetes.io/name: pep-proxy
-        app.kubernetes.io/component: pep
-        {{- include "zeta-guard.baseLabels" . | nindent 8 }}
-      {{- if or .Values.devMode .Values.pepproxy.nginxConf.generateConfigMap }}
+        {{- include "pep-proxy.labels" . | nindent 8 }}
+        {{- with .Values.pepproxy.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if .Values.pepproxy.podAnnotations | or .Values.devMode | or .Values.pepproxy.nginxConf.generateConfigMap }}
       annotations:
+        {{- with .Values.pepproxy.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- if .Values.pepproxy.nginxConf.generateConfigMap }}
         {{- $nginxConf := include "zeta-guard.pep-nginx-conf" . }}
         checksum/nginx-conf: {{ $nginxConf | sha256sum }}
@@ -31,12 +31,18 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      {{- with .Values.pepproxy.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
-        - name: "{{ .Values.pepproxy.image.image_pull_secret | default .Values.global.image_pull_secret }}"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pepproxy.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: nginx
-          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.pepproxy.image.registry }}{{ .Values.pepproxy.image.repository }}:{{ .Values.pepproxy.image.tag }}"
-          imagePullPolicy: "{{ .Values.pepproxy.image.pullPolicy }}"
+          image: "{{ include "pep-proxy.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.pepproxy.imagePullPolicy }}"
           ports:
             - name: http-main
               containerPort: 8081
@@ -50,14 +56,40 @@ spec:
             httpGet:
               path: /status
               port: status
+          {{- if .Values.pepproxy.containerSecurityContext }}
+          securityContext:
+          {{- toYaml .Values.pepproxy.containerSecurityContext | nindent 12 }}
+          {{- end }}
           startupProbe:
             httpGet:
               path: /status
               port: status
+          {{- with .Values.pepproxy.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: nginx-conf
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            {{- if .Values.pepproxy.asl_enabled }}
+            - name: roots-json
+              mountPath: /etc/nginx/roots.json
+              subPath: roots.json
+              readOnly: true
+            - name: asl-signer-cert
+              mountPath: /etc/nginx/signer_cert.pem
+              subPath: signer_cert.pem
+              readOnly: true
+            - name: asl-signer-key
+              mountPath: /etc/nginx/signer_key.pem
+              subPath: signer_key.pem
+              readOnly: true
+            - name: asl-issuer-cert
+              mountPath: /etc/nginx/issuer_cert.pem
+              subPath: issuer_cert.pem
+              readOnly: true
+            {{- end }}
             - name: nginx-cache
               mountPath: /var/cache/nginx
             - name: nginx-run
@@ -71,17 +103,10 @@ spec:
               mountPath: /srv/.well-known/{{ base $path }}
               subPath: {{ base $path }}
             {{- end }}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-            capabilities:
-              drop: ["ALL"]
 
       {{- if .Values.pepproxyMetricsEnabled }}
         - name: metrics
-          image: nginx/nginx-prometheus-exporter:1.5.1
+          image: "{{ .Values.pepproxyMetricsExporterImage }}"
           command:
             - nginx-prometheus-exporter
           args:
@@ -105,13 +130,10 @@ spec:
             httpGet:
               path: /metrics
               port: metrics
+          {{- if .Values.pepproxy.containerSecurityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1000
-            capabilities:
-              drop: ["ALL"]
+          {{- toYaml .Values.pepproxy.containerSecurityContext | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -124,6 +146,32 @@ spec:
             items:
               - key: nginx.conf
                 path: nginx.conf
+        {{- if .Values.pepproxy.asl_enabled }}
+        - name: roots-json
+          secret:
+            secretName: roots-json
+            items:
+              - key: roots.json
+                path: "roots.json"
+        - name: asl-signer-cert
+          secret:
+            secretName: asl-identity
+            items:
+              - key: signer-cert
+                path: "signer_cert.pem"
+        - name: asl-signer-key
+          secret:
+            secretName: asl-identity
+            items:
+              - key: signer-key
+                path: "signer_key.pem"
+        - name: asl-issuer-cert
+          secret:
+            secretName: asl-identity
+            items:
+              - key: issuer-cert
+                path: "issuer_cert.pem"
+        {{- end }}
         - name: nginx-cache
           emptyDir: {}
         - name: nginx-run
@@ -137,6 +185,14 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.pepproxy.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pepproxy.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 
 ---
 {{- if .Values.pepproxy.nginxConf.generateConfigMap }}
@@ -146,9 +202,7 @@ kind: ConfigMap
 metadata:
   name: "{{ .Values.pepproxy.nginxConf.configMapName }}"
   labels:
-    app.kubernetes.io/name: pep-proxy
-    app.kubernetes.io/component: pep
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "pep-proxy.labels" . | nindent 4 }}
 data:
   nginx.conf: |-
     {{- $nginxConf | nindent 4 }}
@@ -159,13 +213,10 @@ kind: Service
 metadata:
   name: pep-proxy-svc
   labels:
-    app.kubernetes.io/name: pep-proxy
-    app.kubernetes.io/component: pep
-    app.kubernetes.io/version: {{ .Values.pepproxy.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "pep-proxy.labels" . | nindent 4 }}
 spec:
   selector:
-    app: pep-proxy
+    {{- include "pep-proxy.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: 80

@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-testenv
 description: ZETA Guard test installation
 type: application
-version: 0.3.2
+version: 0.4.1
 dependencies:
   - name: testfachdienst
     version: 0.0.1
@@ -26,7 +26,7 @@ dependencies:
     tags:
       - exauthsim
   - name: zeta-guard
-    version: 0.3.2
+    version: 0.4.1
     repository: file://charts/zeta-guard
     tags:
       - zeta-guard
@@ -45,3 +45,12 @@ dependencies:
     repository: file://charts/tiger-testsuite
     tags:
       - tiger-testsuite
+  - name: zeta-tls-test-tool-service
+    version: 0.1.0
+    repository: file://charts/zeta-tls-test-tool-service
+    condition: zetaTlsTestToolServiceEnabled
+  - name: infinispan-external
+    version: 0.0.1
+    repository: file://charts/infinispan-external
+    tags:
+      - infinispan-external

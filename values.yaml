@@ -3,14 +3,90 @@
 
 # Global defaults used by subcharts; keep safe empties
 global:
-  image_pull_secret: nil
+  imagePullSecrets: []
   registry: ""
   registry_host: ""
+  infinispanExternal:
+    enabled: false
+    replicaCount: 3
+    remote:
+      host:
+      port:
+    admin:
+      username: "please set me"
+      password: "please set me"
+      secretName:
+    config: |-
+      <infinispan xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:infinispan:config:15.0 https://infinispan.org/schemas/infinispan-config-15.0.xsd
+                            urn:infinispan:server:15.0 https://infinispan.org/schemas/infinispan-server-15.0.xsd" xmlns="urn:infinispan:config:15.0" xmlns:server="urn:infinispan:server:15.0">
+        <cache-container name="default" statistics="true">
+            <transport cluster="${infinispan.cluster.name:cluster}" stack="${infinispan.cluster.stack:tcp}" node-name="${infinispan.node.name:}" />
+            <security>
+                <authorization />
+            </security>
+        </cache-container>
+        <server xmlns="urn:infinispan:server:15.0">
+            <interfaces>
+                <interface name="public">
+                    <inet-address value="${infinispan.bind.address:127.0.0.1}" />
+                </interface>
+            </interfaces>
+            <socket-bindings default-interface="public" port-offset="${infinispan.socket.binding.port-offset:0}">
+                <socket-binding name="default" port="${infinispan.bind.port:11222}" />
+            </socket-bindings>
+            <security>
+                <security-realms>
+                    <security-realm name="default">
+                        <!-- Uncomment to enable TLS on the realm -->
+                        <!-- server-identities>
+                      <ssl>
+                         <keystore path="server.pfx"
+                                   password="password" alias="server"
+                                   generate-self-signed-certificate-host="localhost"/>
+                      </ssl>
+                   </server-identities-->
+                        <properties-realm />
+                    </security-realm>
+                </security-realms>
+            </security>
+            <endpoints socket-binding="default" security-realm="default" />
+        </server>
+        <cache-container name="keycloak">
+            <replicated-cache name="work" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </replicated-cache>
+            <distributed-cache name="sessions" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+            <distributed-cache name="authenticationSessions" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+            <distributed-cache name="clientSessions" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+            <distributed-cache name="offlineSessions" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+            <distributed-cache name="offlineClientSessions" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+            <distributed-cache name="actionTokens" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+            <distributed-cache name="loginFailures" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </distributed-cache>
+        </cache-container>
+      </infinispan>
 
 # Keep tags empty by default; env files can enable as needed
 tags: { }
 
 exauthsim: { }
+
+zetaTlsTestToolServiceEnabled: false
+
+zeta-tls-test-tool-service: { }
 
 
 # Safe defaults for cert-manager issuers to avoid nil pointer lookups
@@ -51,17 +127,11 @@ zeta-guard:
   authServerLogConsoleOutput: default
   authServerMetricsEnabled: true
   authServerTracingEnabled: true
-  logCollectorEnabled: true
-  log-collector:
-    config:
-      receivers:
-        filelog:
-          exclude:
-            - /var/log/pods/*log-collector*/log-collector/*.log
-            - /var/log/pods/*telemetry-gateway*/telemetry-gateway/*.log
-            - /var/log/pods/*test-monitoring-collector*/opentelemetry-collector/*.log
+  gematikConnectionEnabled: false
   opaDistributedTracingEnabled: true
   opaStatusPrometheus: false
+  openshiftRoute:
+    enabled: false
   pepproxy:
     image:
       tag: main
@@ -140,6 +210,10 @@ zeta-guard:
           autoindex     off;
         }
         {{- if .Values.pepproxy.asl_enabled }}
+        location /CertData. {
+            asl on;
+            pep off;
+        }
         location /ASL {
           pep                   on;
           asl                   on;
@@ -150,8 +224,24 @@ zeta-guard:
         {{- end }}
   pepproxyMetricsEnabled: true
   pepproxyTracingEnabled: true
-
   telemetryGatewayEnabled: true
+  telemetry-gateway:
+    config:
+      service:
+        extensions:
+          - health_check
+        pipelines:
+          logs:
+            exporters:
+              - debug
+          metrics:
+            exporters:
+              - debug
+          traces:
+            exporters:
+              - debug
+    extraVolumeMounts: [ ]
+    extraVolumes: [ ]
 
 smcb_keystore:
   keystore: "please set me"

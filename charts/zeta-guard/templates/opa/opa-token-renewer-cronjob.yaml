@@ -5,10 +5,7 @@ kind: CronJob
 metadata:
   name: opa-token-renewer-cronjob
   labels:
-    app.kubernetes.io/name: opa
-    app.kubernetes.io/component: pdp
-    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "opa.labels" . | nindent 4 }}
 spec:
   schedule: {{ $wif.tokenRenewer.schedule | quote }}
   jobTemplate:
@@ -17,15 +14,23 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: opa
-            app.kubernetes.io/component: pdp
-            app.kubernetes.io/version: {{ $.Values.opa.image.tag | quote }}
-            {{- include "zeta-guard.baseLabels" . | nindent 12 }}
+            {{- include "opa.labels" . | nindent 12 }}
+            {{- with .Values.opa.podLabels }}
+            {{- toYaml . | nindent 8 }}
+            {{- end }}
           {{- if $.Values.devMode }}
           annotations:
             zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
           {{- end }}
         spec:
+          {{- with .Values.opa.workloadIdentityFederation.worker.imagePullSecrets | default .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.opa.workloadIdentityFederation.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           securityContext:
             seccompProfile:
               type: RuntimeDefault
@@ -33,24 +38,17 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: token-renewer
-              image: google/cloud-sdk:549.0.0
-              imagePullPolicy: IfNotPresent
+              image: "{{ .Values.opa.workloadIdentityFederation.worker.image }}"
+              imagePullPolicy: "{{ .Values.opa.workloadIdentityFederation.worker.imagePullPolicy }}"
+              {{- with .Values.opa.cronjobSecurityContext }}
               securityContext:
-                runAsNonRoot: true
-                runAsUser: 1000
-                allowPrivilegeEscalation: false
-                capabilities:
-                  drop: ["ALL"]
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
               command: ["/bin/bash", "-c"]
               args:
                 - |
                   set -euo pipefail
                   echo "Beginne Token-Erneuerung..."
-
-                  # Sicherstellen, dass jq verfügbar ist (Basis-Image enthält es evtl. nicht)
-                  if ! command -v jq >/dev/null 2>&1; then
-                    apt-get update -y && apt-get install -y jq && rm -rf /var/lib/apt/lists/* || true
-                  fi
 
                   # 1. K8s Service Account Token aus dem projizierten Volume lesen
                   K8S_TOKEN=$(cat /var/run/secrets/sts.googleapis.com/serviceaccount/token)
@@ -80,7 +78,8 @@ spec:
                     "https://sts.googleapis.com/v1/token" \
                     -H "Content-Type: application/json" \
                     -d "$STS_PAYLOAD")
-                  GCP_ACCESS_TOKEN=$(jq -r '.access_token' /tmp/sts.json 2>/dev/null || echo "")
+                  command -v python3 >/dev/null 2>&1 || { echo "python3 not found in image" >&2; exit 1; }
+                  GCP_ACCESS_TOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/sts.json")).get("access_token",""))')
 
                   if [ "$HTTP_CODE" != "200" ] || [ -z "$GCP_ACCESS_TOKEN" ] || [ "$GCP_ACCESS_TOKEN" = "null" ]; then
                     echo "FEHLER: STS Aufruf fehlgeschlagen (HTTP $HTTP_CODE)." >&2
@@ -103,7 +102,7 @@ spec:
                     -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
                     -H "Content-Type: application/json" \
                     -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"],"lifetime":"3600s"}')
-                  IMP_TOKEN=$(jq -r '.accessToken' /tmp/imp.json 2>/dev/null || echo "")
+                  IMP_TOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/imp.json")).get("accessToken",""))')
 
                   if [ "$IMP_HTTP_CODE" != "200" ] || [ -z "$IMP_TOKEN" ] || [ "$IMP_TOKEN" = "null" ]; then
                     echo "FEHLER: GSA-Impersonation fehlgeschlagen (HTTP $IMP_HTTP_CODE)." >&2
@@ -118,9 +117,8 @@ spec:
                   echo -n "oauth2accesstoken:${IMP_TOKEN}" > /tmp/gar_basic.txt
                   ENCODED_TOKEN=$(base64 -w0 /tmp/gar_basic.txt 2>/dev/null || base64 /tmp/gar_basic.txt | tr -d '\n')
 
-                  kubectl patch secret opa-gcp-token \
-                    --type='json' \
-                    -p="[{\"op\": \"replace\", \"path\": \"/data/token\", \"value\": \"${ENCODED_TOKEN}\"}]"
+                  kubectl patch secret opa-gcp-token --type=merge -p "{\"data\":{\"token\":\"${ENCODED_TOKEN}\"}}"
+                  kubectl annotate --overwrite secret gematik-oidc-token last-updated="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
                   echo "Kubernetes Secret 'opa-gcp-token' aktualisiert (Basic-Präfix gesetzt)."
               volumeMounts:

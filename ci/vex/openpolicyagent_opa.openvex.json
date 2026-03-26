@@ -1,0 +1,24 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
+  "author": "Unknown Author",
+  "version": 4,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33186"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Affects gRPC servers with auth interceptors on :path. OPA is accessed via HTTP REST API (/v1/data) only; gRPC management API is not enabled.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-03-23T11:00:00Z"
+    }
+  ],
+  "timestamp": "2026-02-27T15:41:26Z",
+  "last_updated": "2026-03-23T11:00:00Z"
+}

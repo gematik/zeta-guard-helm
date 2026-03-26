@@ -1,0 +1,153 @@
+{{- if and .Values.opa.enabled .Values.opa.simulation.enabled }}
+# Precompute config snippets for checksum to avoid inline assignment
+{{- $bundleCfg := "" }}
+{{- if .Values.opa.bundle.enabled }}
+{{- /* $bundleCfg is used only to compute CHECKSUM_OPA; the actual config is rendered by opa-policy-configmap.yaml */ -}}
+{{- $bundleCfg = include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .)) }}
+{{- end }}
+{{- $inlinePolicy := "" }}
+{{- if not .Values.opa.bundle.enabled }}
+{{- $inlinePolicy = include "opa.policyRego" . }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa-simulation
+  labels:
+    {{- include "opaSimulation.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.opa.simulation.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "opaSimulation.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "opaSimulation.labels" . | nindent 8 }}
+        {{- with .Values.opa.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if .Values.opa.podAnnotations | or .Values.devMode }}
+      annotations:
+        {{- with .Values.opa.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.devMode }}
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+        {{- end }}
+      {{- end }}
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- $wif := .Values.opa.workloadIdentityFederation }}
+      {{- if .Values.opa.serviceAccountName }}
+      serviceAccountName: {{ .Values.opa.serviceAccountName | quote }}
+      {{- end }}
+      {{- with .Values.opa.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: opa-simulation
+          {{- with .Values.opa.containerSecurityContext }}
+          securityContext:
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.opa.image }}"
+          imagePullPolicy: "{{ .Values.opa.imagePullPolicy }}"
+          env:
+            - name: CHECKSUM_OPA
+              value: "{{ list $inlinePolicy (include "opa.configYaml" .) $bundleCfg | toJson | sha256sum }}"
+          args:
+            - "run"
+            - "--server"
+            - "--addr=0.0.0.0:8181"
+            - "--log-level={{ .Values.opa.logLevel }}"
+            {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+            - "--config-file=/config/opa.yaml"
+            {{- end }}
+            {{- if not .Values.opa.bundle.enabled }}
+            - "/policies/authz.rego"
+            {{- end }}
+          ports:
+            - containerPort: 8181
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          {{- with .Values.opa.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if not .Values.opa.bundle.enabled }}
+            - name: opa-policy
+              mountPath: /policies/authz.rego
+              subPath: authz.rego
+              readOnly: true
+            {{- end }}
+            {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+            - name: opa-simulation-config
+              mountPath: /config/opa.yaml
+              subPath: opa.yaml
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) }}
+            - name: gcp-token-volume
+              mountPath: /var/run/secrets/gcp
+              readOnly: true
+            {{- end }}
+            - name: opa-persistence
+              mountPath: /var/opa
+      volumes:
+        {{- if not .Values.opa.bundle.enabled }}
+        - name: opa-policy
+          configMap:
+            name: opa-policy
+        {{- end }}
+        {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
+        {{/* Decide if opa-config is a Secret based on presence of SecretRef credentials */}}
+        {{- $cred := .Values.opa.bundle.credentials }}
+        {{- $configIsSecret := false }}
+        {{- if and .Values.opa.bundle.enabled $cred }}
+          {{- if and $cred.secretRef $cred.secretRef.name }}
+            {{- $configIsSecret = true }}
+          {{- end }}
+        {{- end }}
+        - name: opa-simulation-config
+          {{- if $configIsSecret }}
+          secret:
+            secretName: opa-simulation-config
+          {{- else }}
+          configMap:
+            name: opa-simulation-config
+          {{- end }}
+        {{- end }}
+        - name: opa-persistence
+          emptyDir: {}
+        {{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) }}
+        - name: gcp-token-volume
+          secret:
+            secretName: opa-gcp-token
+        {{- end }}
+      {{- with .Values.opa.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.opa.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

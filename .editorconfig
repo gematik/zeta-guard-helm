@@ -8,3 +8,6 @@ insert_final_newline = true
 max_line_length = 80
 
 ij_visual_guides = 80
+
+[*.yaml]
+ij_yaml_spaces_within_braces = false

@@ -1,40 +1,63 @@
 global:
-  image_pull_secret: nil
-  registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
+  imagePullSecrets: [ ]
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+  infinispanExternal: {}
 
 registry_name: ""
 
+# additionalLabels is a map of labels added to each zeta-guard resource.
+additionalLabels: {}
+
 authserver:
+  replicaCount: 1
+  genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 0.3.2
-    pullPolicy: Always
+    tag: 0.4.1
+  imagePullPolicy: Always
+  imagePullSecrets: [ ]
+  # authserver.podLabels is a map of labels to add to the authserver pod.
+  podLabels: {}
   # Provider configuration for ZETA SMC-B token-exchange implementation
   provider:
     smcB:
       opa:
         enabled: true
       opaBaseUrl: "http://opa:8181"
-      decisionPath: "/v1/data/zeta/authz/decision"
+      opaSimulationBaseUrl: "http://opa-simulation:8181"
+      decisionPath: "/v1/data/policies/zeta/authz/decision"
       connectionTimeoutMs: 1000
       readTimeoutMs: 2000
       failClosed: true
+  smcbHashingPepper:
   admin:
     username: admin
-    # HINT: THIS IS TEMPORARY! CHANGE AT RUNTIME!
-    # TODO: use robust Secret-based strategy
     password:
   config:
     maxClients: "256"
     clientRegistrationTTL: "PT5M"
     clientRegistrationSchedulerInterval: "PT2M"
-  resources: { }
-  # mostly for test setup purposes
+  resources:
+    limits:
+      cpu: "8"
+      memory: "4Gi"
+    requests:
+      cpu: "4"
+      memory: "4Gi"
+  # Mostly for test setup purposes.
   # Adds an entry to the authserver's hosts file, mapping hostAlias.ip to hostAlias.name
   hostAlias: { }
+  dbPool:
+    minSize: 25
+    maxSize: 150
+  httpPool:
+    maxThreads: 200
   log:
     level: "INFO"
+  # podAnnotations is for setting additional Kubernetes Annotations to a Pod.
+  podAnnotations: {}
+  affinity: {}
+  tolerations: []
 
 # authServerLogConsoleOutput sets the log output to JSON or default (plain) unstructured logging
 authServerLogConsoleOutput: json
@@ -46,13 +69,28 @@ authServerMetricsEnabled: true
 authServerTracingEnabled: true
 
 pepproxy:
+  replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 0.3.0
-    pullPolicy: Always
+    tag: 0.4.0
+  imagePullPolicy: Always
+  imagePullSecrets: [ ]
+  # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
+  podLabels: {}
+  resources:
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+    requests:
+      cpu: "250m"
+      memory: "200Mi"
   wellKnownBase: http://localhost
   # boolean that controls if ASL should be enabled (true) or not (false)
   asl_enabled: true
+  #
+  #aslRootCA: "GEM.RCA7 TEST-ONLY"
+  #
+  #aslOcspUrl: "http://example.org/ocsp"
   nginxConf:
     configMapName: pep-nginx-conf
     generateConfigMap: false
@@ -76,9 +114,19 @@ pepproxy:
 
     # requiredScopes defines scopes required for a valid access token.
     requiredScopes: [ ]
+  # podAnnotations is for setting additional Kubernetes Annotations to a Pod.
+  podAnnotations: {}
+  affinity: {}
+  tolerations: []
+  sessionAffinity:
+    enabled: false  # set to true when replicaCount > 1; uses ip-hash (X-Forwarded-For) via NIC
 
 # pepproxyMetricsEnabled enables the metrics endpoint for Keycloak
 pepproxyMetricsEnabled: true
+
+# pepproxyMetricsExporterImage is required if pepproxyMetricsEnabled is true
+# using a fixed version of the "edge" tag since the latest release 1.5.1 has vulnerabilities
+pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter@sha256:0bf30a7c0ec24554a87063905f505a4ae4ea49043eab68f03660474512ba5fc8
 
 # pepproxyTracingEnabled enables tracing for nginx
 pepproxyTracingEnabled: true
@@ -93,31 +141,69 @@ devMode: false
 
 
 # DB mode switch:
-# - bitnami: using Bitnami subchart service/secret only for demo purposes – no support at all
-# - operator: using Zalando Postgres Operator
-# - external: use external db by providing filling values authserverDb.kcDb, authserverDb.kcDbUrl,
-#       authserverDb.kcDbSchema, authserverDb.kcDbUsername, authserverDb.kcDbPasswordSecretName
-#       The db password is pulled from the "password" field of a secret going by the provided name. The other properties
-#       behave according to the keycloak environment variables. See https://www.keycloak.org/server/db
-databaseMode: operator
-postgresql:
-  enabled: false
+# - cloudnative: managed by CloudNativePG operator
+# - external: use external db by providing values authserverDb.kcDb, authserverDb.kcDbUrl, authserverDb.kcDbSchema,
+#       authserverDb.kcDbSecretName
+#       The db username and password are pulled from the respective field of a secret going by the provided name.
+#       The other properties behave according to the keycloak environment variables.
+#       See https://www.keycloak.org/server/db
+authserverDb:
+  kcDb: postgres
+databaseMode: cloudnative
+
+# CloudNativePG settings used when databaseMode=cloudnative.
+# WARNING: instances=1 is only suitable for development/test environments.
+# For production use instances >= 3 to avoid a single point of failure.
+cloudnativePg:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  storage:
+    size: 10Gi
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
 clusterIssuer: ""
+
+# If gematikConnectionEnabled is true, the CronJob gematik-oidc-token-renewer-cronjob is deployed and will maintain a valid access token in the Secret gematik-oidc-token
+gematikConnectionEnabled: true
+
+gematik:
+  # workloadIdentityFederation contains configuration for Google Workload Identity Federation
+  workloadIdentityFederation:
+    # The project number of the project that contains the workload identity pool
+    projectNumber: ""
+    # The ID of the workload identity pool
+    poolId: ""
+    # The ID of the workload identity pool provider
+    workloadIdentityProvider: ""
+
+  # serviceAccountEmailAddress refers to a Google service account to be impersonated
+  serviceAccountEmailAddress: ""
+  # clientId is an OAuth client ID for the IAP-secured resource
+  clientId: "833409780574-lilt6qf6lli28r16b72q3p8epefop2gr.apps.googleusercontent.com"
 
 # IngressClass used by the generated Ingress.
 # - With the bundled NIC: keep equal to nginx-ingress.controller.ingressClass.name.
 # - With an external controller: disable the bundled NIC and set this to your class (e.g., gce, openshift-default).
 ingressClassName: "nginx"
 
-# Ingress configuration extensions
-ingress:
-  annotations: {}
+# If ingressEnabled is true, Ingresses are deployed.
+ingressEnabled: true
+ingressMasterAnnotations: { }
+ingressMinionAnnotations: { }
+
+# If nginxIngressEnabled is true, the nginx-ingress controller is deployed and Ingresses receive annotations.
+nginxIngressEnabled: true
 
 nginx-ingress:
-  enabled: true
   controller:
+    readOnlyRootFilesystem: true
     # We use standard Kubernetes Ingress; disable NIC CRDs to avoid CRD install requirement
     enableCustomResources: false
     ingressClass:
@@ -144,16 +230,22 @@ nginx-ingress:
         # AFOs: A_17775 - use client order
         ssl-prefer-server-ciphers: "false"
         # AFOs: GS-A_5526 - renegotiation disabled by default since v0.8.23
+    resources:
+      limits:
+        cpu: "2"
+        memory: "1Gi"
+      requests:
+        cpu: "250m"
+        memory: "200Mi"
 opa:
   enabled: true
+  # opa.podLabels is a map of labels to add to the opa pod.
+  podLabels: {}
   replicaCount: 1
   serviceAccountName: ""
-  image:
-    # use the default registry here
-    registry: "openpolicyagent"
-    repository: /opa
-    tag: 1.11.0-static
-    pullPolicy: IfNotPresent
+  image: openpolicyagent/opa:1.14.1-static
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: [ ]
   # Set OPA server log level: debug|info|warn|error (default: info)
   logLevel: info
   # Bundle mode (disabled by default) — inline policyRego is used when disabled
@@ -171,8 +263,8 @@ opa:
         # Name of the Secret in the release namespace that holds credentials
         name: ""
     polling:
-      min_delay_seconds: 120
-      max_delay_seconds: 180
+      min_delay_seconds: 60
+      max_delay_seconds: 60
     # Signature verification for OPA bundles
     verification:
       enabled: true
@@ -180,6 +272,14 @@ opa:
       keyId: ""
       algorithm: ""
       publicKey: ""
+      # Optional: must match the scope embedded in the bundle signature. Omit if bundle was signed without a scope.
+      scope: ""
+  simulation:
+    enabled: true
+    replicaCount: 1
+    bundle:
+      # Optional explicit simulation bundle resource. If empty, chart derives from active resource.
+      resource: ""
   # Workload Identity Federation (AKS → GCP STS) for GAR access
   workloadIdentityFederation:
     enabled: false
@@ -194,6 +294,19 @@ opa:
       schedule: "*/45 * * * *"
       # Number of retries for failed Jobs spawned by the CronJob
       backoffLimit: 5
+
+    # opa.workloadIdentityFederation.worker is required if opa.workloadIdentityFederation.enabled is true
+    worker:
+      image: google/cloud-sdk:549.0.0
+      imagePullPolicy: IfNotPresent
+      imagePullSecrets: [ ]
+      resources:
+        limits:
+          cpu: "250m"
+          memory: "200Mi"
+        requests:
+          cpu: "50m"
+          memory: "50Mi"
 
   # --- Example: Workload Identity Federation (WIF) ---
   #
@@ -242,7 +355,22 @@ opa:
       periodSeconds: 20
     readiness:
       periodSeconds: 20
-  resources: {}
+  resources:
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+    requests:
+      cpu: "100m"
+      memory: "200Mi"
+  # podAnnotations is for setting additional Kubernetes Annotations to a Pod.
+  podAnnotations: {}
+  affinity: {}
+  tolerations: []
+
+# Optional: Install CloudNativePG operator in the same namespace (namespace-scoped)
+# Enabled by default so each namespace manages its own operator instance.
+# CRDs remain cluster-scoped and are installed once (the first time the
+# operator is installed in any namespace).
 
 # opaDistributedTracingEnabled enables distributed tracing with a gRPC endpoint
 opaDistributedTracingEnabled: true
@@ -257,10 +385,10 @@ opaPolicy:
   # Default fake policy: allow-all decision object.
   # The policies will be loaded from PIP and PAP Service (workload identity federation or secretRef)
   policyRego: |
-    package zeta.authz
+    package policies.zeta.authz
 
     # Minimal decision object compatible with callers expecting
-    # data.zeta.authz.decision => {"allow": bool, "ttl": {"access_token": number, "refresh_token": number}}
+    # data.policies.zeta.authz.decision => {"allow": bool, "ttl": {"access_token": number, "refresh_token": number}}
     decision := {
       "allow": true,
       "ttl": {
@@ -269,58 +397,13 @@ opaPolicy:
       },
     }
 
-# If logCollectorEnabled is true, pods, services, and other resources for the log collector are added to the helm release
-logCollectorEnabled: true
-
-log-collector:
-  mode: daemonset
-  image:
-    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
-  command:
-    name: otelcol-k8s
-  presets:
-    logsCollection:
-      enabled: true
-    kubernetesAttributes:
-      enabled: true
-  config:
-    exporters:
-      otlp/telemetry-gateway:
-        # ToDo prefix with release name
-        endpoint: telemetry-gateway:4317
-        tls:
-          insecure: true
-
-    receivers:
-      filelog:
-        exclude:
-          - /var/log/pods/*log-collector*/log-collector/*.log
-          - /var/log/pods/*telemetry-gateway*/telemetry-gateway/*.log
-
-    service:
-      pipelines:
-        logs:
-          receivers: [ filelog ]
-          exporters:
-            - otlp/telemetry-gateway
-        metrics:
-          receivers: [ prometheus ]
-          exporters:
-            - otlp/telemetry-gateway
-        traces: null
-
-  ports:
-    jaeger-compact:
-      enabled: false
-    jaeger-thrift:
-      enabled: false
-    jaeger-grpc:
-      enabled: false
-    zipkin:
-      enabled: false
-
-  additionalLabels:
-    app.kubernetes.io/part-of: zeta-guards
+# Add openshift route
+openshiftRoute:
+  enabled: false
+#  host:
+#  issuer:
+#    issuerName:
+#    secretName:
 
 # telemetryGatewayEnabled adds the telemetry gateway to the helm release
 telemetryGatewayEnabled: true
@@ -331,12 +414,28 @@ telemetry-gateway:
     repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
   command:
     name: otelcol-k8s
-  presets:
-    kubernetesAttributes:
-      enabled: true
-      extractAllPodLabels: true
-      extractAllPodAnnotations: true
+  resources:
+    limits:
+      cpu: "4"
+      memory: "2Gi"
+    requests:
+      cpu: "100m"
+      memory: "200Mi"
   config:
+    exporters:
+      otlp_grpc/gematik:
+        endpoint: otlp.v1.bd.prod.ccs.gematik.solutions:443
+        tls:
+          cert_file: "/etc/tls/tls.crt"
+          key_file: "/etc/tls/tls.key"
+          reload_interval: 24h
+        auth:
+          authenticator: bearertokenauth/gematik
+
+    extensions:
+      bearertokenauth/gematik:
+        filename: "/etc/gcp/token"
+
     processors:
       redaction/betreiber:
         # by default, keep all attributes
@@ -457,18 +556,41 @@ telemetry-gateway:
                 - targets: [ "${env:MY_POD_IP}:8888" ]
 
     service:
+      extensions:
+        - bearertokenauth/gematik
+        - health_check
       pipelines:
         logs:
-          receivers: [ otlp ]
-          exporters: [ debug ]
+          receivers:
+            - otlp
+          exporters:
+            - otlp_grpc/gematik
         metrics:
           receivers:
             - otlp
             - prometheus
-          exporters: [ debug ]
+          exporters:
+            - debug
         traces:
-          receivers: [ otlp ]
-          exporters: [ debug ]
+          receivers:
+            - otlp
+          exporters:
+            - otlp_grpc/gematik
+
+  extraVolumeMounts:
+    - name: gcp-token
+      mountPath: /etc/gcp
+      readOnly: true
+    - name: tls
+      mountPath: /etc/tls
+      readOnly: true
+  extraVolumes:
+    - name: gcp-token
+      secret:
+        secretName: gematik-oidc-token
+    - name: tls
+      secret:
+        secretName: zeta-guard-tls
 
   ports:
     jaeger-compact:
@@ -481,5 +603,3 @@ telemetry-gateway:
       enabled: false
   additionalLabels:
     app.kubernetes.io/part-of: zeta-guards
-
-gematikConnectionEnabled: false   # will be enabled by default in a future release

@@ -19,7 +19,7 @@ You need to add an exporter to the telemetry gateway's configuration in
 telemetry-gateway:
   config:
     exporters:
-      otlp/test-monitoring-service:
+      otlp_grpc/test-monitoring-service:
         # endpoint: SERVICE.NAMESPACE.svc.cluster.local:4317
         endpoint: opentelemetry-collector.test-monitoring.svc.cluster.local:4317
 ```

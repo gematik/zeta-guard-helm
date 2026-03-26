@@ -1,0 +1,20 @@
+{{- if .Values.openshiftRoute.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zeta-guard-openshift-route
+  labels:
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/issuer: {{ .Values.openshiftRoute.issuer.issuerName }}
+spec:
+  host: {{ .Values.openshiftRoute.host }}
+  to:
+    kind: Service
+    name: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "authserver" }}
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}

@@ -3,13 +3,10 @@ kind: Service
 metadata:
   name: authserver
   labels:
-    app.kubernetes.io/name: authserver
-    app.kubernetes.io/component: pdp
-    app.kubernetes.io/version: {{ .Values.authserver.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "authserver.labels" . | nindent 4 }}
 spec:
   selector:
-    app: authserver
+    {{- include "authserver.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: 80
@@ -20,6 +17,6 @@ spec:
     {{- if .Values.devMode }}
     - name: jdwp
       port: 5005
-      targetPort: 5005
+      targetPort: jdwp
     {{- end }}
   type: ClusterIP

@@ -14,10 +14,14 @@ terraform-provider-*
 /kind-local.yaml
 /private/
 /terraform/
+/rendered.yaml
 Makefile
 /opa_bundle/
+/ci/
 
 # do not remove
 .envrc.local
 .smb_keystore
 .smb_keystore_pw
+/testsuite/
+/tmp/

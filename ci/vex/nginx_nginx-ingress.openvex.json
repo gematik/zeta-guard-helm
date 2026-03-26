@@ -1,0 +1,83 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
+  "author": "Unknown Author",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-25646"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libpng16-16t64"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-68431"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libheif-plugin-dav1d"
+        },
+        {
+          "@id": "pkg:deb/debian/libheif-plugin-libde265"
+        },
+        {
+          "@id": "pkg:deb/debian/libheif1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-59375"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libexpat1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-24051"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/go.opentelemetry.io/otel/sdk"
+        }
+      ],
+      "status": "not_affected",
+      "status_note": "MacOS is not a supported production platform.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33186"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Affects gRPC servers with auth interceptors on :path. nginx-agent is a gRPC client only (connects to NMS); no gRPC server is run. NMS is not deployed.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-03-23T11:00:00Z"
+    }
+  ],
+  "timestamp": "2026-02-27T15:41:26Z",
+  "last_updated": "2026-03-23T11:00:00Z"
+}

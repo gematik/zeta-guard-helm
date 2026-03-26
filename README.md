@@ -15,11 +15,12 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
   - `charts/exauthsim`,
   - `charts/test-driver`
   - `charts/tiger-testsuite` (Tiger based regression service + Workflow UI)
+  - `charts/zeta-tls-test-tool-service` (optional TLS Test Tool control service)
 
 ## Notes
 - Re-run `make deps` after changing `Chart.yaml` or any `charts/*/Chart.yaml`.
 - Commit `Chart.lock` so CI stays in sync with local dependency resolution.
-- The Zalando Postgres Operator is intentionally NOT a chart dependency here; install it once per cluster with Terraform.
+- The cloudnative-pg Operator is intentionally NOT a chart dependency here; install it once per cluster with Terraform.
 
 ## Installing zeta-guard
 
@@ -70,6 +71,28 @@ Given that kubectl is using the correct context, you can install the helm chart 
 
 ### During development
 
+#### Local TLS Test Tool control service with KIND
+
+The umbrella chart includes an optional `zeta-tls-test-tool-service` subchart for managing the
+bundled TLS Test Tool inside the cluster. It is enabled in the local values profiles via
+`zetaTlsTestToolServiceEnabled: true`.
+
+1. Build and load the image into the local kind cluster:
+
+```shell
+docker build -t zeta-tls-test-tool-service:latest ../zeta-tls-test-tool-service
+kind load docker-image zeta-tls-test-tool-service:latest --name zeta-local
+```
+
+2. Deploy the local profile:
+
+```shell
+make deploy stage=local
+```
+
+The service is reachable inside the cluster at
+`http://zeta-tls-test-tool-service.<namespace>.svc.cluster.local`.
+
 #### Registry & Tag
 
 During development,
@@ -96,7 +119,7 @@ zeta-guard:
       tag: 0.1.3-canary
 ```
 
-#### Image pull secret
+#### Image pull secrets
 
 During development, you may pull images from a private registry.
 You can create an appropriate image pull secret in your cluster as follows
@@ -114,8 +137,9 @@ After creating the image pull secret, you can use it in the helm chart via the f
 
 ```yaml
 global:
-  # use this image pull secret
-  image_pull_secret: my-image-pull-secret-name
+  imagePullSecrets:
+    # use this image pull secret
+    - name: my-image-pull-secret-name
 ```
 
 #### OPA bundle credentials (registry access)
@@ -191,7 +215,7 @@ Render checks:
 ## Additional documentation
 
 * Explanations
-    * [Postgres Operator](docs/explanations/Postgres_operator.md)
+    * [Postgres Operator](docs/explanations/CloudNativePG.md)
 * How-to guides
     * [How to configure ZETA Guard Authserver](docs/how-to_guides/How_to_configure_authserver.md)
     * [How to create a docker-registry type secret for accessing the GitLab container registry](docs/how-to_guides/How_to_create_a_docker_registry_secret.md)

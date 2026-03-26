@@ -17,10 +17,18 @@ nodes:
       - containerPort: 32098
         hostPort: 9200
         protocol: TCP
+      - containerPort: 32090
+        hostPort: 9090
+        protocol: TCP
       - containerPort: 32010
         hostPort: 9010
         protocol: TCP
       - containerPort: 32011
         hostPort: 9011
         protocol: TCP
+      - containerPort: 32012
+        hostPort: 9012
+        protocol: TCP
+
+  - role: worker
   - role: worker

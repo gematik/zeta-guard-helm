@@ -1,14 +1,16 @@
-{{- define "opa.policyRego" -}}
+{{ define "opa.policyRego" -}}
 {{ required "zeta-guard.opaPolicy.policyRego must be set (Rego v1 policy)" .Values.opaPolicy.policyRego }}
 {{- end }}
 
-{{- define "opa.configYaml" }}
+{{ define "opa.configYaml" }}
 {{- if .Values.opaPolicy.logDecisions }}
 decision_logs:
   console: true
 
 distributed_tracing:
-  {{ if .Values.opaDistributedTracingEnabled }}type: grpc{{ end }}
+{{- if .Values.opaDistributedTracingEnabled }}
+  type: grpc
+{{- end }}
   address: {{ include "telemetryGateway.hostname" . }}:4317
 
 status:
@@ -16,15 +18,33 @@ status:
 {{- end }}
 {{- end }}
 
-{{- define "opa.bundleConfigYaml" }}
+{{/*
+  Helper: opa.simBundleResource
+  Derives the simulation bundle resource string.
+  Uses opa.simulation.bundle.resource if explicitly set; otherwise appends "-sim" to the active resource.
+  Only call this when opa.bundle.enabled=true.
+*/}}
+{{ define "opa.simBundleResource" -}}
+{{- if .Values.opa.simulation.bundle.resource -}}
+  {{- .Values.opa.simulation.bundle.resource -}}
+{{- else -}}
+  {{- $active := required "opa.bundle.resource is required when bundle.enabled=true" .Values.opa.bundle.resource -}}
+  {{- printf "%s-sim" $active -}}
+{{- end -}}
+{{- end }}
+
+{{ define "opa.bundleConfigYaml" }}
+{{- /* Support both direct call (.) and parameterized call (dict "ctx" . "bundleResource" "..."). */ -}}
+{{- $ctx := .ctx | default . }}
+{{- $bundleResource := .bundleResource | default $ctx.Values.opa.bundle.resource }}
 {{- $token := "" }}
-{{- $wif := .Values.opa.workloadIdentityFederation }}
+{{- $wif := $ctx.Values.opa.workloadIdentityFederation }}
 {{- $useWif := (and $wif $wif.enabled) | default false }}
-{{- $secretRef := .Values.opa.bundle.credentials.secretRef }}
+{{- $secretRef := $ctx.Values.opa.bundle.credentials.secretRef }}
 {{- $useSecret := (and (not $useWif) $secretRef $secretRef.name) }}
 
 {{- if $useSecret }}
-  {{- with (lookup "v1" "Secret" $.Release.Namespace $secretRef.name) }}
+  {{- with (lookup "v1" "Secret" $ctx.Release.Namespace $secretRef.name) }}
     {{- with .data }}
       {{- with index . "token" }}{{- $token = b64dec . }}{{- end }}
     {{- end }}
@@ -32,9 +52,9 @@ status:
 {{- end }}
 
 services:
-  {{ required "opa.bundle.serviceName is required when bundle.enabled=true" .Values.opa.bundle.serviceName }}:
-    {{- if .Values.opa.bundle.url }}
-    url: {{ .Values.opa.bundle.url | quote }}
+  {{ required "opa.bundle.serviceName is required when bundle.enabled=true" $ctx.Values.opa.bundle.serviceName }}:
+    {{- if $ctx.Values.opa.bundle.url }}
+    url: {{ $ctx.Values.opa.bundle.url | quote }}
     {{- end }}
     type: oci
     {{- if $useSecret }}
@@ -56,16 +76,19 @@ services:
 
 bundles:
   authz:
-    service: {{ .Values.opa.bundle.serviceName | quote }}
-    resource: {{ required "opa.bundle.resource is required when bundle.enabled=true" .Values.opa.bundle.resource | quote }}
+    service: {{ $ctx.Values.opa.bundle.serviceName | quote }}
+    resource: {{ required "opa.bundle.resource is required when bundle.enabled=true" $bundleResource | quote }}
     persist: true
     polling:
-      min_delay_seconds: {{ .Values.opa.bundle.polling.min_delay_seconds }}
-      max_delay_seconds: {{ .Values.opa.bundle.polling.max_delay_seconds }}
-    {{- $verif := .Values.opa.bundle.verification }}
+      min_delay_seconds: {{ $ctx.Values.opa.bundle.polling.min_delay_seconds }}
+      max_delay_seconds: {{ $ctx.Values.opa.bundle.polling.max_delay_seconds }}
+    {{- $verif := $ctx.Values.opa.bundle.verification }}
     {{- if and $verif.enabled $verif.keyId }}
     signing:
       keyid: {{ $verif.keyId | quote }}
+      {{- if $verif.scope }}
+      scope: {{ $verif.scope | quote }}
+      {{- end }}
     {{- end }}
 {{- if and $verif.enabled $verif.keyId $verif.publicKey }}
 keys:
@@ -75,8 +98,7 @@ keys:
 {{ $verif.publicKey | nindent 6 }}
 {{- end }}
 
-
-{{- if .Values.opaPolicy.logDecisions }}
+{{- if $ctx.Values.opaPolicy.logDecisions }}
 decision_logs:
   console: true
 {{- end }}
@@ -84,5 +106,5 @@ decision_logs:
 persistence_directory: /var/opa
 
 status:
-  prometheus: {{ .Values.opaStatusPrometheus }}
+  prometheus: {{ $ctx.Values.opaStatusPrometheus }}
 {{- end -}}

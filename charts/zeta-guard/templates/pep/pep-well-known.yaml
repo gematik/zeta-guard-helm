@@ -3,11 +3,10 @@ kind: ConfigMap
 metadata:
   name: pep-well-known
   labels:
-    app.kubernetes.io/name: pep-proxy
-    app.kubernetes.io/component: pep
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "pep-proxy.labels" . | nindent 4 }}
 data:
-# {{ .Values.authserver.hostname }}
+  # TODO: brauchen wir das?
+  # {{ .Values.authserver.hostname }}
 {{- range $path, $file := .Files.Glob "files/well-known/*" }}
   {{ base $path }}: |-
 {{ tpl ($file | toString) $ | indent 4 }}

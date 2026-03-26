@@ -1,15 +1,9 @@
 dependencies:
 - name: nginx-ingress
   repository: oci://ghcr.io/nginx/charts
-  version: 2.4.2
+  version: 2.5.0
 - name: opentelemetry-collector
   repository: https://open-telemetry.github.io/opentelemetry-helm-charts
-  version: 0.144.0
-- name: opentelemetry-collector
-  repository: https://open-telemetry.github.io/opentelemetry-helm-charts
-  version: 0.144.0
-- name: postgresql
-  repository: oci://registry-1.docker.io/bitnamicharts
-  version: 15.5.38
-digest: sha256:1708ef3d890e15c5b7f315043676b312f175186763fd3d5a915fcbd397e9a29d
-generated: "2026-02-02T15:34:58.654685+01:00"
+  version: 0.147.1
+digest: sha256:6b0556d9371a2321b4c9c6c67e861adb493d904548d040ad052285496890269a
+generated: "2026-03-23T11:44:33.481429+01:00"

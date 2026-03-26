@@ -4,16 +4,30 @@ kind: Service
 metadata:
   name: opa
   labels:
-    app.kubernetes.io/name: opa
-    app.kubernetes.io/component: pdp
-    app.kubernetes.io/version: {{ .Values.opa.image.tag | quote }}
-    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    {{- include "opa.labels" . | nindent 4 }}
 spec:
   selector:
-    app: opa
+    {{- include "opa.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: 8181
       targetPort: http
   type: ClusterIP
+{{- if .Values.opa.simulation.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa-simulation
+  labels:
+    {{- include "opaSimulation.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "opaSimulation.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 8181
+      targetPort: http
+  type: ClusterIP
+{{- end }}
 {{- end }}

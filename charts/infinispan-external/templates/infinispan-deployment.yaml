@@ -1,0 +1,65 @@
+{{- if and .Values.global.infinispanExternal.enabled (not .Values.global.infinispanExternal.remote.host) (not .Values.global.infinispanExternal.remote.port)}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infinispan
+spec:
+  replicas: {{.Values.global.infinispanExternal.replicaCount}}
+  selector:
+    matchLabels:
+      app: infinispan
+  template:
+    metadata:
+      labels:
+        app: infinispan
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: infinispan
+          image: infinispan/server:15.2
+          ports:
+            - containerPort: 11222
+            - containerPort: 7800
+          args:
+            - "--server-config=/server/conf-custom/infinispan-config.xml"
+          env:
+            - name: USER
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.global.infinispanExternal.admin.secretName }}
+                  name: {{ .Values.global.infinispanExternal.admin.secretName }}
+                  {{- else }}
+                  name: infinispan-admin
+                  {{- end }}
+                  key: username
+            - name: PASS
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.global.infinispanExternal.admin.secretName }}
+                  name: {{ .Values.global.infinispanExternal.admin.secretName }}
+                  {{- else }}
+                  name: infinispan-admin
+                  {{- end }}
+                  key: password
+            - name: JAVA_OPTIONS
+              value: >
+                -Djgroups.dns.query=infinispan
+                -Djgroups.dns.record.type=A
+                -Dinfinispan.cluster.name=k8s-cluster
+                -Dinfinispan.cluster.stack=kubernetes
+          volumeMounts:
+            - name: infinispan-config
+              mountPath: /server/conf-custom/
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ "ALL" ]
+      volumes:
+        - name: infinispan-config
+          configMap:
+            name: infinispan-config
+{{- end}}

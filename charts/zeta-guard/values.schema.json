@@ -4,6 +4,11 @@
     "authserver": {
       "type": "object",
       "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of authserver (Keycloak) replicas."
+        },
         "admin": {
           "type": "object",
           "properties": {
@@ -16,6 +21,98 @@
                 "string",
                 "null"
               ]
+            }
+          }
+        },
+        "genesisHash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Initial hash for admin events log (required for first install)"
+        },
+        "smcbHashingPepper": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Pepper value for SMCB hashing (required for first install)"
+        },
+        "image": {
+          "$ref": "#/$defs/ZetaImage"
+        },
+        "hostname": {
+          "type": "string",
+          "description": "External hostname for the Keycloak authserver (passed as --hostname)."
+        },
+        "dbPool": {
+          "type": "object",
+          "properties": {
+            "minSize": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Keycloak --db-pool-min-size: minimum number of idle DB connections."
+            },
+            "maxSize": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Keycloak --db-pool-max-size: maximum number of DB connections."
+            }
+          }
+        },
+        "httpPool": {
+          "type": "object",
+          "properties": {
+            "maxThreads": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Keycloak --http-pool-max-threads: maximum number of Undertow worker threads."
+            }
+          }
+        },
+        "imagePullSecrets": {
+          "$ref": "#/$defs/K8sImagePullSecrets"
+        },
+        "provider": {
+          "type": "object",
+          "properties": {
+            "smcB": {
+              "type": "object",
+              "properties": {
+                "opa": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Enable OPA policy enforcement for SMC-B token exchange."
+                    }
+                  }
+                },
+                "opaBaseUrl": {
+                  "type": "string",
+                  "description": "Base URL of the active OPA instance (e.g. http://opa:8181)."
+                },
+                "opaSimulationBaseUrl": {
+                  "type": "string",
+                  "description": "Base URL of the OPA simulation instance. Set to empty string to disable shadow calls (e.g. http://opa-simulation:8181)."
+                },
+                "decisionPath": {
+                  "type": "string",
+                  "description": "OPA decision endpoint path (e.g. /v1/data/policies/zeta/authz/decision)."
+                },
+                "connectionTimeoutMs": {
+                  "type": "integer",
+                  "description": "HTTP connection timeout in milliseconds for OPA requests."
+                },
+                "readTimeoutMs": {
+                  "type": "integer",
+                  "description": "HTTP read timeout in milliseconds for OPA requests."
+                },
+                "failClosed": {
+                  "type": "boolean",
+                  "description": "When true, deny the token exchange if OPA is unreachable (503). When false, allow."
+                }
+              }
             }
           }
         }
@@ -38,41 +135,26 @@
       "type": "object",
       "properties": {
         "clientId": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "serviceAccountEmailAddress": {
-          "type": "string",
-          "minLength": 5
+          "type": "string"
         },
         "workloadIdentityFederation": {
           "type": "object",
           "properties": {
             "projectNumber": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "poolId": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "workloadIdentityProvider": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             }
-          },
-          "required": [
-            "projectNumber",
-            "poolId",
-            "workloadIdentityProvider"
-          ]
+          }
         }
-      },
-      "required": [
-        "clientId",
-        "serviceAccountEmailAddress",
-        "workloadIdentityFederation"
-      ]
+      }
     },
     "gematikConnectionEnabled": {
       "type": "boolean"
@@ -80,6 +162,9 @@
     "global": {
       "type": "object",
       "properties": {
+        "imagePullSecrets": {
+          "$ref": "#/$defs/K8sImagePullSecrets"
+        },
         "registry_host": {
           "type": "string"
         }
@@ -87,12 +172,6 @@
       "required": [
         "registry_host"
       ]
-    },
-    "log-collector": {
-      "type": "object"
-    },
-    "logCollectorEnabled": {
-      "type": "boolean"
     },
     "opaDistributedTracingEnabled": {
       "type": "boolean"
@@ -103,11 +182,10 @@
     "databaseMode": {
       "type": "string",
       "enum": [
-        "operator",
         "external",
-        "bitnami"
+        "cloudnative"
       ],
-      "description": "Where the database credentials are sourced from. If 'operator' then nothing else needs to be done. If 'external', also see value 'authserverDb'."
+      "description": "Where the database credentials are sourced from. 'cloudnative' (CloudNativePG) or 'external' (supply authserverDb)."
     },
     "authserverDb": {
       "type": "object",
@@ -121,13 +199,9 @@
           "type": "string",
           "description": "See environment variable KC_DB_URL in keycloak config https://www.keycloak.org/server/db"
         },
-        "kcDbUsername": {
+        "kcDbSecretName": {
           "type": "string",
-          "description": "See environment variable KC_DB_USERNAME in keycloak config https://www.keycloak.org/server/db"
-        },
-        "kcDbPasswordSecretName": {
-          "type": "string",
-          "description": "Name of a secret that contains the database password in its field 'password'. Will be passed into environment variable KC_DB_PASSWORD. See keycloak config https://www.keycloak.org/server/db"
+          "description": "Name of a secret that contains the database username and password in its fields `username` and 'password'. Will be passed into environment variables KC_DB_USERNAME and KC_DB_PASSWORD. See keycloak config https://www.keycloak.org/server/db"
         },
         "kcDbSchema": {
           "type": "string",
@@ -135,9 +209,58 @@
         }
       }
     },
+    "cloudnativePg": {
+      "type": "object",
+      "description": "Relevant only for databaseMode=cloudnative. Configures the managed CloudNativePG cluster.",
+      "properties": {
+        "instances": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of PostgreSQL instances in the CloudNativePG cluster. Use 1 for development/test only. Production deployments require >= 3 to avoid a single point of failure."
+        },
+        "imageName": {
+          "type": "string",
+          "description": "Container image for the CloudNativePG PostgreSQL cluster."
+        },
+        "resources": {
+          "$ref": "#/$defs/K8sResourceRequirements"
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "size": {
+              "type": "string",
+              "description": "Persistent volume size for the CloudNativePG cluster (for example: 10Gi)."
+            }
+          }
+        }
+      }
+    },
     "pepproxy": {
       "type": "object",
       "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of PEP proxy (Nginx) replicas."
+        },
+        "asl_enabled": {
+          "type": "boolean"
+        },
+        "aslRootCA": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aslOcspUrl": {
+          "type": "string",
+          "minLength": 1
+        },
+        "image": {
+          "$ref": "#/$defs/ZetaImage"
+        },
+        "imagePullSecrets": {
+          "$ref": "#/$defs/K8sImagePullSecrets"
+        },
         "nginxConf": {
           "type": "object",
           "properties": {
@@ -213,6 +336,21 @@
               }
             }
           ]
+        },
+        "resources": {
+          "$ref": "#/$defs/K8sResourceRequirements"
+        },
+        "sessionAffinity": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable ip-hash sticky sessions via NIC (hash $http_x_forwarded_for). Required when replicaCount > 1."
+            }
+          },
+          "required": [
+            "enabled"
+          ]
         }
       },
       "required": [
@@ -274,6 +412,9 @@
                 },
                 "publicKey": {
                   "type": "string"
+                },
+                "scope": {
+                  "type": "string"
                 }
               }
             },
@@ -292,11 +433,62 @@
             }
           }
         },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of OPA replicas."
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "description": "OPA server log level."
+        },
+        "image": {
+          "type": "string"
+        },
+        "imagePullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "imagePullSecrets": {
+          "$ref": "#/$defs/K8sImagePullSecrets"
+        },
+        "resources": {
+          "$ref": "#/$defs/K8sResourceRequirements"
+        },
         "workloadIdentityFederation": {
           "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
+            }
+          }
+        },
+        "simulation": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "replicaCount": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "bundle": {
+              "type": "object",
+              "properties": {
+                "resource": {
+                  "type": "string"
+                }
+              }
             }
           }
         }
@@ -378,15 +570,16 @@
         }
       ]
     },
-    "ingress": {
+    "ingressMasterAnnotations": {
       "type": "object",
-      "properties": {
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "ingressMinionAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
       }
     },
     "routeViaTigerProxy": {
@@ -398,12 +591,12 @@
     "clusterIssuer": {
       "type": "string"
     },
+    "nginxIngressEnabled": {
+      "type": "boolean"
+    },
     "nginx-ingress": {
       "type": "object",
       "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
         "controller": {
           "type": "object",
           "properties": {
@@ -494,7 +687,6 @@
     "authServerTracingEnabled",
     "gematikConnectionEnabled",
     "global",
-    "logCollectorEnabled",
     "opaDistributedTracingEnabled",
     "opaStatusPrometheus",
     "pepproxy",
@@ -502,22 +694,65 @@
     "pepproxyTracingEnabled",
     "telemetryGatewayEnabled"
   ],
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "gematikConnectionEnabled": {
-            "const": true
-          }
+  "title": "Values",
+  "type": "object",
+  "$defs": {
+    "ZetaImage": {
+      "type": "object",
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-z0-9+._-]+:[a-zA-Z0-9=_-]+$"
+        },
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$"
+        }
+      }
+    },
+    "K8sImagePullSecrets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/K8sLocalObjectReference"
+      }
+    },
+    "K8sLocalObjectReference": {
+      "$comment": "Siehe https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/local-object-reference/#LocalObjectReference",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
         }
       },
-      "then": {
-        "required": [
-          "gematik"
-        ]
+      "required": [
+        "name"
+      ]
+    },
+    "K8sResourceRequirements": {
+      "$comment": "https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#resources",
+      "type": "object",
+      "description": "Compute Resources required by this container. ",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "requests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
       }
     }
-  ],
-  "title": "Values",
-  "type": "object"
+  }
 }

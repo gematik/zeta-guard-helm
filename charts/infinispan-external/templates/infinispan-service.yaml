@@ -1,0 +1,19 @@
+{{- if and .Values.global.infinispanExternal.enabled (not .Values.global.infinispanExternal.remote.host) (not .Values.global.infinispanExternal.remote.port)}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: infinispan
+  labels:
+    app: infinispan
+spec:
+  clusterIP: None
+  ports:
+    - name: infinispan
+      port: 11222
+      targetPort: 11222
+    - name: jgroups
+      port: 7800
+      targetPort: 7800
+  selector:
+    app: infinispan
+{{- end}}

@@ -16,11 +16,65 @@ data:
       fileSaveInfo:
         writeToFile: {{ .Values.proxyConfig.fileSaveInfo.writeToFile }}
         fileName: {{ .Values.proxyConfig.fileSaveInfo.fileName }}
-      proxyRoutes: {{ range $route := .Values.proxyConfig.proxyRoutes }}
+      proxyRoutes:{{ range $route := .Values.proxyConfig.proxyRoutes }}
       - from: {{ $route.from }}
         to: {{ $route.to }}
-      {{ end }}
+      {{- end }}
       {{- with .Values.proxyConfig.tls }}
       tls:
 {{ toYaml . | indent 8 }}
       {{- end }}
+
+  application.grpc.yaml: |
+    tigerProxy:
+      proxyPort: 14137
+      adminPort: 19999
+      proxyLogLevel: {{ .Values.proxyConfig.proxyLogLevel }}
+      activateRbelParsing: {{ .Values.proxyConfig.activateRbelParsing }}
+      parsingShouldBlockCommunication: {{ .Values.proxyConfig.parsingShouldBlockCommunication }}
+      {{- if .Values.proxyConfig.directReverseProxy }}
+      directReverseProxy:
+        hostname: {{ .Values.proxyConfig.directReverseProxy.hostname }}
+        port: {{ .Values.proxyConfig.directReverseProxy.port }}
+        ignoreConnectionErrors: {{ default false .Values.proxyConfig.directReverseProxy.ignoreConnectionErrors }}
+      {{- end }}
+
+  nginx.conf: |
+    worker_processes auto;
+    error_log  /dev/stdout warn;
+    pid        /tmp/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include       /etc/nginx/mime.types;
+      default_type  application/octet-stream;
+
+      access_log  /dev/stdout;
+
+      keepalive_timeout 65;
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+
+      server {
+        listen 4138 http2;
+        client_max_body_size {{ .Values.proxyConfig.otlpHttpClientMaxBodySize }};
+
+        location / {
+          proxy_pass http://127.0.0.1:{{ .Values.proxyConfig.proxyPort }}/telemetry/gateway/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+        }
+      }
+    }
+    # stream {
+    #   server {
+    #     listen 4137;
+    #     proxy_pass 127.0.0.1:14137;
+    #   }
+    # }

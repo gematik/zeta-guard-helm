@@ -2,6 +2,65 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 0.4.1
+
+### added:
+
+- Configurable authserver DB connection pool and HTTP thread pool
+- Configurable resource limits and requests
+
+### changed:
+
+- Updated OPA and NGINX-Ingress
+
+### removed:
+
+- Removed log-collector component
+
+## Release 0.4.0
+
+### added:
+
+- Support for container image digests in compound `image` values
+- Support for custom affinities, labels, pod annotations and tolerances
+- Support for individual security context per pod
+- Support for OpenShift compatibility
+- OPA simulation support
+- Enabled telemetry delivery to gematik by default
+- Configurable replica counts
+- PEP sticky sessions for multi-replica deployments
+- Support for external Infinispan
+
+### changed:
+
+- `GENESIS_HASH` and `SMCB_HASHING_PEPPER` are now provided exclusively via Kubernetes Secrets and are no longer configured directly in the template file. These values must be present in the respective values.yaml during the initial deployment; for upgrades, existing Secrets are retained.
+- For external database configurations, both the Keycloak database username and password are now expected as keys within the same Kubernetes Secret (`authserverDb.kcDbSecretName`).
+- Charts have been tested with RedHats local OpenShift testplatform, CodeReady Containers (CRC) with standard pod security `restricted-v2`.
+- It is now possible to set the `securityContext` on a per-pod basis via Helm values.
+- Support for lists of image pull secrets and aligned values with Kubernetes
+  syntax
+- Database modes: only `cloudnative` (CloudNativePG) and `external` are
+  supported. Use a single cluster-wide CloudNativePG operator.
+- `opa.image` is now a string value instead of a compound value.
+- Container images of CronJobs and nginx-prometheus-exporter are now
+  configurable.
+- Aligned values for image pull policies with Kubernetes syntax.
+- Updated OpenTelemetry collector to version 0.147.0.
+- Updated OpenPolicyAgent to version 1.14.0-static.
+- **BREAKING CHANGE** Pod selectors now use Kubernetes' well-known labels
+- Configurable smc-b keystore
+- The chart's Ingresses have become optional, and you can configure their annotations.
+- `nginx-ingress.enabled` has been replaced by `nginxIngressEnabled`.
+- k8sattributes processor deactivated for log-collector and telemetry-gateway
+- Restricted log collection to OPA pods and containers.
+
+### removed:
+
+- Support for Bitnami PostgreSQL subchart removed.
+- Support for Zalando Postgres Operator removed (`databaseMode: operator` no
+  longer available).
+- Unused value `global.registry`
+- Labels containing container image tags
 
 ## Release 0.3.2
 
