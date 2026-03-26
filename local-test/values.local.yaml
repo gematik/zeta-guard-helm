@@ -227,7 +227,7 @@ zeta-guard:
     hostname: zeta-kind.local
     http_enabled: true
     image:
-      tag: 0.4.0
+      tag: 0.4.1
     imagePullPolicy: IfNotPresent
     log:
       level: "INFO,de.gematik.zeta.zetaguard:debug"
