@@ -40,9 +40,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       {{- $wif := .Values.opa.workloadIdentityFederation }}
-      {{- if .Values.opa.serviceAccountName }}
-      serviceAccountName: {{ .Values.opa.serviceAccountName | quote }}
-      {{- end }}
+      serviceAccountName: opa
       {{- with .Values.opa.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
