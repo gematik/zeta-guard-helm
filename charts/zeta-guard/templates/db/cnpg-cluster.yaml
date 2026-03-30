@@ -8,6 +8,7 @@ metadata:
 spec:
   instances: {{ .Values.cloudnativePg.instances }}
   imageName: {{ .Values.cloudnativePg.imageName | quote }}
+  imagePullPolicy: {{ .Values.cloudnativePg.imagePullPolicy | default "IfNotPresent" }}
   storage:
     size: {{ .Values.cloudnativePg.storage.size | quote }}
   {{- with .Values.cloudnativePg.resources }}
