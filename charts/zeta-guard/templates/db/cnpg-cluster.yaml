@@ -6,6 +6,9 @@ metadata:
   labels:
     app.kubernetes.io/part-of: zeta-guard
 spec:
+  {{- with .Values.cloudnativePg.affinity }}
+  affinity: {{ .toYaml . | nindent 4 }}
+  {{- end }}
   instances: {{ .Values.cloudnativePg.instances }}
   imageName: {{ .Values.cloudnativePg.imageName | quote }}
   storage:
