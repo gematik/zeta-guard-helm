@@ -233,8 +233,8 @@ spec:
                 secretKeyRef:
                   name: smcb-hashing-pepper
                   key: pepper
-            # DB wiring switches by databaseMode value (cloudnative|external)
-            {{- if eq .Values.databaseMode "cloudnative" }}
+            # DB wiring switches for internal(cloudnativepg) and external
+            {{- if .Values.cloudnativePg.enabled }}
             # CloudNativePG-backed DB
             - name: KC_DB
               value: "postgres"
