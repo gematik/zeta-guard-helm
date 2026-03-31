@@ -5,7 +5,7 @@
 * Kubernetes 1.19+ is required for OpenTelemetry Operator installation
 * Helm 4.0+
 * [cert-manager](https://cert-manager.io/)
-* [CloudNativePG operator](https://cloudnative-pg.io/) (single cluster-wide operator; required when `zeta-guard.databaseMode: cloudnative`)
+* [CloudNativePG operator](https://cloudnative-pg.io/) (single cluster-wide operator; required when `zeta-guard.cloudnativePg.enabled: true`)
 
 ## How to install the requirements
 
