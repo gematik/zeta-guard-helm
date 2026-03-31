@@ -179,17 +179,9 @@
     "opaStatusPrometheus": {
       "type": "boolean"
     },
-    "databaseMode": {
-      "type": "string",
-      "enum": [
-        "external",
-        "cloudnative"
-      ],
-      "description": "Where the database credentials are sourced from. 'cloudnative' (CloudNativePG) or 'external' (supply authserverDb)."
-    },
     "authserverDb": {
       "type": "object",
-      "description": "Relevant only for databaseMode=external . This is how you can configure your own DB.",
+      "description": "Relevant only for cloudnativePg.enabled=false . This is how you can configure your own DB.",
       "properties": {
         "kcDb": {
           "type": "string",
@@ -211,8 +203,11 @@
     },
     "cloudnativePg": {
       "type": "object",
-      "description": "Relevant only for databaseMode=cloudnative. Configures the managed CloudNativePG cluster.",
+      "description": "Relevant only for cloudnativePg.enabled=true. Configures the managed CloudNativePG cluster.",
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "instances": {
           "type": "integer",
           "minimum": 1,

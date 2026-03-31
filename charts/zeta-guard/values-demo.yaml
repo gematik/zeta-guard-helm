@@ -53,9 +53,10 @@ pepproxy:
       }
 
 # DB mode switch:
-# - cloudnative: using CloudNativePG operator
-# - external: use external db by providing values in authserverDb.*
-databaseMode: cloudnative
+# - true: using CloudNativePG operator
+# - false: use external db by providing values in authserverDb.*
+cloudnativePg:
+  enabled: true
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
 clusterIssuer: "letsencrypt-cd"

@@ -14,3 +14,8 @@ dependencies:
     repository: https://open-telemetry.github.io/opentelemetry-helm-charts
     condition: telemetryGatewayEnabled
     alias: telemetry-gateway
+  - name: cluster
+    version: 0.6.0
+    repository: https://cloudnative-pg.github.io/charts
+    alias: cloudnativePg
+    condition: cloudnativePg.enabled
