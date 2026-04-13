@@ -214,6 +214,7 @@ databaseMode: cloudnative
 # WARNING: instances=1 is only suitable for development/test environments.
 # For production use instances >= 3 to avoid a single point of failure.
 cloudnativePg:
+  affinity: {}
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
   resources:
