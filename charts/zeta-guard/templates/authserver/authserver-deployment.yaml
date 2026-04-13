@@ -33,6 +33,7 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      serviceAccountName: zeta-authserver
       {{- with .Values.authserver.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

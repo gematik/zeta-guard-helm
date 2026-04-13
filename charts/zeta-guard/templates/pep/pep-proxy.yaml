@@ -194,6 +194,7 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      serviceAccountName: zeta-pep
       {{- with .Values.pepproxy.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
