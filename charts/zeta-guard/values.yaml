@@ -226,8 +226,11 @@ cloudnativePg:
   storage:
     size: 10Gi
 
-# Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
-clusterIssuer: ""
+# Which cert-manager Issuer to use for TLS on the Ingress (default)
+issuer: ""
+
+# Which cert-manager ClusterIssuer to use for TLS on the Ingress (default). If `issuer` is set, it overrides this value.
+clusterIssuer: "letsencrypt"
 
 # If gematikConnectionEnabled is true, the CronJob gematik-oidc-token-renewer-cronjob is deployed and will maintain a valid access token in the Secret gematik-oidc-token
 gematikConnectionEnabled: true
