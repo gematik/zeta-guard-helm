@@ -12,7 +12,11 @@ metadata:
     nginx.org/mergeable-ingress-type: "master"
     {{- end }}
     {{- if .Values.authserver.hostname }}
-    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt" | quote }}
+    {{- if .Values.issuer }}
+    cert-manager.io/issuer: {{.Values.issuer | quote}}
+    {{- else if .Values.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{.Values.clusterIssuer | quote}}
+    {{- end}}
     ingress.kubernetes.io/ssl-redirect: "true"
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/hsts: "true"

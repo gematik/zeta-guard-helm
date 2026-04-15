@@ -1229,9 +1229,16 @@
         "nginx-namespace2"
       ]
     },
+    "issuer": {
+      "type": "string",
+      "description": "cert-manager Issuer name used for TLS certificates on Ingress resources.",
+      "examples": [
+        "letsencrypt"
+      ]
+    },
     "clusterIssuer": {
       "type": "string",
-      "description": "cert-manager ClusterIssuer name used for TLS certificates on Ingress resources.",
+      "description": "cert-manager ClusterIssuer name used for TLS certificates on Ingress resources. If an `issuer` is defined, it takes precedence over `clusterIssuer`.",
       "examples": [
         "letsencrypt"
       ]
