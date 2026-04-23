@@ -117,6 +117,9 @@ authServerMetricsEnabled: true
 # authServerTracingEnabled enables the OpenTelemetry tracing
 authServerTracingEnabled: true
 
+istio:
+  enabled: false
+
 pepproxy:
   replicaCount: 1
   image:
