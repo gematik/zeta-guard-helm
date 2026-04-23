@@ -171,6 +171,9 @@ authServerMetricsEnabled: true
 # authServerTracingEnabled enables the OpenTelemetry tracing
 authServerTracingEnabled: true
 
+istio:
+  enabled: false
+
 pepproxy:
   serviceAccount:
     create: true
