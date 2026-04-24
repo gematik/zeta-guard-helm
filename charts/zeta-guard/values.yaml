@@ -213,18 +213,31 @@ databaseMode: cloudnative
 # CloudNativePG settings used when databaseMode=cloudnative.
 # WARNING: instances=1 is only suitable for development/test environments.
 # For production use instances >= 3 to avoid a single point of failure.
+# possible values can be found here: https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md
 cloudnativePg:
-  instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
-  resources:
-    requests:
-      cpu: 500m
-      memory: 512Mi
-    limits:
-      cpu: "1"
-      memory: 1Gi
-  storage:
-    size: 10Gi
+  enabled: true
+  fullnameOverride: keycloak-db
+  cluster:
+    instances: 1
+    imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    storage:
+      size: 10Gi
+    initdb:
+      database: keycloak
+      owner: zeta-guard
+    monitoring:
+      instrumentation:
+        # should be verified. has only been set to ensure no more configmaps are rendered as before.
+        # see https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/values.yaml#L329 for further details on property.
+        logicalReplication: true
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
 clusterIssuer: ""

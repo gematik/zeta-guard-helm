@@ -507,6 +507,9 @@
       "type": "object",
       "description": "Relevant only for databaseMode=cloudnative. Configures the managed CloudNativePG cluster. For details see https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md",
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "instances": {
           "type": "integer",
           "minimum": 1,

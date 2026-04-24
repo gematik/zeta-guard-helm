@@ -5,5 +5,8 @@ dependencies:
 - name: opentelemetry-collector
   repository: https://open-telemetry.github.io/opentelemetry-helm-charts
   version: 0.147.2
-digest: sha256:d2ed3862933dcfa8c858430a2f6c666113fe66b941373e4a00d4fda15ce23557
-generated: "2026-04-08T17:15:40.656411+02:00"
+- name: cluster
+  repository: https://cloudnative-pg.github.io/charts
+  version: 0.6.0
+digest: sha256:df363d573520101d810c4646b5acd73b5109767889d3450e39d92c314c0cb173
+generated: "2026-03-31T16:31:32.283813+02:00"

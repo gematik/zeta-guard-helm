@@ -85,7 +85,7 @@ app.kubernetes.io/name: authserver
   Used by: authserver/authserver-deployment.yaml
 */}}
 {{- define "authserver.kcDb" -}}
-{{- if eq .Values.databaseMode "cloudnative" -}}
+{{- if .Values.cloudnativePg.enabled -}}
 postgres
 {{- else -}}
 {{ .Values.authserverDb.kcDb }}
