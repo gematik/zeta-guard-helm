@@ -1,0 +1,91 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pep-proxy-egress
+  labels:
+    {{- include "pep-proxy.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "pep-proxy.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # kube-dns
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # authserver (token validation, well-known, proxy_pass)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "authserver.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    # telemetry-gateway (OTLP gRPC + syslog UDP)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 54526
+          protocol: UDP
+    {{- if .Values.networkPolicy.egress.popp.mock }}
+    # popp-mock pod — podSelector + targetPort 8080 (kindnet evaluates NetworkPolicy post-DNAT;
+    # the service maps port 80 → targetPort 8080, so the post-DNAT destination port is 8080)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: popp-mock
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+    {{- $pi := .Values.networkPolicy.egress.providerInternal }}
+    {{- if $pi.allowAll }}
+    # Provider-internal: allow all egress (allowAll=true)
+    - {}
+    {{- else }}
+    {{- range $pi.podSelectors }}
+    # provider-internal cluster-local pod (podSelector + targetPort, kindnet post-DNAT)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .matchLabels | nindent 14 }}
+      ports:
+        - port: {{ .port }}
+          protocol: TCP
+    {{- end }}
+    {{- $ocspCab := .Values.networkPolicy.egress.ocspCabForum.ipBlocks }}
+    {{- $ocspSmcb := .Values.networkPolicy.egress.ocspSmcbTsp.ipBlocks }}
+    {{- $ocspTi := .Values.networkPolicy.egress.ocspTiPki.ipBlocks }}
+    {{- $popp := .Values.networkPolicy.egress.popp.ipBlocks }}
+    {{- $gar := .Values.networkPolicy.egress.artifactRegistry.ipBlocks }}
+    {{- $pgar := .Values.networkPolicy.egress.providerArtifactRegistry.ipBlocks }}
+    {{- $rs := $pi.resourceServers.ipBlocks }}
+    {{- $ts := $pi.telemetrySystems.ipBlocks }}
+    {{- $external := concat $ocspCab $ocspSmcb $ocspTi $popp $gar $pgar $rs $ts | uniq }}
+    {{- if $external }}
+    # External: OCSP responders, PoPP, artifact registries (provisioning-processor init container),
+    #           provider-internal resource servers and telemetry
+    - to:
+        {{- range $external }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}

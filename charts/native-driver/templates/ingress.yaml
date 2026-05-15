@@ -1,0 +1,35 @@
+{{- /* vim: set ft=helm: */ -}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nativedriver
+  labels:
+    app: nativedriver
+    app.kubernetes.io/name: nativedriver
+  annotations:
+    nginx.org/mergeable-ingress-type: "minion"
+    #nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver"{{ else }}"testdriver"{{ end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /nativeproxy
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}nativedriver{{ end }}
+                port:
+                  number: 80
+          - path: /nativedriver-api
+            pathType: Prefix
+            backend:
+              service:
+                name: nativedriver
+                port:
+                  number: 80

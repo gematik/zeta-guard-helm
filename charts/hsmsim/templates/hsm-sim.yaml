@@ -15,6 +15,10 @@ spec:
     metadata:
       labels:
         {{- include "hsm-sim.labels" . | nindent 8 }}
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -28,11 +32,7 @@ spec:
         - name: hsm-sim
           image: "{{ include "hsm-sim.image" . | trim }}"
           imagePullPolicy: "{{ .Values.imagePullPolicy }}"
-          {{- if .Values.persistent }}
-          args: ["--listen", "0.0.0.0:50051", "--keys-dir", "/data/keys/"]
-          {{- else }}
           args: ["--listen", "0.0.0.0:50051", "--keys-dir", "/etc/hsm_sim/keys/"]
-          {{- end }}
           ports:
             - containerPort: 50051
               name: grpc
@@ -54,22 +54,36 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.persistent }}
           volumeMounts:
             - name: keys
-              mountPath: /data/keys
+              mountPath: /etc/hsm_sim/keys
       initContainers:
-        - name: seed-ca
+        - name: seed-keys
           image: "{{ include "hsm-sim.image" . | trim }}"
           imagePullPolicy: "{{ .Values.imagePullPolicy }}"
-          command: ["sh", "-c", "cp /etc/hsm_sim/keys/ca.* /data/keys/"]
+          command: ["sh", "-c", "cp -r /etc/hsm_sim/keys/. /seed-keys/"]
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: keys
-              mountPath: /data/keys
+              mountPath: /seed-keys
+
+          {{- if .Values.extraKeys.enabled }}
+            {{- range $item := .Values.extraKeys.items }}
+            - name: extra-keys
+              mountPath: /seed-keys/{{ $item | quote }}
+              subPath: {{ $item | quote }}
+            {{- end }}
+          {{- end }}
       volumes:
         - name: keys
-          persistentVolumeClaim:
-            claimName: hsm-sim-keys
+          emptyDir: {}
+      {{- if .Values.extraKeys.enabled }}
+        - name: extra-keys
+          secret:
+            secretName: {{ .Values.extraKeys.secret }}
       {{- end }}
 
       securityContext:
@@ -86,19 +100,6 @@ spec:
 
 ---
 
-{{- if .Values.persistent }}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: hsm-sim-keys
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 100Mi
-
----
-{{- end }}
 apiVersion: v1
 kind: Service
 metadata:

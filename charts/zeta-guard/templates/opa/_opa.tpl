@@ -2,20 +2,34 @@
 {{ required "zeta-guard.opaPolicy.policyRego must be set (Rego v1 policy)" .Values.opaPolicy.policyRego }}
 {{- end }}
 
-{{ define "opa.configYaml" }}
-{{- if .Values.opaPolicy.logDecisions }}
+{{ define "opa.opentelemetryGatewayService" -}}
+opentelemetrygateway:
+  url: http://{{ include "telemetryGateway.hostname" . }}:49152
+  allow_insecure_tls: true
+{{ end }}
+
+{{ define "opa.common_config" -}}
 decision_logs:
-  console: true
-
-distributed_tracing:
+  console: {{ .Values.opa.logDecisions | ternary "true" "false" }}
+  service: {{ .Values.telemetryGatewayEnabled | ternary "opentelemetrygateway" "" }}
 {{- if .Values.opaDistributedTracingEnabled }}
+distributed_tracing:
   type: grpc
-{{- end }}
   address: {{ include "telemetryGateway.hostname" . }}:4317
-
-status:
-  prometheus: {{ .Values.opaStatusPrometheus }}
+  service_name: "ZETA Guard PDP policy engine"
+  service_version: "{{ .Values.opa.image.tag }}"
 {{- end }}
+status:
+  console: {{ .Values.opa.logStatusUpdates | ternary "true" "false" }}
+  service: {{ .Values.telemetryGatewayEnabled | ternary "opentelemetrygateway" "" }}
+  prometheus: {{ .Values.opaStatusPrometheus | ternary "true" "false" }}
+{{ end }}
+
+{{/* configuration for OPA without bundles */}}
+{{ define "opa.configYaml" -}}
+{{ include "opa.common_config" . }}
+services:
+  {{ include "opa.opentelemetryGatewayService" .  | nindent 2 }}
 {{- end }}
 
 {{/*
@@ -33,6 +47,7 @@ status:
 {{- end -}}
 {{- end }}
 
+{{/* configuration for OPA with bundles */}}
 {{ define "opa.bundleConfigYaml" }}
 {{- /* Support both direct call (.) and parameterized call (dict "ctx" . "bundleResource" "..."). */ -}}
 {{- $ctx := .ctx | default . }}
@@ -43,8 +58,12 @@ status:
 {{- $secretRef := $ctx.Values.opa.bundle.credentials.secretRef }}
 {{- $useSecret := (and (not $useWif) $secretRef $secretRef.name) }}
 
+{{- include "opa.common_config" $ctx -}}
 
 services:
+  {{- if $ctx.Values.telemetryGatewayEnabled }}
+  {{- include "opa.opentelemetryGatewayService" $ctx | nindent 2 -}}
+  {{- end }}
   {{ required "opa.bundle.serviceName is required when bundle.enabled=true" $ctx.Values.opa.bundle.serviceName }}:
     {{- if $ctx.Values.opa.bundle.url }}
     url: {{ $ctx.Values.opa.bundle.url | quote }}
@@ -87,13 +106,22 @@ keys:
     {{/* 'key' will be set via --set-file */}}
 {{- end }}
 
-{{- if $ctx.Values.opaPolicy.logDecisions }}
-decision_logs:
-  console: true
-{{- end }}
-
 persistence_directory: /var/opa
-
-status:
-  prometheus: {{ $ctx.Values.opaStatusPrometheus }}
 {{- end -}}
+
+{{/* OPA configuration fragment used to override common configuration */}}
+{{ define "opa-simulation.config" -}}
+{{ $serviceName := "opa_receiver_for_simulation" -}}
+decision_logs:
+  service: {{ .Values.telemetryGatewayEnabled | ternary $serviceName "" }}
+{{- if .Values.opaDistributedTracingEnabled }}
+distributed_tracing:
+  service_name: "ZETA Guard PDP policy engine (simulation)"
+{{- end }}
+services:
+  {{ $serviceName }}:
+    url: http://{{ include "telemetryGateway.hostname" . }}:49153
+    allow_insecure_tls: true
+status:
+  service: {{ .Values.telemetryGatewayEnabled | ternary $serviceName "" }}
+{{- end }}

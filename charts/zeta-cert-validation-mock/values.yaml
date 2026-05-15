@@ -1,0 +1,64 @@
+global:
+  imagePullSecrets: []
+  registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+
+registry_name: ""
+
+replicaCount: 1
+
+# When enabled, injects a changing annotation to force pod rollouts
+# on each helm upgrade/apply even if image tag is unchanged.
+devMode: false
+
+image:
+  repository: zeta-cert-validation-mock
+  tag: "latest"
+imagePullPolicy: Always
+
+imagePullSecrets: []
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+resources: {}
+
+service:
+  type: ClusterIP
+  annotations: {}
+  ports:
+    http: 80
+    httpTargetPort: 8080
+  nodePorts:
+    http: null
+
+mock:
+  mode: always_good
+  goodProbability: "0.999"
+  revokedProbability: "0.001"
+  seed: ""
+  enableAdminEndpoints: true
+
+signing:
+  createSecret: true
+  secretName: zeta-cert-validation-mock-signer
+  mountBase: /app/signing
+  smb:
+    keyStore: Y2VydC1wbGFjZWhvbGRlcgo=
+    keyStorePassword: cGFzc3dvcmQK
+  tls:
+    keyStore: Y2VydC1wbGFjZWhvbGRlcgo=
+    keyStorePassword: cGFzc3dvcmQK
+
+

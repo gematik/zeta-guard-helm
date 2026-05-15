@@ -67,30 +67,130 @@ opentelemetry-demo:
 
   opentelemetry-collector:
     config:
+      connectors:
+        spanmetrics:
+          dimensions:
+            - name: zeta-test.status.code
+
       processors:
+        attributes/ti_monitoring:
+          actions:
+            - key: gematik.zeta.kind
+              action: insert
+              value: monitoring
+        attributes/ti_siem:
+          actions:
+            - key: gematik.zeta.kind
+              action: insert
+              value: siem
         # this is a workaround for https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45428
         resource/delete_k8s_labels:
           attributes:
             - key: app
               action: delete
+        transform/set_error_status:
+          error_mode: ignore
+          trace_statements:
+            - context: span
+              statements:
+                # Mark spans with HTTP 4xx/5xx responses via a custom attribute so they appear in Prometheus error rate metrics.
+                # status.code is a reserved OTel field (cannot be namespaced); zeta-test.status.code is a custom attribute.
+                # http.status_code = old OTel semantic convention (PEP/nginx); http.response.status_code = new convention (Keycloak Java agent)
+                - set(attributes["zeta-test.status.code"], "STATUS_CODE_ERROR") where attributes["http.status_code"] != nil and attributes["http.status_code"] >= 400
+                - set(attributes["zeta-test.status.code"], "STATUS_CODE_ERROR") where attributes["http.response.status_code"] != nil and attributes["http.response.status_code"] >= 400
+      receivers:
+        otlp/ti_monitoring:
+          protocols:
+            grpc:
+              endpoint: "${env:MY_POD_IP}:4327"
+            http:
+              endpoint: "${env:MY_POD_IP}:4328"
+        otlp/ti_siem:
+          protocols:
+            grpc:
+              endpoint: "${env:MY_POD_IP}:4337"
+            http:
+              endpoint: "${env:MY_POD_IP}:4338"
 
       service:
         pipelines:
-          logs:
+          logs/ti_monitoring:
+            receivers:
+              - otlp/ti_monitoring
             processors:
-              - k8sattributes
               - memory_limiter
-              - resourcedetection
-              - resource
               - resource/delete_k8s_labels
+              - attributes/ti_monitoring
               - batch
-          metrics:
+            exporters:
+              - opensearch
+          logs/ti_siem:
             receivers:
-              - otlp
-              - spanmetrics
-          traces:
+              - otlp/ti_siem
+            processors:
+              - memory_limiter
+              - resource/delete_k8s_labels
+              - attributes/ti_siem
+              - batch
+            exporters:
+              - opensearch
+          metrics/ti_monitoring:
             receivers:
+              - otlp/ti_monitoring
+            processors:
+              - memory_limiter
+              - attributes/ti_monitoring
+              - batch
+            exporters:
+              - otlphttp/prometheus
+          metrics/ti_siem:
+            receivers:
+              - otlp/ti_siem
+            processors:
+              - memory_limiter
+              - attributes/ti_siem
+              - batch
+            exporters:
+              - otlphttp/prometheus
+          traces/ti_monitoring:
+            receivers:
+              - otlp/ti_monitoring
+            processors:
+              - memory_limiter
+              - transform/set_error_status
+              - attributes/ti_monitoring
+              - batch
+            exporters:
               - otlp
+          traces/ti_siem:
+            receivers:
+              - otlp/ti_siem
+            processors:
+              - memory_limiter
+              - transform/set_error_status
+              - attributes/ti_siem
+              - batch
+            exporters:
+              - otlp
+
+    ports:
+      otlp-ti-mntrng:
+        enabled: true
+        containerPort: 4328
+        servicePort: 4328
+        hostPort: 4328
+        protocol: TCP
+        # nodePort: 30317
+        appProtocol: grpc
+      otlp-ti-siem:
+        enabled: true
+        containerPort: 4338
+        servicePort: 4338
+        hostPort: 4338
+        protocol: TCP
+        # nodePort: 30317
+        appProtocol: grpc
+
 ingressClassName: "nginx"
 # ingressRulesHost defines the hostname for all ingress rules in this chart.
 ingressRulesHost: "test-monitoring-ingress.localhost"

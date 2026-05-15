@@ -30,8 +30,19 @@ spec:
           env:
             - name: spring_profiles_active
               value: default,docker
+            - name: SERVER_PORT
+              value: "8090"
+            - name: SERVER_SERVLET_CONTEXT_PATH
+              value: {{ .Values.tokenGenerator.ingress.path | default "/popp-token-generator" | quote }}
+            {{- with .Values.tokenGenerator.poppIssuerUrl }}
+            - name: POPP_ISSUER_URL
+              value: {{ . | quote }}
+            {{- end }}
           ports:
-            - containerPort: 80
+            - containerPort: 8090
+          volumeMounts:
+            - name: token-generator-tmp
+              mountPath: /tmp
           {{- with .Values.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -66,6 +77,10 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        {{- if .Values.tokenGenerator.enabled }}
+        - name: token-generator-tmp
+          emptyDir: { }
+        {{- end }}
         - name: nginx-tmp
           emptyDir: { }
         - name: nginx-cache

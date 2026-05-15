@@ -5,7 +5,7 @@
 > production or any security-sensitive environment. Remove the chart or keep the chart disabled unless you are testing
 > in an isolated sandbox:
 >
-> ```
+> ```yaml
 > tags:
 >   tiger-proxy: false
 > ```
@@ -29,9 +29,13 @@ tiger-proxy:
       - from: /proxy
         to: http://testdriver/proxy
       - from: /telemetry/gateway
-        to: http://test-monitoring-collector-local:4318
+        to: http://test-monitoring-collector-local:4328
       - from: /opa
         to: http://opa:8181
+      - from: /.well-known/openid-federation
+        to: http://popp-statics/.well-known/openid-federation
+      - from: /.well-known/signed-jwks
+        to: http://popp-statics/.well-known/signed-jwks
       - from: /popp
         to: http://popp-statics
       - from: /
@@ -47,21 +51,23 @@ zeta-guard:
     nginxConf:
       fachdienstUrl: https://tiger-proxy:80/testfachdienst
       poppIssuer: "http://tiger-proxy/popp"
+  telemetry-gateway:
+    config:
+      exporters:
+        otlp_http/test-monitoring-service:
+          endpoint: http://tiger-proxy:4138
+        otlp_http/ti_siem:
+          endpoint: http://tiger-proxy:4138
 
 testdriver:
   routeViaTigerProxy: true
-
-testMonitoringService:
-  opentelemetry-demo:
-    opentelemetry-collector:
-      config:
-        exporters:
-          otlp_http/test-monitoring-service:
-            endpoint: http://tiger-proxy:4138
 ```
 
-Note: The `/popp` route points to the `popp-statics` Service from the `popp-mocks` chart.
-Ensure `popp-mocks.enabled: true` (or adjust the `/popp` target and `poppIssuer` to your JWKS endpoint).
+Note: The `/popp`, `/.well-known/openid-federation`, and `/.well-known/signed-jwks`
+routes point to the `popp-statics` Service from the `popp-mocks` chart. Keep these routes in place when
+the PEP PoPP issuer is exposed through Tiger Proxy, otherwise federation metadata and signed JWKS lookups will bypass
+or fail through the proxy path. Ensure `popp-mocks.enabled: true` (or adjust these targets and `poppIssuer`
+to your own PoPP metadata/JWKS endpoints).
 
 For telemetry, the switch works the same way as for the other Tiger routes: keep the
 `/telemetry/gateway` entry in `tiger-proxy.proxyConfig.proxyRoutes` and point the OTLP HTTP exporter to
@@ -69,6 +75,32 @@ For telemetry, the switch works the same way as for the other Tiger routes: keep
 forwards to the Tiger route `/telemetry/gateway`, which then forwards to the configured backend target.
 
 After setting these values the Tiger proxy chart will be deployed when running `make deploy stage=<target-stage>`.
+
+### DNS redirection for non-configurable domains
+
+In some cases clients need to contact a domain that is not or not easily configurable (e.g. CRL endpoints or OCSP responders in TLS certificates).
+The ZETA Guard deployment can be configured to redirect DNS resolution of such domains to the statically assigned IP of the standalone Tiger proxy.
+Additionally, the (unique) URL path for the target domains has to be added to the `tiger-proxy.proxyConfig.proxyRoutes[]` or else the client will not 
+be able to receive a useful response.
+
+See `values.yaml` for the following `global` section:
+
+```yaml
+global:
+  enableDNSRedirect: true
+  dns:
+    tigerStaticClusterIP: "10.96.3.11"
+    redirects:
+      - fqdn: ocsp.example.com
+        ip: "10.96.3.11"
+```
+
+This section is used to:
+- assign a static ClusterIP to the Tiger proxy `Service`
+- add `hostAliases` to the `template.spec.hostAliases` key of the PEP, PDP and testdriver deployments
+
+**Note**: The full list of DNS redirections (`global.dns.redirects[]`) is written to the `hosts` file of the PEP, PDP and testdriver containers. This means that if there are domains that are contacted for multiple purposes, all unique URL paths have to be added to `tiger-proxy.proxyConfig.proxyRoutes[]`.
+
 
 ## Deactivate routing via tiger proxy
 
@@ -90,17 +122,16 @@ zeta-guard:
     nginxConf:
       fachdienstUrl: https://testfachdienst:443
       poppIssuer: http://popp-statics
+  telemetry-gateway:
+    config:
+      exporters:
+        otlp_http/test-monitoring-service:
+          endpoint: http://test-monitoring-collector-local:4328
+        otlp_http/ti_siem:
+          endpoint: http://test-monitoring-collector-local:4338
 
 testdriver:
   routeViaTigerProxy: false
-
-testMonitoringService:
-  opentelemetry-demo:
-    opentelemetry-collector:
-      config:
-        exporters:
-          otlp_http/test-monitoring-service:
-            endpoint: http://test-monitoring-collector-local:4318
 ```
 
 After setting these values the Tiger proxy chart will be ignored when running `make deploy stage=<target-stage>`.
@@ -108,6 +139,85 @@ After setting these values the Tiger proxy chart will be ignored when running `m
 If the Tiger proxy chart stays enabled but telemetry should bypass it, remove the `/telemetry/gateway` route
 from `tiger-proxy.proxyConfig.proxyRoutes` and point the exporter directly to the real collector.
 
+## Deployment configuration
+
+### ServiceAccount
+
+By default, a dedicated ServiceAccount is created with
+`automountServiceAccountToken: false`:
+
+```yaml
+tiger-proxy:
+  serviceAccount:
+    create: true
+    name: tiger-proxy
+```
+
+### Resources
+
+Resource requests and limits can be configured separately for the main
+container and the nginx sidecar:
+
+```yaml
+tiger-proxy:
+  resources:
+    limits:
+      cpu: "900m"
+      memory: "1Gi"
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+  nginxSidecar:
+    resources:
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+```
+
+### Nginx sidecar image
+
+The nginx sidecar image is configurable:
+
+```yaml
+tiger-proxy:
+  nginxSidecar:
+    image:
+      repository: docker.io/nginxinc/nginx-unprivileged
+      tag: "alpine3.22-slim"
+```
+
+### Replicas and PodDisruptionBudget
+
+```yaml
+tiger-proxy:
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+```
+
+### Security context
+
+The pod-level and container-level security contexts are configurable:
+
+```yaml
+tiger-proxy:
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop: [ "ALL" ]
+```
+
+Note: `runAsUser` is intentionally not set by default, as it is not supported
+on OpenShift.
 
 ## Enable TLS for the testfachdienst route
 

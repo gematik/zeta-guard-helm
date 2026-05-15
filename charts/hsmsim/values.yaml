@@ -4,7 +4,7 @@ enabled: true
 registry_name: ""
 image:
   repository: hsm_sim
-  tag: 0.5.0
+  tag: 1.0.0
 imagePullPolicy: Always
 imagePullSecrets: [ ]
 podLabels: {}
@@ -13,7 +13,20 @@ resources:
     memory: "100Mi"
   requests:
     memory: "10Mi"
-persistent: false
+extraKeys:
+  enabled: false
+  secret: hsm-tls
+  # items:
+  # - tls.p256.key.pem
+  # - tls.p256.cert.pem
+  items: []
+devMode: false
 podAnnotations: {}
 affinity: {}
 tolerations: []
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  capabilities:
+    drop: [ "ALL" ]

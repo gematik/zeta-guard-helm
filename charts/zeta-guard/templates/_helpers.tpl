@@ -50,6 +50,18 @@ app.kubernetes.io/name: authserver
   Builds the full image reference including registry, repository and tag.
   Used by: authserver/authserver-deployment.yaml
 */}}
+{{- define "keychainGenerator.image" -}}
+{{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.authserver.dbEnc.keychainGenerator.image.registry -}}
+{{- printf "%s%s" $registry .Values.authserver.dbEnc.keychainGenerator.image.repository -}}
+{{- if .Values.authserver.dbEnc.keychainGenerator.image.tag }}:{{ .Values.authserver.dbEnc.keychainGenerator.image.tag }}{{ end }}
+{{- if .Values.authserver.dbEnc.keychainGenerator.image.digest }}@{{ .Values.authserver.dbEnc.keychainGenerator.image.digest }}{{ end }}
+{{- end -}}
+
+{{/*
+  Helper: authserver.image
+  Builds the full image reference including registry, repository and tag.
+  Used by: authserver/authserver-deployment.yaml
+*/}}
 {{- define "authserver.image" -}}
 {{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.authserver.image.registry -}}
 {{- printf "%s%s" $registry .Values.authserver.image.repository -}}
@@ -58,25 +70,25 @@ app.kubernetes.io/name: authserver
 {{- end -}}
 
 {{/*
-  Helper: authserver.provisioningProcessor.image
+  Helper: provisioningProcessor.image
   Builds the full image reference including registry, repository and tag.
 */}}
-{{- define "authserver.provisioningProcessor.image" -}}
-{{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.authserver.provisioningProcessor.image.registry -}}
-{{- printf "%s%s" $registry .Values.authserver.provisioningProcessor.image.repository -}}
-{{- if .Values.authserver.provisioningProcessor.image.tag }}:{{ .Values.authserver.provisioningProcessor.image.tag }}{{ end }}
-{{- if .Values.authserver.provisioningProcessor.image.digest }}@{{ .Values.authserver.provisioningProcessor.image.digest }}{{ end }}
+{{- define "provisioningProcessor.image" -}}
+{{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.provisioningProcessor.image.registry -}}
+{{- printf "%s%s" $registry .Values.provisioningProcessor.image.repository -}}
+{{- if .Values.provisioningProcessor.image.tag }}:{{ .Values.provisioningProcessor.image.tag }}{{ end }}
+{{- if .Values.provisioningProcessor.image.digest }}@{{ .Values.provisioningProcessor.image.digest }}{{ end }}
 {{- end -}}
 
 {{/*
-  Helper: opa.provisioningProcessor.image
+  Helper: opa.image
   Builds the full image reference including registry, repository and tag.
 */}}
-{{- define "opa.provisioningProcessor.image" -}}
-{{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.opa.provisioningProcessor.image.registry -}}
-{{- printf "%s%s" $registry .Values.opa.provisioningProcessor.image.repository -}}
-{{- if .Values.opa.provisioningProcessor.image.tag }}:{{ .Values.opa.provisioningProcessor.image.tag }}{{ end }}
-{{- if .Values.opa.provisioningProcessor.image.digest }}@{{ .Values.opa.provisioningProcessor.image.digest }}{{ end }}
+{{- define "opa.image" -}}
+{{- $registry := default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.opa.image.registry -}}
+{{- printf "%s%s" $registry .Values.opa.image.repository -}}
+{{- if .Values.opa.image.tag }}:{{ .Values.opa.image.tag }}{{ end }}
+{{- if .Values.opa.image.digest }}@{{ .Values.opa.image.digest }}{{ end }}
 {{- end -}}
 
 {{/*

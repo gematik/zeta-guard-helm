@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zeta-cert-validation-mock
+  labels:
+    app.kubernetes.io/name: zeta-cert-validation-mock
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app.kubernetes.io/name: zeta-cert-validation-mock
+  type: {{ default "ClusterIP" .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ default 80 .Values.service.ports.http }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) .Values.service.nodePorts.http }}
+      nodePort: {{ .Values.service.nodePorts.http }}
+      {{- end }}

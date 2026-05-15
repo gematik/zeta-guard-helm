@@ -1,0 +1,48 @@
+{{- if and .Values.networkPolicy.enabled .Values.opa.enabled .Values.opa.simulation.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opa-simulation-egress
+  labels:
+    {{- include "opaSimulation.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "opaSimulation.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # kube-dns
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # telemetry-gateway (OTLP gRPC)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - port: 4317
+          protocol: TCP
+    {{- $pip := .Values.networkPolicy.egress.pip.ipBlocks }}
+    {{- $gar := .Values.networkPolicy.egress.artifactRegistry.ipBlocks }}
+    {{- $pgar := .Values.networkPolicy.egress.providerArtifactRegistry.ipBlocks }}
+    {{- $external := concat $pip $gar $pgar | uniq }}
+    {{- if $external }}
+    # External: OPA bundle registries (PIP/artifact)
+    - to:
+        {{- range $external }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}

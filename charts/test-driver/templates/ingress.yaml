@@ -12,6 +12,7 @@ metadata:
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "minion"
     nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver"{{ else }}"testdriver"{{ end }}
+    nginx.org/client-max-body-size: "10m"
     {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}

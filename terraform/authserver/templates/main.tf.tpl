@@ -4,10 +4,7 @@ terraform {
       source  = "keycloak/keycloak"
       version = ">= 5.7.0"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = ">= 2.38"
-    }
+{{KUBERNETES_REQUIRED_PROVIDER}}
   }
 
   {{BACKEND_BLOCK}}

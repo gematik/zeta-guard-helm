@@ -1,53 +1,127 @@
 # How to Configure Ingress (F5 NIC, mergeable)
 
-This chart uses F5 NGINX Ingress Controller (NIC) mergeable Ingresses by default:
+This chart uses F5 NGINX Ingress Controller (NIC) mergeable Ingresses by
+default:
+
 - Master (`zeta-guard`) holds TLS and annotations (no paths)
-- Minions (`zeta-guard-minion`, `testdriver`, `test-monitoring-ingress`) hold routing rules for the same host/class
+- Minions (`zeta-guard-minion`, `testdriver`, `test-monitoring-ingress`) hold
+  routing rules for the same host/class
 
 ## Prerequisites
-- NIC installed/enabled (bundled by default): `zeta-guard.nginxIngressEnabled: true`, or an external NIC compatible with `nginx.org/mergeable-ingress-type`.
-- A host for the environment (required for mergeable): set `zeta-guard.authserver.hostname`.
-- Consistent class across master and minions: set `zeta-guard.ingressClassName` and align subcharts (e.g., `testdriver.ingressClassName`).
+
+- NIC installed/enabled (bundled by default):
+  `zeta-guard.nginxIngressEnabled: true`, or an external NIC compatible with
+  `nginx.org/mergeable-ingress-type`.
+- A host for the environment (required for mergeable): set
+  `zeta-guard.authserver.hostname`.
+- Consistent class across master and minions: set `zeta-guard.ingressClassName`
+  and align subcharts (e.g., `testdriver.ingressClassName`).
 - cert-manager installed when using TLS via ClusterIssuer.
 
 ## Configure
+
 1) Set host and class
-   - `zeta-guard.authserver.hostname: <env-host>`
-   - `zeta-guard.ingressClassName: <class>`
-   - `testdriver.ingressRulesHost: <env-host>`, `testdriver.ingressClassName: <class>`
-   - `testMonitoringService.ingressRulesHost: <env-host>`, `ingressClassName: <class>`
+    - `zeta-guard.authserver.hostname: <env-host>`
+    - `zeta-guard.ingressClassName: <class>`
+    - `testdriver.ingressRulesHost: <env-host>`,
+      `testdriver.ingressClassName: <class>`
+    - `testMonitoringService.ingressRulesHost: <env-host>`,
+      `ingressClassName: <class>`
 
 2) Optional: route via Tiger Proxy
-   - `zeta-guard.routeViaTigerProxy: true` to send `/auth` and `/` through `tiger-proxy`.
-   - Ensure the Tiger chart is enabled and its `proxyRoutes` cover required paths.
-   - For WebSocket upgrade support on routed services, ensure minion ingresses include NIC websocket annotations that match the actually routed backends:
-     - `zeta-guard-minion`: `"tiger-proxy"` when `routeViaTigerProxy=true`, otherwise `"pep-proxy-svc"`
-     - `testdriver`: `"tiger-proxy,testdriver"` when `routeViaTigerProxy=true`, otherwise `"testdriver"`
+    - `zeta-guard.routeViaTigerProxy: true` to send `/auth` and `/` through
+      `tiger-proxy`.
+    - Ensure the Tiger chart is enabled and its `proxyRoutes` cover required
+      paths.
+    - For WebSocket upgrade support on routed services, ensure minion ingresses
+      include NIC websocket annotations that match the actually routed backends:
+        - `zeta-guard-minion`: `"tiger-proxy"` when `routeViaTigerProxy=true`,
+          otherwise `"pep-proxy-svc"`
+        - `testdriver`: `"tiger-proxy,testdriver"` when
+          `routeViaTigerProxy=true`, otherwise `"testdriver"`
 
 3) Deploy
-   - `make deps`
-   - `make deploy stage=<env>`
+    - `make deps`
+    - `make deploy stage=<env>`
 
 ## Verify
+
 - Master and minions exist and share host/class:
-  - `kubectl -n <ns> get ingress zeta-guard zeta-guard-minion testdriver test-monitoring-ingress -o wide`
+    - `kubectl -n <ns> get ingress zeta-guard zeta-guard-minion testdriver 
+    test-monitoring-ingress -o wide`
+
 - Paths:
-   - WebSocket annotations present on minions (required for WS upgrade passthrough):
-     - `kubectl -n <ns> get ingress zeta-guard-minion testdriver -o yaml | rg websocket-services`
-  - `/auth` → `authserver` (or `tiger-proxy` when routing via Tiger)
-  - `/` → `pep-proxy-svc` (or `tiger-proxy` when routing via Tiger)
-  - `/proxy` and `/testdriver-api` → owned by `testdriver` minion
+    - WebSocket annotations present on minions (required for WS upgrade
+      passthrough):
+        - `kubectl -n <ns> get ingress zeta-guard-minion testdriver -o yaml 
+        | rg websocket-services`
+    - `/auth` → `authserver` (or `tiger-proxy` when routing via Tiger)
+    - `/` → `pep-proxy-svc` (or `tiger-proxy` when routing via Tiger)
+    - `/proxy` and `/testdriver-api` → owned by `testdriver` minion
 - TLS policy:
-  - `curl -vkI --tls-max 1.1 https://<host>` → fail
-  - `curl -vkI --tls-max 1.2 https://<host>` → pass
-  - `curl -vkI --tls-max 1.3 https://<host>` → pass
+    - `curl -vkI --tls-max 1.1 https://<host>` → fail
+    - `curl -vkI --tls-max 1.2 https://<host>` → pass
+    - `curl -vkI --tls-max 1.3 https://<host>` → pass
+
+## Protecting the Admin API via a separate hostname
+
+When `zeta-guard.authserver.adminHostname` is set, the chart creates two
+additional Ingress resources and activates admin API blocking inside the PEP
+proxy:
+
+| Resource                    | Purpose                                                            |
+|-----------------------------|--------------------------------------------------------------------|
+| `zeta-guard-admin` (master) | TLS-terminating ingress for `adminHostname`                        |
+| `zeta-guard-admin-minion`   | Routes `/auth` on `adminHostname` → `authserver` directly (no PEP) |
+
+On the **main hostname**, the `/auth` Ingress path is removed — all traffic
+falls through to the `/` catch-all which routes to `pep-proxy-svc`. Inside the
+PEP proxy, a `location ~ ^/auth/admin` block returns `403`, and a
+`location /auth` block proxies all other auth requests directly to `authserver`
+without token enforcement.
+
+**Relationship with `routeViaTigerProxy`**
+
+When `routeViaTigerProxy: true`, both `/auth` and `/` already route to
+tiger-proxy via the main ingress. Tiger-proxy internally routes
+`/auth → http://authserver/auth`, bypassing the PEP proxy location blocks.
+Admin API blocking therefore **does not take effect** in tiger-proxy
+environments. Tiger-proxy is a test tool only — production deployments use
+`routeViaTigerProxy: false`.
+
+**DNS for the admin hostname**
+
+The admin hostname must resolve to the same ingress controller IP as the main
+hostname. For KIND/local development, add the admin hostname to
+`issuers.local.dnsNames` in local values file and include it in
+`adminTlsSecretName: zeta-guard-tls` to reuse the existing self-signed
+certificate. The Makefile awk regex already includes `adminHostname:` values
+when generating the CoreDNS patch, otherwise manual DNS entry is needed.
+
+## Forcing a NIC pod restart after TLS / HSM config changes
+
+In-place `nginx -s reload` does not re-initialise OpenSSL providers (e.g.
+`ossl_hsm`). Bump `nginx-ingress.controller.pod.annotations.config-rev` in
+`charts/zeta-guard/values.yaml` whenever you change `controller.config.entries`
+or any HSM-related ingress config; any change to the value triggers a NIC pod
+rolling restart. Convention: `YYYY-MM-DD-<short-tag>`.
 
 ## Notes
-- Azure Load Balancer: set `service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /healthz` on the NIC Service for healthy probes.
-- External controller: disable bundled NIC via `zeta-guard.nginxIngressEnabled: false` and set only `zeta-guard.ingressClassName` to the cluster’s class.
-- Minions must not duplicate the same path+host across Ingresses; define each path in exactly one minion.
+
+- Azure Load Balancer: set
+  `service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /healthz`
+  on the NIC Service for healthy probes.
+- External controller: disable bundled NIC via
+  `zeta-guard.nginxIngressEnabled: false` and set only
+  `zeta-guard.ingressClassName` to the cluster’s class.
+- Minions must not duplicate the same path+host across Ingresses; define each
+  path in exactly one minion.
 
 ## Troubleshooting
+
 - Admission conflict: “host ... and path ... is already defined in ingress ...”
-  - Remove legacy Ingress that still owns the path+host before applying mergeable minions, or roll out in two steps (master first, then minions).
-- Hostless local: mergeable expects an explicit host; set `zeta-guard.authserver.hostname` for local (self‑signed issuer supported via `issuers.local`).
+    - Remove legacy Ingress that still owns the path+host before applying
+      mergeable minions or roll out in two steps (master first, then minions).
+- Hostless local: mergeable expects an explicit host; set
+  `zeta-guard.authserver.hostname` for local (self‑signed issuer supported via
+  `issuers.local`).

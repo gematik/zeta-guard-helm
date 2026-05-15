@@ -5,7 +5,7 @@ metadata:
   labels:
     component: testdriver
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app: testdriver
@@ -19,13 +19,21 @@ spec:
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
       {{- end }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
       securityContext:
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- if .Values.global.enableDNSRedirect }}
+      {{- template "global.tigerDNSRedirect" . }}
+    {{- end }}
       containers:
         - name: testdriver
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -81,6 +89,12 @@ spec:
               value: {{ .Values.connector_user_id }}
             - name: SMCB_CARD_HANDLE
               value: {{ .Values.connector_card_handle }}
+            - name: REQUIRED_ROLE_OID
+              value: {{ .Values.requiredOid }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: smcb-keystore
           secret:

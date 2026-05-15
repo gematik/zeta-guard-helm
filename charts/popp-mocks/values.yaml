@@ -12,3 +12,9 @@ tokenGenerator:
     tag: "1.0.1"
   imagePullPolicy: IfNotPresent
   enabled: false
+  poppIssuerUrl: "https://popp.example.com"
+  ingress:
+    enabled: false
+    className: ""
+    hostname: ""
+    path: /popp-token-generator

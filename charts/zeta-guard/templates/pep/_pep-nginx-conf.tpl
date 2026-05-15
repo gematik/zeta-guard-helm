@@ -11,6 +11,9 @@ load_module modules/ngx_otel_module.so;
 {{- end }}
 
 error_log /dev/stdout debug;
+{{- if $.Values.telemetryGatewayEnabled }}
+error_log syslog:server={{ include "telemetryGateway.hostname" $ }}:54526 debug;
+{{- end }}
 pid /tmp/nginx.pid;
 
 events {
@@ -23,6 +26,9 @@ http {
     include common.conf;
 
     access_log /dev/stdout main;
+    {{- if $.Values.telemetryGatewayEnabled }}
+    access_log syslog:server={{ include "telemetryGateway.hostname" $ }}:54526 main;
+    {{- end }}
 
     client_body_temp_path /tmp/client_body_temp;
     proxy_temp_path /tmp/proxy_temp;
@@ -34,12 +40,10 @@ http {
     pep_pdp_issuer {{ .pepIssuer }};
     ## server hosting PoPP entity statement at /.well-known/openid-federation
     ## optional if no locations use pep_require_popp
-    {{- with .poppIssuer }}
-    pep_popp_issuer {{ . }};
+    {{- if .poppIssuer }}
+    pep_popp_issuer {{ .poppIssuer }};
+    pep_popp_validity "{{ .poppValidity }}";
     {{- end }}
-    # pep_http_client_idle_timeout 30; # s
-    # pep_http_client_max_idle_per_host 64;
-    # pep_http_client_tcp_keepalive 30; # s
     # pep_http_client_connect_timeout 2; # s
     # pep_http_client_timeout 10; # s
     pep_http_client_accept_invalid_certs {{ .httpClientAcceptInvalidCerts | ternary "on" "off" }};
@@ -50,7 +54,7 @@ http {
     pep_asl_signer_cert /etc/nginx/signer_cert.pem;
     pep_asl_signer_key /etc/nginx/signer_key.pem;
     pep_asl_ca_cert /etc/nginx/issuer_cert.pem;
-    pep_asl_roots_json /etc/nginx/roots.json;
+    pep_asl_roots_json /var/trust-data/roots.json;
     {{- with $.Values.pepproxy.aslRootCA }}
     pep_asl_root_ca {{ . | quote }};
     {{- end }}
@@ -63,6 +67,10 @@ http {
     {{- with $.Values.pepproxy.aslOcspTtl }}
     pep_asl_ocsp_ttl {{ . | quote }};
     {{- end }}
+    {{- end }}
+    {{- if $.Values.pepproxyTracingEnabled }}
+    otel_resource_attr "service.version" "{{ $.Values.pepproxy.image.tag }}";
+    otel_service_name "ZETA Guard PEP HTTP proxy";
     {{- end }}
 
     ### Location Config
@@ -87,6 +95,8 @@ http {
     {{- end }}
     ## implied ppop validity in s
     # pep_ppop_validity 31536000;
+    ## forward client data to upstream
+    # pep_forward_client_data off;
 
     server {
         listen 8081;
@@ -105,6 +115,9 @@ http {
         root /usr/share/nginx/html;
 
         {{- if $.Values.pepproxy.asl_enabled }}
+        allow 127.0.0.1;
+        deny all;
+
         include asl.conf;
         {{- end }}
 
@@ -113,6 +126,9 @@ http {
         # Target:   http://authserver/auth/realms/zeta-guard/.well-known/zeta-guard-well-known
         location /.well-known/ {
             pep off;
+
+            satisfy all;
+            allow all;
 
             default_type application/json;
             alias /srv/.well-known/;
@@ -123,6 +139,25 @@ http {
             }
         }
 
+        {{- if $.Values.authserver.adminHostname }}
+        # Block public access to Keycloak Admin REST API and Admin Console.
+        # /auth is routed through the PEP proxy so this location takes effect.
+        location ~ ^/auth/admin {
+            return 403;
+        }
+        # Route all other /auth/* requests to Keycloak (no token required).
+        location /auth {
+            pep off;
+            proxy_pass http://authserver;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            # Pass through the proto set by the TLS-terminating ingress ($scheme would
+            # be "http" here since the ingress talks to the PEP proxy over plain HTTP).
+            proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        }
+        {{- end }}
         {{- tpl .locations $ | nindent 8 }}
     }
 
@@ -132,6 +167,8 @@ http {
     }
     otel_trace on;
     otel_trace_context inject;
+    {{- end }}
+
     server {
         listen 8080;
 
@@ -141,7 +178,6 @@ http {
             stub_status;
         }
     }
-    {{- end }}
 }
 
 {{- end }}

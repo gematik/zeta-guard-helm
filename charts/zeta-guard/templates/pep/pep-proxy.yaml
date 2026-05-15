@@ -31,13 +31,62 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      {{- if and .Values.pepproxy.serviceAccount .Values.pepproxy.serviceAccount.create }}
+      serviceAccountName: {{ .Values.pepproxy.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
       {{- with .Values.pepproxy.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.pepproxy.resources }}
-      resources:
+      {{- with .Values.pepproxy.podSecurityContext }}
+      securityContext:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.global.enableDNSRedirect }}
+      {{- template "global.tigerDNSRedirect" . }}
+    {{- end }}
+      {{- if .Values.pepproxy.asl_enabled }}
+      initContainers:
+        - name: trust-anchor-provisioning-processor
+          image: "{{ include "provisioningProcessor.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy }}"
+          {{- with .Values.provisioningProcessor.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: RESULT_DIR
+              value: "/var/trust-data"
+            - name: PROCESSORS_ROOTS_JSON_ENABLED
+              value: "true"
+            - name: PROVISIONING_CONTAINER_NAME
+              value: {{ .Values.provisioningProcessor.provisioningContainer | quote }}
+            {{- if .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+            - name: PROVISIONING_CONTAINER_REGISTRY_CA_FILE
+              value: "/var/registry-ca/ca.crt"
+            {{- end }}
+            - name: TRUST_CERTCHAIN_FILE
+              value: "/var/image-trustchain/certchain.pem"
+          {{- with .Values.provisioningProcessor.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: trust-data
+              mountPath: "/var/trust-data"
+              readOnly: false
+            - name: image-trustchain
+              mountPath: "/var/image-trustchain"
+              readOnly: true
+            - name: tmpfs
+              mountPath: "/tmp"
+              readOnly: false
+            {{- if .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+            - name: registry-ca
+              mountPath: /var/registry-ca
+              readOnly: true
+            {{- end }}
       {{- end }}
       containers:
         - name: nginx
@@ -82,9 +131,8 @@ spec:
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
             {{- if .Values.pepproxy.asl_enabled }}
-            - name: roots-json
-              mountPath: /etc/nginx/roots.json
-              subPath: roots.json
+            - name: trust-data
+              mountPath: "/var/trust-data"
               readOnly: true
             - name: asl-signer-cert
               mountPath: /etc/nginx/signer_cert.pem
@@ -156,12 +204,22 @@ spec:
               - key: nginx.conf
                 path: nginx.conf
         {{- if .Values.pepproxy.asl_enabled }}
-        - name: roots-json
+        - name: trust-data
+          emptyDir: {}
+        - name: tmpfs
+          emptyDir:
+            medium: "Memory"
+        - name: image-trustchain
           secret:
-            secretName: roots-json
+            secretName: {{ required "SecretRef for image verification certchain is missing, see imageTrustCertchainSecretRef" .Values.imageTrustCertchainSecretRef }}
+        {{- with .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+        - name: registry-ca
+          secret:
+            secretName: {{ .name }}
             items:
-              - key: roots.json
-                path: "roots.json"
+              - key: {{ .key }}
+                path: ca.crt
+        {{- end }}
         - name: asl-signer-cert
           secret:
             secretName: asl-identity
@@ -191,9 +249,6 @@ spec:
           configMap:
             name: pep-well-known
             defaultMode: 0444
-      securityContext:
-        seccompProfile:
-          type: RuntimeDefault
       {{- with .Values.pepproxy.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

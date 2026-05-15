@@ -1,6 +1,4 @@
-provider "kubernetes" {
-  config_path = pathexpand(var.config_path)
-}
+{{KUBERNETES_PROVIDER_BLOCK}}
 
 provider "keycloak" {
   tls_insecure_skip_verify = var.insecure_tls

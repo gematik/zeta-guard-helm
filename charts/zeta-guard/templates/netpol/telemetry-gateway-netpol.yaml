@@ -1,0 +1,42 @@
+{{- if and .Values.networkPolicy.enabled .Values.telemetryGatewayEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: telemetry-gateway-egress
+  labels:
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    app.kubernetes.io/name: telemetry-gateway
+    app.kubernetes.io/component: telemetry
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    # kube-dns
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- $telemetry := .Values.networkPolicy.egress.telemetry.ipBlocks }}
+    {{- $siem := .Values.networkPolicy.egress.siem.ipBlocks }}
+    {{- $external := concat $telemetry $siem | uniq }}
+    {{- if $external }}
+    # External: gematik Telemetriedaten-Empfänger (OTLP) and SIEM
+    - to:
+        {{- range $external }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,16 +1,121 @@
+# =============================================================================
+# ZETA Guard Helm Chart — Demo / Reference Values
+# =============================================================================
+# This file documents configurable values of the zeta-guard subchart.
+# Use it as a reference when creating environment-specific overrides.
+# Values shown here are sensible demo defaults; adjust for your environment.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Global settings (shared across subcharts via Helm's global mechanism)
+# ---------------------------------------------------------------------------
+global:
+  imagePullSecrets: [ ]
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+  # infinispanExternal: see umbrella chart values for full Infinispan config
+
+# Registry path prefix prepended to image repository names (e.g. "zeta/zeta-guard/")
+registry_name: ""
+
+# additionalLabels is a map of labels added to every zeta-guard resource.
+additionalLabels: {}
+
+# ---------------------------------------------------------------------------
+# Authserver (Keycloak-based ZETA authorization server)
+# ---------------------------------------------------------------------------
 authserver:
+  # --- ServiceAccount ---
+  serviceAccount:
+    create: true
+    name: authserver
+
+  # --- Pod security context (applied to the pod spec) ---
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+  # --- PodDisruptionBudget ---
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+  # --- Image ---
+  image:
+    repository: keycloak-zeta
+    tag: 1.0.0
+  imagePullPolicy: Always
+  imagePullSecrets: [ ]
+
+  # --- Scaling ---
+  replicaCount: 1
+
+  # --- Hostname ---
+  # Public hostname used in Keycloak's frontend URL.
+  hostname: "zeta-demo.example"
+  # Separate hostname for the Keycloak admin console and admin REST API.
+  # When set, /auth/admin is blocked via the PEP proxy and a dedicated admin
+  # ingress is created. Terraform and CI/CD runners must use this hostname.
+  # IP-based access restriction must be configured at the infrastructure layer
+  # (e.g. Cloud Armor, NetworkPolicy, firewall rules).
+  adminHostname: "admin.zeta-demo.example"
+
+  # --- Admin credentials ---
+  # Must be set on first deployment; existing Secrets are retained on upgrade.
+  admin:
+    username: admin
+    password: ""
+
+  # --- Genesis hash & SMC-B hashing pepper ---
+  # Required on first install; leave empty on upgrades.
+  # The chart reads the existing cluster Secret automatically (lookup) and leaves
+  # it unchanged. To rotate a value, set it explicitly during helm upgrade —
+  # see Quickstart guide for consequences.
+  # Generate: genesisHash=$(openssl rand -hex 32)  smcbHashingPepper=$(uuidgen)
+  genesisHash: ""
+  smcbHashingPepper: ""
+
+  # --- Provider configuration (ZETA SMC-B token-exchange) ---
+  provider:
+    smcB:
+      opa:
+        enabled: true
+      opaBaseUrl: "http://opa:8181"
+      opaSimulationBaseUrl: "http://opa-simulation:8181"
+      decisionPath: "/v1/data/policies/zeta/authz/decision"
+      connectionTimeoutMs: 1000
+      readTimeoutMs: 2000
+      failClosed: true
+
+  # --- Client registration ---
   config:
     maxClients: "256"
-  hostname: ""
-  provisioningProcessor:
-    image:
-      tag: 0.5.0
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: false
-      runAsNonRoot: true
-      capabilities:
-        drop: [ "ALL" ]
+    clientRegistrationTTL: "PT5M"
+    clientRegistrationSchedulerInterval: "PT2M"
+
+  # --- HSM integration ---
+  hsm:
+    # Activates HSM Proxy connection at authserver startup (HSM_PROXY_ENDPOINT).
+    # When false, the HsmProxyKeycloakFactory SPI is a no-op.
+    enabled: false
+    endpoint: ""   # gRPC address of the HSM Proxy, e.g. "hsm-sim:50051"
+    tls:
+      # Pod-level HTTPS on port 8443 using the HSM-backed key.
+      # Requires authserver.hsm.enabled: true and a running HSM Proxy.
+      enabled: false
+      keyId: ""    # TLS key ID in the HSM
+    tokenSigning:
+      # JWT token signing via HSM-backed ES256 key. Requires hsm.enabled: true.
+      enabled: false
+      keyId: ""    # Token signing key ID in the HSM
+
+  # --- TLS (non-HSM) ---
+  tls:
+    # Pod-level HTTPS on port 8443 using a cert/key from a Kubernetes Secret.
+    # The Secret must contain keys tls.crt and tls.key.
+    enabled: false
+    certSecretName: ""
+
+  # --- Keycloak build init container ---
   initContainer:
     containerSecurityContext:
       allowPrivilegeEscalation: false
@@ -18,6 +123,15 @@ authserver:
       runAsNonRoot: true
       capabilities:
         drop: [ "ALL" ]
+    resources:
+      limits:
+        cpu: "2"
+        memory: "1Gi"
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+
+  # --- Main Keycloak container ---
   container:
     containerSecurityContext:
       allowPrivilegeEscalation: false
@@ -25,84 +139,416 @@ authserver:
       runAsNonRoot: true
       capabilities:
         drop: [ "ALL" ]
+    resources:
+      limits:
+        cpu: "8"
+        memory: "4Gi"
+      requests:
+        cpu: "4"
+        memory: "4Gi"
 
+  # --- Database connection pool ---
+  dbPool:
+    minSize: 25
+    maxSize: 150
+
+  # --- HTTP thread pool ---
+  httpPool:
+    maxThreads: 200
+
+  # --- Logging ---
+  # Supports per-category overrides separated by comma, e.g. "INFO,org.keycloak:DEBUG"
+  # For production use "WARN" or higher to reduce log volume.
+  log:
+    level: "WARN"
+
+  # --- Probe thresholds ---
+  probes:
+    liveness:
+      initialDelaySeconds: 0
+      periodSeconds: 15
+      failureThreshold: 5
+    readiness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 5
+    startup:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 20
+
+  # --- Host alias (test setup: add /etc/hosts entry) ---
+  hostAlias: {}
+
+  # --- Pod metadata ---
+  podLabels: {}
+  podAnnotations: {}
+
+  # --- Scheduling ---
+  affinity: {}
+  tolerations: [ ]
+
+# --- Authserver feature toggles (top-level) ---
+
+# Log output format: "json" for structured logging, "default" for plain text
+authServerLogConsoleOutput: json
+
+# Enable the Keycloak metrics endpoint
+authServerMetricsEnabled: true
+
+# Enable OpenTelemetry tracing for authserver
+authServerTracingEnabled: true
+
+# ---------------------------------------------------------------------------
+# PEP-Proxy (nginx-based Policy Enforcement Point)
+# ---------------------------------------------------------------------------
+pepproxy:
+  # --- ServiceAccount ---
+  serviceAccount:
+    create: true
+    name: pep-proxy
+
+  # --- Pod security context (applied to the pod spec) ---
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+  # --- Image ---
+  image:
+    repository: ngx_pep
+    tag: 1.0.0
+  imagePullPolicy: Always
+  imagePullSecrets: [ ]
+
+  # --- Scaling ---
+  replicaCount: 1
+
+  # --- Resources ---
+  resources:
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+    requests:
+      cpu: "250m"
+      memory: "200Mi"
+
+  # --- Container security context ---
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop: [ "ALL" ]
+
+  # --- Well-known base URL ---
+  wellKnownBase: http://localhost
+
+  # --- ASL (Application Security Layer) ---
+  # Controls whether ASL is enabled (true) or disabled (false).
+  asl_enabled: true
+  # aslRootCA: "GEM.RCA7 TEST-ONLY"
+  # Specify an override OCSP URL or "off" to disable stapling:
+  # aslOcsp: "http://example.org/ocsp"
+  # Change maximum validity of cached OCSP responses (default 24h per A_24624-01):
+  # alsOcspTtl: 5m
+
+  # --- nginx configuration ---
+  nginxConf:
+    configMapName: pep-nginx-conf
+    # Set to true to have the chart generate the ConfigMap from values below.
+    generateConfigMap: true
+
+    # Accept invalid upstream TLS certificates (test only!)
+    httpClientAcceptInvalidCerts: false
+
+    # ASL test mode — disables encryption. NEVER USE IN PRODUCTION!
+    aslTestmode: false
+
+    # Enable (true) or disable (false) no-travel enforcement
+    noTravel: false
+
+    # Fachdienst URL forwarded to by the PEP
+    fachdienstUrl: "https://fachdienst"
+
+    # JWKS issuer for PoPP key validation.
+    # Set to null to disable PoPP.
+    poppIssuer: "http://localhost"
+
+    # OIDC issuer (iss) of the authorization server
+    pepIssuer: "http://authserver/auth/realms/zeta-guard"
+
+    # Audience required for a valid access token
+    requiredAudience: "test"
+
+    # Scopes required for a valid access token
+    requiredScopes: [ ]
+
+    # Custom nginx location blocks (Go template string)
+    locations: ""
+
+  # --- HSM integration for PEP ---
+  # Set to gRPC URL of HSM Proxy to enable ossl_hsm integration
+  hsmProxyAddr: null
+
+  # --- Pod metadata ---
+  podLabels: {}
+  podAnnotations: {}
+
+  # --- Scheduling ---
+  affinity: {}
+  tolerations: [ ]
+
+# --- PEP-Proxy feature toggles (top-level) ---
+
+# Enable metrics endpoint (requires pepproxyMetricsExporterImage)
+pepproxyMetricsEnabled: true
+
+# nginx-prometheus-exporter image (required when pepproxyMetricsEnabled is true)
+pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter@sha256:0bf30a7c0ec24554a87063905f505a4ae4ea49043eab68f03660474512ba5fc8
+
+# Enable tracing for nginx
+pepproxyTracingEnabled: true
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+
+# DB mode switch:
+# - cloudnative: managed by CloudNativePG operator
+# - external: use external DB (provide authserverDb.kcDb, kcDbUrl, kcDbSchema, kcDbSecretName)
+databaseMode: cloudnative
+
+authserverDb:
+  kcDb: postgres
+
+# CloudNativePG DB connection settings (databaseMode=cloudnative).
+cloudnativeDbUrl: "jdbc:postgresql://keycloak-db-rw:5432/keycloak"
+cloudnativeDbSecretName: "keycloak-db-app"
+cloudnativeDbSchema: "public"
+
+# CloudNativePG cluster settings (databaseMode=cloudnative).
+# WARNING: instances=1 is only suitable for dev/test.
+# For production use instances >= 3.
+cloudnativePg:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  storage:
+    size: 10Gi
+
+# ---------------------------------------------------------------------------
+# Ingress & TLS
+# ---------------------------------------------------------------------------
+
+# cert-manager ClusterIssuer for TLS on the Ingress
+clusterIssuer: "letsencrypt-cd"
+
+# Name of the Kubernetes Secret containing the gematik certificate chain for
+# verifying the cosign signature of the provisioning data image. The Secret
+# must have a key 'certchain.pem' holding a PEM-encoded X.509 certificate
+# chain (CA and intermediate certs, no leaf cert). Required.
+# For production: create your own Secret with gematik production certificates.
+# For tests: use gematik-image-signer-test (included in the chart).
 imageTrustCertchainSecretRef: gematik-image-signer-test
+
+# IngressClass used by generated Ingress resources.
+# With the bundled NIC: keep equal to nginx-ingress.controller.ingressClass.name.
+# With an external controller: set to your class (e.g., gce, openshift-default).
+ingressClassName: "nginx"
+
+# Deploy Ingress resources
+ingressEnabled: true
+ingressMasterAnnotations: {}
+ingressMinionAnnotations: {}
 
 ingress:
   sessionAffinity:
+    # Set to true when replicaCount > 1; uses ip-hash via NIC
     enabled: false
 
-pepproxy:
-  replicaCount: 1
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
+# Deploy the bundled nginx-ingress controller
+nginxIngressEnabled: true
+
+nginx-ingress:
+  controller:
     readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    runAsUser: 1000
-    capabilities:
-      drop: [ "ALL" ]
-  imagePullPolicy: Always
-  nginxConf:
-    generateConfigMap: true
+    # NIC v5.4.0+ uses /tmp for thread-local temp files
+    volumes:
+      - name: tmp
+        emptyDir: {}
+    volumeMounts:
+      - name: tmp
+        mountPath: /tmp
+    enableCustomResources: false
+    ingressClass:
+      name: nginx
+    service:
+      type: LoadBalancer
+      externalTrafficPolicy: Cluster
+    config:
+      entries:
+        ssl-protocols: "TLSv1.2 TLSv1.3"
+        ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384"
+        ssl-ecdh-curve: "prime256v1:secp384r1:brainpoolP256r1:brainpoolP384r1"
+        ssl-session-cache: "none"
+        ssl-session-tickets: "on"
+        ssl-session-timeout: "5m"
+        ssl-stapling: "off"
+        # Use client order
+        ssl-prefer-server-ciphers: "false"
+    resources:
+      limits:
+        cpu: "2"
+        memory: "1Gi"
+      requests:
+        cpu: "250m"
+        memory: "200Mi"
 
-    fachdienstUrl: https://fachdienst
-    pepIssuer: http://authserver/auth/realms/zeta-guard
-    poppIssuer: "http://localhost"
-    requiredAudience: "test"
-    requiredScopes: [ ]
+# Use OpenShift Ingress Route-Controller; creates edge-terminated routes with TLS redirect
+openshiftIngress:
+  enabled: false
+  certName: ""
 
-# DB mode switch:
-# - cloudnative: using CloudNativePG operator
-# - external: use external db by providing values in authserverDb.*
-databaseMode: cloudnative
+# ---------------------------------------------------------------------------
+# Routing & Development
+# ---------------------------------------------------------------------------
 
-# Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
-clusterIssuer: "letsencrypt-cd"
+# When true, the Ingress routes traffic via tiger-proxy instead of direct services.
+routeViaTigerProxy: false
 
+# When enabled, injects a changing annotation to force pod rollouts on each helm upgrade.
+devMode: false
+
+# ---------------------------------------------------------------------------
+# OPA (Open Policy Agent)
+# ---------------------------------------------------------------------------
 opa:
   enabled: true
-  # For demo, use inline policy by default so no registry credentials are required.
-  bundle:
-    # use Workload Identity Federation or secretRef when enabling bundle mode
-    enabled: false
-  provisioningProcessor:
-    image:
-      tag: 0.5.0
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: false
-      runAsNonRoot: true
-      runAsUser: 1000
-      capabilities:
-        drop: [ "ALL" ]
+  replicaCount: 1
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: [ ]
+
+  # OPA server log level: debug|info|warn|error
+  logLevel: info
+
+  # Kubernetes ServiceAccount name for OPA pods (blank = default)
+  serviceAccountName: ""
+
+  # --- Container security context ---
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     runAsNonRoot: true
-    runAsUser: 1000
     capabilities:
       drop: [ "ALL" ]
-  # set if Workload Identity Federation is enabled
+
+  # --- CronJob security context (WIF token renewer) ---
   cronjobSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
     runAsNonRoot: true
-    runAsUser: 1000
     capabilities:
       drop: [ "ALL" ]
-  logLevel: info
+
+  # --- Resources ---
+  resources:
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+    requests:
+      cpu: "100m"
+      memory: "200Mi"
+
+  # --- Health probes ---
+  health:
+    liveness:
+      periodSeconds: 20
+    readiness:
+      periodSeconds: 20
+
+  # --- Bundle mode (disabled = inline policyRego is used) ---
+  bundle:
+    enabled: false
+    # Logical service name used in OPA config
+    serviceName: registry
+    # Base URL of the OCI registry
+    url: ""
+    # Fully qualified bundle resource (including registry host)
+    resource: ""
+    credentials:
+      secretRef:
+        name: ""
+    polling:
+      min_delay_seconds: 60
+      max_delay_seconds: 60
+    # Signature verification for OPA bundles
+    verification:
+      enabled: true
+      keyId: ""
+      algorithm: ""
+      publicKey: ""
+      scope: ""
+
+  # --- OPA Simulation ---
+  simulation:
+    enabled: true
+    replicaCount: 1
+    bundle:
+      # Optional explicit simulation bundle resource. If empty, the chart derives from active resource.
+      resource: ""
+
+  # --- Workload Identity Federation (AKS → GCP STS) for GAR access ---
   workloadIdentityFederation:
     enabled: false
-# Decision logs toggle used by both inline and bundle configs
+    sts:
+      sa: ""
+    tokenRenewer:
+      enabled: true
+      schedule: "*/45 * * * *"
+      backoffLimit: 5
+    worker:
+      image: google/cloud-sdk:549.0.0
+      imagePullPolicy: IfNotPresent
+      imagePullSecrets: [ ]
+      resources:
+        limits:
+          cpu: "250m"
+          memory: "200Mi"
+        requests:
+          cpu: "50m"
+          memory: "50Mi"
+
+  # --- Pod metadata ---
+  podLabels: {}
+  podAnnotations: {}
+
+  # --- Scheduling ---
+  affinity: {}
+  tolerations: [ ]
+
+# --- OPA feature toggles (top-level) ---
+
+# Enable distributed tracing with a gRPC endpoint
+opaDistributedTracingEnabled: true
+
+# Export bundle and plugin status metrics to Prometheus
+opaStatusPrometheus: true
+
+# --- OPA policy / data configuration ---
 opaPolicy:
+  # Enable console decision logs in OPA
   logDecisions: true
-  # Example fake policy: allow-all decision object.
-  # The policies should be loaded from PIP-PAP Service (workload identity federation or secretRef)
+  # Default fake policy: allow-all decision object.
+  # In production, policies are loaded from PIP-PAP via bundle mode.
   policyRego: |
     package policies.zeta.authz
 
-    # Minimal decision object compatible with callers expecting
-    # data.policies.zeta.authz.decision => {"allow": bool, "ttl": {"access_token": number, "refresh_token": number}}
     decision := {
       "allow": true,
       "ttl": {
@@ -111,5 +557,168 @@ opaPolicy:
       },
     }
 
-openshiftRoute:
+# ---------------------------------------------------------------------------
+# Provisioning Processor (shared init container for trust-anchor provisioning)
+# ---------------------------------------------------------------------------
+# Used by authserver, OPA, OPA-simulation, and PEP-Proxy as init container.
+provisioningProcessor:
+  provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
+  # provisioningContainerCaSecretRef:  # Optional: CA cert for private registry
+  #   name: registry-ca
+  #   key: ca.crt
+  image:
+    repository: provisioning-processor
+    tag: 1.0.0
+  imagePullPolicy: Always
+  resources:
+    limits:
+      cpu: "1"
+      memory: "200Mi"
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    capabilities:
+      drop: [ "ALL" ]
+
+# ---------------------------------------------------------------------------
+# Gematik connection (OIDC token renewer CronJob)
+# ---------------------------------------------------------------------------
+
+# If true, the CronJob gematik-oidc-token-renewer-cronjob maintains a valid
+# access token in the Secret gematik-oidc-token.
+gematikConnectionEnabled: false
+
+gematik:
+  workloadIdentityFederation:
+    projectNumber: ""
+    poolId: ""
+    workloadIdentityProvider: ""
+  serviceAccountEmailAddress: ""
+  idTokenAudience: ""
+
+# ---------------------------------------------------------------------------
+# Telemetry Gateway (OpenTelemetry Collector)
+# ---------------------------------------------------------------------------
+
+# Deploy the telemetry gateway
+telemetryGatewayEnabled: true
+
+telemetry-gateway:
+  mode: deployment
+  image:
+    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+  command:
+    name: otelcol-k8s
+  resources:
+    limits:
+      cpu: "4"
+      memory: "2Gi"
+    requests:
+      cpu: "100m"
+      memory: "200Mi"
+  extraVolumeMounts: [ ]
+  extraVolumes: [ ]
+  ports:
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+  additionalLabels:
+    app.kubernetes.io/part-of: zeta-guards
+  config:
+    exporters:
+      # Override with environment-specific exporter, e.g.:
+      # otlp_grpc/gematik:
+      #   endpoint: https://otlp.v1.bd.prod.ccs.gematik.solutions:443
+      #   auth:
+      #     authenticator: bearertokenauth/gematik
+      debug: {}
+    processors:
+      redaction/betreiber:
+        allow_all_keys: true
+        blocked_key_patterns:
+          - ".*token.*"
+        # See chart values.yaml for full list of blocked_values patterns
+        blocked_values: [ ]
+        ignored_key_patterns:
+          - '^app\.kubernetes\.io\/.+'
+          - '^container\..+'
+          - '^k8s\..+'
+          - '^net\..+'
+          - '^log\..+'
+          - '^otel\..+'
+          - '^service\..+'
+        ignored_keys:
+          - http.user_agent
+        redact_all_types: true
+        summary: info
+    service:
+      extensions:
+        - health_check
+      pipelines:
+        logs:
+          exporters:
+            - debug
+        metrics:
+          exporters:
+            - debug
+        traces:
+          exporters:
+            - debug
+
+# ---------------------------------------------------------------------------
+# Egress NetworkPolicies (A_27864-01)
+# ---------------------------------------------------------------------------
+# When enabled, each ZETA Guard pod gets an egress NetworkPolicy that restricts
+# outbound traffic to explicitly listed IP blocks. Internal cluster communication
+# (DNS, pod-to-pod) is always allowed via pod/namespace selectors.
+# Ports are not restricted in this release (Phase 1 — IP-only).
+#
+# Set ipBlocks per category (list of CIDR strings, e.g. ["1.2.3.4/32"]).
+# Leave empty to allow no external egress for that category.
+#
+# IP acquisition:
+#   - gematik endpoints (telemetry, SIEM, PoPP): dig +short <hostname>
+#   - Google Artifact Registry: https://www.gstatic.com/ipranges/cloud.json (filter europe-west3)
+#   - OCSP responders: openssl x509 -in <cert.pem> -text | grep -A2 "OCSP" → dig +short <ocsp-host>
+#
+# For provider-internal traffic, set providerInternal.allowAll: true to bypass
+# IP restrictions entirely (e.g. during initial setup).
+networkPolicy:
   enabled: false
+
+  egress:
+    telemetry: # gematik Telemetriedaten-Empfänger (OTLP)
+      ipBlocks: [ ]               # e.g. ["<gematik-otlp-ip>/32"]
+    siem: # SIEM der gematik
+      ipBlocks: [ ]
+    artifactRegistry: # ZETA Artifact Registry bei gematik (OPA bundles, images)
+      ipBlocks: [ ]               # e.g. Google Artifact Registry europe-west3-docker.pkg.dev
+    providerArtifactRegistry: # Provider-interne Registry
+      ipBlocks: [ ]
+    ocspCabForum: # OCSP/CRL TLS TSPs nach CAB Forum
+      ipBlocks: [ ]
+    ocspSmcbTsp: # SMC-B TSP OCSP Responder
+      ipBlocks: [ ]
+    ocspTiPki: # OCSP Responder TSP Komponenten PKI der TI
+      ipBlocks: [ ]
+    pip: # PIP — Quelle der OPA Policy Bundles
+      ipBlocks: [ ]
+    popp: # PoPP Dienst
+      ipBlocks: [ ]
+      mock: false                # set true when popp-mocks subchart is deployed (allows egress to app=popp-mock pod, targetPort 8080)
+    providerInternal: # Anbieter-interner Verkehr
+      allowAll: false            # true = gesamter Egress erlaubt (kein IP-Filter)
+      resourceServers:
+        ipBlocks: [ ]
+      telemetrySystems:
+        ipBlocks: [ ]
+      podSelectors: [ ]           # cluster-local pods via podSelector+targetPort (kindnet post-DNAT); e.g. [{matchLabels: {app: testfachdienst}, port: 8080}]

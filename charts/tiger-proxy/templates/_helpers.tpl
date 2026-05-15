@@ -60,3 +60,16 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+
+{{/*
+Try to resolve IP of cluster DNS dynamically or fallback to placeholder
+*/}}
+{{- define "clusterDnsIp" -}}
+{{- $dnsService := lookup "v1" "Service" "kube-system" "kube-dns" }}
+{{- if empty $dnsService }}
+{{- printf "%s" "10.96.0.10" }}
+{{- else }}
+{{- default "10.96.0.10" $dnsService.spec.clusterIP }}
+{{- end }}
+{{- end }}

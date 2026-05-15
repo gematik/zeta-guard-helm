@@ -18,3 +18,8 @@ That entrypoint forwards requests to the Tiger route `/telemetry/gateway`, which
 `tiger-proxy.proxyConfig.proxyRoutes[]`. Whether telemetry goes through Tiger or directly to the collector is therefore
 controlled by the exporter destination (`http://tiger-proxy:4138` versus the real collector endpoint), not by
 `zeta-guard.routeViaTigerProxy`.
+
+When PoPP metadata is served through Tiger Proxy, the proxy route list must also expose the externally visible
+federation and key endpoints that the PEP stack relies on: `/.well-known/openid-federation`,
+`/.well-known/signed-jwks`, and the `/popp` base path. In the default setup these routes are
+forwarded to the `popp-statics` Service from the `popp-mocks` chart.

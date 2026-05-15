@@ -34,8 +34,8 @@ TF_PATH := terraform/authserver
 TF_VAR_config_path ?= "~/.kube/config"
 TF_VAR_use_kubernetes ?= true
 
-# Enforce SMB keystore vars for most targets (skip helper-only targets)
-ifeq ($(filter help deps lint template-demo yamllint generate-asl-identity-secret,$(MAKECMDGOALS)),)
+# Enforce SMB keystore vars only for targets that actually pass them to Helm
+ifneq ($(filter deploy deploy-debug template template--debug render dry-run,$(MAKECMDGOALS)),)
 
 ifeq ($(strip $(SMB_KEYSTORE_PW_FILE)),)
 $(error SMB_KEYSTORE_PW_FILE must not be empty)
@@ -45,9 +45,25 @@ ifeq ($(strip $(SMB_KEYSTORE_FILE_B64)),)
 $(error SMB_KEYSTORE_FILE_B64 must not be empty)
 endif
 
+ifneq ($(strip $(OCSP_SMB_KEYSTORE_PW_FILE)),)
+override HELM_EXTRA_VALUES_PARAMS += --set-file "zeta-cert-validation-mock.signing.smb.keyStorePassword=${OCSP_SMB_KEYSTORE_PW_FILE}"
 endif
 
-HELM_EXTRA_VALUES_PARAMS=--set-file "smcb_keystore.password=${SMB_KEYSTORE_PW_FILE}" --set-file "smcb_keystore.keystore=${SMB_KEYSTORE_FILE_B64}"
+ifneq ($(strip $(OCSP_SMB_KEYSTORE_FILE_B64)),)
+override HELM_EXTRA_VALUES_PARAMS += --set-file "zeta-cert-validation-mock.signing.smb.keyStore=${OCSP_SMB_KEYSTORE_FILE_B64}"
+endif
+
+# add override to allow additional params, e.g. `make <cmd> HELM_EXTRA_VALUES_PARAMS=--debug`
+override HELM_EXTRA_VALUES_PARAMS += --set-file "smcb_keystore.password=${SMB_KEYSTORE_PW_FILE}" --set-file "smcb_keystore.keystore=${SMB_KEYSTORE_FILE_B64}"
+
+endif
+
+# For the local-guard stage, inject the detected HOST_IP into the NetworkPolicy so that the PEP proxy
+# can reach the ingress (zeta-kind.local → HOST_IP via CoreDNS) for JWK fetches without hardcoding
+# the IP in values.local-guard.yaml. HOST_IP is auto-detected (same value used to patch CoreDNS).
+ifeq ($(STAGE),local-guard)
+  override HELM_EXTRA_VALUES_PARAMS += --set "zeta-guard.networkPolicy.egress.providerInternal.resourceServers.ipBlocks[0]=$(HOST_IP)/32"
+endif
 
 .PHONY: \
   help deps lint template-demo yamllint \
@@ -55,7 +71,7 @@ HELM_EXTRA_VALUES_PARAMS=--set-file "smcb_keystore.password=${SMB_KEYSTORE_PW_FI
   template render dry-run \
   deploy deploy-debug \
   config config-plan config-import \
-  status uninstall clean \
+  status versions versions-debug uninstall clean \
   dry-run-security-restricted security-restricted security-disable show-label \
   generate-asl-identity-secret \
   renew-opa-token \
@@ -78,9 +94,8 @@ endif
 	@echo "Vars (effective):\n RELEASE=$(RELEASE)\n NAMESPACE=$(NAMESPACE)\n VALUES=$(VALUES)\n STAGE=$(STAGE)"
 	@echo
 	@echo "Note:"
-	@echo "  Most targets require the following environment variables to be set:"
-	@echo "    - SMB_KEYSTORE_PW_FILE"
-	@echo "    - SMB_KEYSTORE_FILE_B64"
+	@echo "  The following targets require SMB_KEYSTORE_PW_FILE and SMB_KEYSTORE_FILE_B64:"
+	@echo "    deploy, deploy-debug, template, template--debug, render, dry-run"
 
 
 $(LOCK): Chart.yaml $(SUBCHARTS) ## Refresh vendored deps + lock when chart specs change
@@ -142,13 +157,18 @@ uninstall-cnpg-operator: ## Uninstall only the CNPG operator release (keep CRDs)
 ### LINTING/VALIDATION ###
 lint: ## Helm lint subcharts and umbrella
 	# Strict lint of zeta-guard subchart against demo values — validates schema and catches deprecated APIs
-	helm lint charts/zeta-guard --strict -f charts/zeta-guard/values-demo.yaml --set authserver.admin.password=dummy
+	helm lint charts/zeta-guard --strict -f charts/zeta-guard/values-demo.yaml \
+		--set authserver.admin.password=dummy \
+		--set authserver.genesisHash=dummy \
+		--set authserver.smcbHashingPepper=dummy
 	helm lint . --with-subcharts
 
 template-demo: ## Render zeta-guard chart with demo values and validate YAML structure
 	helm template zeta-guard charts/zeta-guard \
 	  -f charts/zeta-guard/values-demo.yaml \
 	  --set authserver.admin.password=dummy \
+	  --set authserver.genesisHash=dummy \
+	  --set authserver.smcbHashingPepper=dummy \
 	  | yamllint -c .yamllint.yaml -
 
 ### RENDERING ###
@@ -246,6 +266,14 @@ config-import: ## For development and troubleshooting only - imports configurati
 status: ## Show Helm release status in the namespace
 	helm status $(RELEASE) -n $(NAMESPACE)
 
+versions: ## Show deployed component images and versions
+	@echo "=== Deployed images in $(NAMESPACE) ==="
+	@kubectl -n $(NAMESPACE) get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.initContainers[*]}  init: {.image}{"\n"}{end}{range .spec.containers[*]}  container: {.image}{"\n"}{end}{end}' | sed 's/^\([a-zA-Z][a-zA-Z0-9_-]*\)-[a-f0-9]\{1,\}-[a-z0-9]\{5\}$$/\1/'
+
+versions-debug: ## Show deployed components with all images and digests
+	@echo "=== Deployed images in $(NAMESPACE) ==="
+	@kubectl -n $(NAMESPACE) get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.initContainerStatuses[*]}  init: {.image}{"\n"}        {.imageID}{"\n"}{end}{range .status.containerStatuses[*]}  container: {.image}{"\n"}            {.imageID}{"\n"}{end}{end}'
+
 
 ### UNINSTALL / CLEAN ###
 uninstall: ## Uninstall the release from the namespace
@@ -257,7 +285,7 @@ uninstall: ## Uninstall the release from the namespace
 
 clean: ## Remove the generated rendered.yaml and terraform files
 	rm -f rendered.yaml
-	rm -rf $(TF_PATH)/.terraform $(TF_PATH)/terraform.tfstate* $(TF_PATH)/.terraform.lock.hcl $(TF_PATH)/main.tf
+	rm -rf $(TF_PATH)/.terraform $(TF_PATH)/terraform.tfstate* $(TF_PATH)/.terraform.lock.hcl $(TF_PATH)/main.tf $(TF_PATH)/providers.tf
 	@find $(TF_PATH)/environments -type f -name '*.backend.hcl' ! -name 'demo.backend.hcl' -delete
 
 trivy: ## scans a Kubernetes namespace for vulnerabilities, misconfigurations and exposed secrets. Requires trivy
@@ -298,7 +326,7 @@ KIND_VALUES_FILE ?= $(firstword $(wildcard $(VALUES_DIR)values.local.yaml privat
 KIND_INGRESS_HOSTS_AUTO := $(strip $(shell \
 	if [ -n "$(KIND_VALUES_FILE)" ] && [ -f "$(KIND_VALUES_FILE)" ]; then \
 	  awk '\
-	    /ingressRulesHost:|hostname:|zetaBaseUrl:|wellKnownBase:|requiredAudience:|pepIssuer:/ { \
+	    /ingressRulesHost:|adminHostname:|hostname:|zetaBaseUrl:|wellKnownBase:|requiredAudience:|pepIssuer:/ { \
 	      line=$$0; sub(/^[^:]*:[[:space:]]*/, "", line); gsub(/["'\'',]/, "", line); \
 	      sub(/^https?:\/\//, "", line); sub(/\/.*/, "", line); sub(/:.*/, "", line); \
 	      if (line ~ /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$$/) print line; \

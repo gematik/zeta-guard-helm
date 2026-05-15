@@ -1,0 +1,18 @@
+{{- if and .Values.authserver.podDisruptionBudget .Values.authserver.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: authserver
+  labels:
+    {{- include "authserver.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.authserver.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.authserver.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "authserver.selectorLabels" . | nindent 6 }}
+{{- end }}

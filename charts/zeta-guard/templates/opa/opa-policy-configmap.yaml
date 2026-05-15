@@ -1,4 +1,5 @@
-{{- if .Values.opa.enabled }}
+{{ if .Values.opa.enabled -}}
+
 {{- if not .Values.opa.bundle.enabled }}
 ---
 apiVersion: v1
@@ -9,8 +10,9 @@ metadata:
     {{- include "opa.labels" . | nindent 4 }}
 data:
   authz.rego: |
-{{ include "opa.policyRego" . | indent 4 }}
+    {{- include "opa.policyRego" . | nindent 4 }}
 {{- end }}
+
 {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
 ---
 apiVersion: v1
@@ -21,14 +23,15 @@ metadata:
     {{- include "opa.labels" . | nindent 4 }}
 data:
   opa.yaml: |
-{{- if .Values.opa.bundle.enabled }}
-{{ include "opa.bundleConfigYaml" . | indent 4 }}
-{{- else }}
-{{ include "opa.configYaml" . | indent 4 }}
-{{- end }}
-{{- end }}
+    {{- $opaConfig := "" }}
+    {{- if .Values.opa.bundle.enabled }}
+      {{- $opaConfig = include "opa.bundleConfigYaml" . }}
+    {{- else }}
+      {{- $opaConfig = include "opa.configYaml" . }}
+    {{- end }}
+    {{- $opaConfig | nindent 4 }}
 
-{{- if and .Values.opa.simulation.enabled (or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled) }}
+{{- if .Values.opa.simulation.enabled  }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -38,10 +41,15 @@ metadata:
     {{- include "opaSimulation.labels" . | nindent 4 }}
 data:
   opa.yaml: |
-{{- if .Values.opa.bundle.enabled }}
-{{ include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .)) | indent 4 }}
-{{- else }}
-{{ include "opa.configYaml" . | indent 4 }}
+    {{- $opaSimulationConfig := "" }}
+    {{- if .Values.opa.bundle.enabled }}
+      {{- $opaSimulationConfig = include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .)) }}
+    {{- else }}
+      {{- $opaSimulationConfig = include "opa.configYaml" . }}
+    {{- end }}
+    {{- $rectifiedOpaSimulationConfig := mergeOverwrite (fromYaml $opaSimulationConfig) (fromYaml (include "opa-simulation.config" .)) | toYamlPretty }}
+    {{- $rectifiedOpaSimulationConfig | nindent 4 }}
+
 {{- end }}
 
 {{- end }}

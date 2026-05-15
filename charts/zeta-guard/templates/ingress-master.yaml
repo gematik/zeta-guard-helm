@@ -11,9 +11,15 @@ metadata:
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "master"
     {{- end }}
-    {{- if .Values.authserver.hostname }}
+    {{- if and .Values.authserver.hostname }}
+    {{- if not (and .Values.nginxIngressEnabled .Values.nginxIngressHsm) }}
     cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt" | quote }}
-    ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/private-key-algorithm: ECDSA
+    cert-manager.io/private-key-size: "256"
+    {{- end }}
+    {{- if not .Values.nginxIngressEnabled }}
+    nginx.org/ssl-redirect: "true"
+    {{- end }}
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/hsts: "true"
     nginx.org/hsts-max-age: "31536000"
@@ -25,14 +31,14 @@ metadata:
     {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
-  {{- if .Values.authserver.hostname }}
+  {{- if (and .Values.authserver.hostname (not (and .Values.nginxIngressEnabled .Values.nginxIngressHsm))) }}
   tls:
     - hosts:
         - {{ .Values.authserver.hostname | quote }}
       secretName: "zeta-guard-tls"
   {{- end }}
+  {{- if .Values.authserver.hostname }}
   rules:
-    - {{- if .Values.authserver.hostname }}
-      host: {{ .Values.authserver.hostname | quote }}
-      {{- end }}
+    - host: {{ .Values.authserver.hostname | quote }}
+  {{- end }}
 {{- end }}

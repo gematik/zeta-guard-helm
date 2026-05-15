@@ -19,6 +19,44 @@ and your administration frontend is at
     {{- end }}
 
 
+Deployed component versions:
+{{- $zg := (index .Subcharts "zeta-guard") }}
+  authserver:                {{ $zg.Values.authserver.image.tag | default "default" }}
+    hsm:            {{ $zg.Values.authserver.hsm.enabled | ternary "enabled" "disabled" }}
+    hsm-tls:        {{ $zg.Values.authserver.hsm.tls.enabled | ternary "enabled" "disabled" }}
+    hsm-token-sign: {{ $zg.Values.authserver.hsm.tokenSigning.enabled | ternary "enabled" "disabled" }}
+{{- if $zg.Values.authserver.provisioningProcessor }}
+  provisioning-processor:    {{ $zg.Values.authserver.provisioningProcessor.image.tag | default "default" }}
+{{- end }}
+  pepproxy:                  {{ $zg.Values.pepproxy.image.tag | default "default" }}
+  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}{{ if not $zg.Values.opa.enabled }} (disabled){{ end }}
+    opa-wif: {{ (and $zg.Values.opa.workloadIdentityFederation $zg.Values.opa.workloadIdentityFederation.enabled) | ternary "enabled" "disabled" }}
+  telemetry-gateway:         {{ (index $zg.Values "telemetry-gateway").image.tag | default "default" }}{{ if not $zg.Values.telemetryGatewayEnabled }} (disabled){{ end }}
+    gematik-connection: {{ $zg.Values.gematikConnectionEnabled | ternary "enabled" "disabled" }}
+{{- if .Subcharts.testdriver }}
+  testdriver:                {{ .Subcharts.testdriver.Values.image.tag | default "default" }}
+{{- end }}
+{{- if .Subcharts.nativedriver }}
+  nativedriver:                {{ .Subcharts.nativedriver.Values.image.tag | default "default" }}
+{{- end }}
+{{- if .Subcharts.testfachdienst }}
+  testfachdienst:            {{ .Subcharts.testfachdienst.Values.image.tag | default "default" }}
+{{- end }}
+{{- if (index .Subcharts "tiger-proxy") }}
+  tiger-proxy:               {{ (index .Subcharts "tiger-proxy").Values.image.tag | default "default" }}
+{{- end }}
+{{- if .Subcharts.exauthsim }}
+  exauthsim:                 {{ .Subcharts.exauthsim.Values.image.tag | default "default" }}
+{{- end }}
+{{- if .Subcharts.hsmsim }}
+{{- if .Subcharts.hsmsim.Values.enabled }}
+  hsm-sim:                   {{ .Subcharts.hsmsim.Values.image.tag | default "default" }}
+{{- end }}
+{{- end }}
+{{- if eq $zg.Values.databaseMode "cloudnative" }}
+  database (cloudnative-pg): {{ $zg.Values.cloudnativePg.imageName | default "default" }}
+{{- end }}
+
 {{ if .Values.testMonitoringServiceEnabled -}}
 - All monitoring services are available via the frontend proxy after running this command:
      kubectl --namespace {{ .Release.Namespace }} port-forward svc/frontend-proxy 8080:8080

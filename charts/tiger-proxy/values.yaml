@@ -16,9 +16,49 @@ image:
   repository: testproxy
 imagePullPolicy: Always
 
-resources:
-  limits:
-    cpu: 900m
+nginxSidecar:
+  image:
+    registry: ""
+    repository: nginxinc/nginx-unprivileged
+    tag: "alpine3.22-slim"
+  imagePullPolicy: IfNotPresent
+  resources: {}
+  # resources:
+  #   limits:
+  #     cpu: "200m"
+  #     memory: "128Mi"
+  #   requests:
+  #     cpu: "50m"
+  #     memory: "64Mi"
+
+resources: {}
+# resources:
+#   limits:
+#     cpu: "900m"
+#     memory: "1Gi"
+#   requests:
+#     cpu: "500m"
+#     memory: "512Mi"
+
+serviceAccount:
+  create: true
+  name: tiger-proxy
+
+podDisruptionBudget:
+  enabled: false
+  # minAvailable: 1
+  # maxUnavailable: 1
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext: {}
+#  allowPrivilegeEscalation: false
+#  readOnlyRootFilesystem: true
+#  runAsNonRoot: true
+#  capabilities:
+#    drop: [ "ALL" ]
 
 proxyConfig:
   proxyPort: 8080
@@ -40,6 +80,10 @@ proxyConfig:
       to: http://testdriver/proxy
     - from: /opa
       to: http://opa:8181
+    - from: /.well-known/openid-federation
+      to: http://popp-statics/.well-known/openid-federation
+    - from: /.well-known/signed-jwks
+      to: http://popp-statics/.well-known/signed-jwks
     - from: /popp
       to: http://popp-statics
     - from: /

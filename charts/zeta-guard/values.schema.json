@@ -5,6 +5,89 @@
       "type": "object",
       "description": "Keycloak-based authorization server configuration.",
       "properties": {
+        "dbEnc": {
+          "type": "object",
+          "description": "Configuration for application side database encryption. Use recommended only if you have to run in a trusted execution environment (German VAU).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enables/disables application side database encryption. Use recommended only if you have to run in a trusted execution environment (German VAU)."
+            },
+            "bootstrapInterval": {
+              "type": "string",
+              "description": "Interval in which to check for encrypted realm. Mainly interesting for the first boot during installation. (This value is in ISO 8601 duration format)",
+              "examples": [
+                "PT20S"
+              ]
+            },
+            "bootstrapAttempts": {
+              "type": "integer",
+              "description": "The number of times to check for encrypted realm. Mainly interesting for the first boot during installation.",
+              "examples": [
+                15,
+                5
+              ]
+            },
+            "keychainFileName": {
+              "type": "string",
+              "description": "Absolute file name of the hsm encrypted keychain file.",
+              "examples": [
+                "/keychain_data/keychain"
+              ]
+            },
+            "initContainerProvideKeys": {
+              "type": "object",
+              "description": "Container spec for an init container that provides encryption keys to the keychain generator (for VAU database encryption)."
+            },
+            "initContainerStoreKeys": {
+              "type": "object",
+              "description": "Container spec for an init container that stores the generated keychain."
+            },
+            "keychainGenerator": {
+              "type": "object",
+              "description": "Configuration for the keychain-generator init container (for VAU database encryption).",
+              "properties": {
+                "resources": {
+                  "$ref": "#/$defs/K8sResourceRequirements",
+                  "description": "CPU and memory resource requests/limits for the keychain-generator init container."
+                },
+                "containerSecurityContext": {
+                  "$ref": "#/$defs/K8sContainerSecurityContext",
+                  "description": "Kubernetes SecurityContext applied to the keychain-generator init container."
+                },
+                "extraVolumeMounts": {
+                  "type": "array",
+                  "description": "Additional volume mounts for the keychain-generator init container."
+                },
+                "image": {
+                  "$ref": "#/$defs/ZetaImage",
+                  "description": "Container image overrides for the keychain-generator."
+                },
+                "imagePullPolicy": {
+                  "type": "string",
+                  "description": "Kubernetes image pull policy for the keychain-generator container.",
+                  "examples": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/K8sServiceAccount",
+          "description": "ServiceAccount configuration for the authserver deployment."
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/K8sPodSecurityContext",
+          "description": "Pod-level security context for the authserver deployment."
+        },
+        "podDisruptionBudget": {
+          "$ref": "#/$defs/K8sPodDisruptionBudget",
+          "description": "PodDisruptionBudget for the authserver deployment."
+        },
         "replicaCount": {
           "type": "integer",
           "minimum": 1,
@@ -92,6 +175,7 @@
         },
         "container": {
           "type": "object",
+          "description": "Authserver main container configuration.",
           "properties": {
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
@@ -104,11 +188,20 @@
                   "allowPrivilegeEscalation": false
                 }
               ]
+            },
+            "resources": {
+              "$ref": "#/$defs/K8sResourceRequirements",
+              "description": "CPU and memory resource requests/limits for the authserver container."
+            },
+            "extraVolumeMounts": {
+              "type": "array",
+              "description": "Additional volume mounts for the authserver main container. May be used for truststores, database VAU database encryptions keys or other things."
             }
           }
         },
         "initContainer": {
           "type": "object",
+          "description": "Authserver keycloak-build init container configuration.",
           "properties": {
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
@@ -121,6 +214,10 @@
                   "allowPrivilegeEscalation": false
                 }
               ]
+            },
+            "resources": {
+              "$ref": "#/$defs/K8sResourceRequirements",
+              "description": "CPU and memory resource requests/limits for the keycloak-build init container."
             }
           }
         },
@@ -177,9 +274,23 @@
             "Never"
           ]
         },
-        "resources": {
-          "$ref": "#/$defs/K8sResourceRequirements",
-          "description": "CPU and memory resource requests/limits for the authserver container."
+        "probes": {
+          "type": "object",
+          "description": "Configurable probe thresholds for the authserver container.",
+          "properties": {
+            "liveness": {
+              "$ref": "#/$defs/K8sProbe",
+              "description": "Liveness probe configuration."
+            },
+            "readiness": {
+              "$ref": "#/$defs/K8sProbe",
+              "description": "Readiness probe configuration."
+            },
+            "startup": {
+              "$ref": "#/$defs/K8sProbe",
+              "description": "Startup probe configuration."
+            }
+          }
         },
         "log": {
           "type": "object",
@@ -212,18 +323,47 @@
         "hsm": {
           "type": "object",
           "description": "HSM Proxy integration in Authserver.",
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "tls": {
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "tokenSigning": {
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          },
           "properties": {
             "enabled": {
               "type": "boolean",
-              "description": "Activate HSM key-loading at startup (sets HSM_PROXY_ENDPOINT / HSM_PROXY_KEY_ID)."
+              "description": "Activate HSM Proxy connection at startup (sets HSM_PROXY_ENDPOINT)."
             },
             "endpoint": {
               "type": "string",
               "description": "gRPC address of the HSM Proxy, e.g. \"hsm-sim:50051\"."
-            },
-            "keyId": {
-              "type": "string",
-              "description": "Key identifier in the HSM, e.g. \"zeta-guard-keycloak-tls-es256-v1.p256\"."
             },
             "tls": {
               "type": "object",
@@ -232,6 +372,34 @@
                 "enabled": {
                   "type": "boolean",
                   "description": "Enable HTTPS on port 8443 using the HSM-backed HSMPROXY KeyStore."
+                },
+                "keyId": {
+                  "type": "string",
+                  "description": "TLS key ID in the HSM, e.g. \"zeta-guard-keycloak-tls-es256-v1.p256\"."
+                }
+              }
+            },
+            "tokenSigning": {
+              "type": "object",
+              "description": "JWT token signing via HSM-backed ES256 key. Requires hsm.enabled: true.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable HSM-backed ES256 token signing (sets HSM_PROXY_TOKEN_KEY_ID)."
+                },
+                "keyId": {
+                  "type": "string",
+                  "description": "Token-signing key ID in the HSM, e.g. \"zeta-guard-keycloak-token-es256-v1.p256\"."
+                }
+              }
+            },
+            "dbEnc": {
+              "type": "object",
+              "description": "Application side database encryption via hsm. Requires hsm.enabled: true and dbEnc.enabled: true.",
+              "properties": {
+                "keyId": {
+                  "type": "string",
+                  "description": "Symmetric key ID in the HSM to use as the key encryption key."
                 }
               }
             }
@@ -358,6 +526,67 @@
               }
             }
           }
+        },
+        "extraVolumes": {
+          "type": "array",
+          "description": "Additional volumes for the authserver pod. May be used for truststores, database VAU database encryptions keys or other things."
+        },
+        "adminHostname": {
+          "type": "string",
+          "description": "When set, /auth/admin is blocked via the PEP proxy and a dedicated admin ingress is created. Terraform/CI must use this hostname for keycloak_url.",
+          "examples": [
+            "admin.zeta-kind.local"
+          ]
+        },
+        "adminTlsSecretName": {
+          "type": "string",
+          "description": "TLS secret name for the admin ingress. Defaults to 'zeta-guard-admin-tls'. For local/KIND environments reuse the main cert by setting this to 'zeta-guard-tls'.",
+          "examples": [
+            "zeta-guard-admin-tls",
+            "zeta-guard-tls"
+          ]
+        },
+        "podLabels": {
+          "type": "object",
+          "description": "Additional labels to add to the authserver pod.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "podAnnotations": {
+          "type": "object",
+          "description": "Additional Kubernetes annotations for the authserver pod.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "hostAlias": {
+          "type": "object",
+          "description": "Adds an entry to the authserver pod's /etc/hosts, mapping hostAlias.ip to hostAlias.name. Mostly for test setup purposes.",
+          "properties": {
+            "ip": {
+              "type": "string",
+              "description": "IP address for the host alias.",
+              "examples": [
+                "192.168.1.100"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "description": "Hostname to map to the IP.",
+              "examples": [
+                "fachdienst.example.com"
+              ]
+            }
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Kubernetes affinity rules for authserver pod scheduling."
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Kubernetes tolerations for authserver pod scheduling."
         }
       }
     },
@@ -377,15 +606,29 @@
       "type": "boolean",
       "description": "Enable OpenTelemetry distributed tracing for Keycloak."
     },
+    "additionalLabels": {
+      "type": "object",
+      "description": "Map of labels added to each zeta-guard resource.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "pepproxyMetricsExporterImage": {
+      "type": "string",
+      "description": "Container image for the nginx-prometheus-exporter sidecar. Required when pepproxyMetricsEnabled is true.",
+      "examples": [
+        "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-prometheus-exporter:1.5.1-zeta1"
+      ]
+    },
     "gematik": {
       "type": "object",
       "description": "Configuration for the gematik connection (OIDC token renewal via Workload Identity Federation).",
       "properties": {
-        "clientId": {
+        "idTokenAudience": {
           "type": "string",
-          "description": "OAuth2 client ID for the IAP-secured gematik resource.",
+          "description": "Audience claim for the ID token generated by the gematik-oidc-token-renewer cronjob. Typically the OAuth 2.0 Client ID of the IAP-protected BDE data receiver.",
           "examples": [
-            "myapp.apps.googleusercontent.com"
+            "123456789-abcdef.apps.googleusercontent.com"
           ]
         },
         "serviceAccountEmailAddress": {
@@ -503,6 +746,27 @@
         }
       }
     },
+    "cloudnativeDbUrl": {
+      "type": "string",
+      "description": "JDBC URL for the CloudNativePG database connection (databaseMode=cloudnative).",
+      "examples": [
+        "jdbc:postgresql://keycloak-db-rw:5432/keycloak"
+      ]
+    },
+    "cloudnativeDbSecretName": {
+      "type": "string",
+      "description": "Name of the Kubernetes Secret containing username and password for the CloudNativePG database (databaseMode=cloudnative).",
+      "examples": [
+        "keycloak-db-app"
+      ]
+    },
+    "cloudnativeDbSchema": {
+      "type": "string",
+      "description": "Database schema for the CloudNativePG database (databaseMode=cloudnative).",
+      "examples": [
+        "public"
+      ]
+    },
     "cloudnativePg": {
       "type": "object",
       "description": "Relevant only for databaseMode=cloudnative. Configures the managed CloudNativePG cluster. For details see https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md",
@@ -538,6 +802,14 @@
       "type": "object",
       "description": "Policy Enforcement Point (PEP) configuration.",
       "properties": {
+        "serviceAccount": {
+          "$ref": "#/$defs/K8sServiceAccount",
+          "description": "ServiceAccount configuration for the PEP proxy deployment."
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/K8sPodSecurityContext",
+          "description": "Pod-level security context for the PEP proxy deployment."
+        },
         "replicaCount": {
           "type": "integer",
           "minimum": 1,
@@ -663,6 +935,15 @@
                 }
               ]
             },
+            "poppValidity": {
+              "type": "string",
+              "description": "quarter: within the current quarter (see gemSpec_ZETA — A_26477)\nduration string: fixed validity period, since iat + optional unit (d,h,m,s); defaults to s if no unit given.",
+              "examples": [
+                "86400",
+                "1d",
+                "quarter"
+              ]
+            },
             "requiredAudience": {
               "type": "string",
               "description": "Required audience (aud) claim in access tokens. This should be your public Fachdienst URL.",
@@ -716,6 +997,47 @@
         "resources": {
           "$ref": "#/$defs/K8sResourceRequirements",
           "description": "CPU and memory resource requests/limits for the pepproxy container."
+        },
+        "imagePullPolicy": {
+          "type": "string",
+          "description": "Kubernetes image pull policy for the PEP proxy container.",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "podLabels": {
+          "type": "object",
+          "description": "Additional labels to add to the pepproxy pod.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "podAnnotations": {
+          "type": "object",
+          "description": "Additional Kubernetes annotations for the pepproxy pod.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "hsmProxyAddr": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "gRPC URL of HSM Proxy to enable ossl_hsm integration in the PEP proxy. Set to null to disable.",
+          "examples": [
+            "hsm-sim:50051"
+          ]
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Kubernetes affinity rules for pepproxy pod scheduling."
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Kubernetes tolerations for pepproxy pod scheduling."
         }
       },
       "required": [
@@ -748,6 +1070,44 @@
           "examples": [
             "Always",
             "IfNotPresent"
+          ]
+        },
+        "provisioningContainer": {
+          "type": "string",
+          "description": "Name of the provisioning container image. Use to switch between RU/PU environments or a custom mirror.",
+          "examples": [
+            "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
+          ]
+        },
+        "provisioningContainerCaSecretRef": {
+          "type": "object",
+          "description": "Reference to a Kubernetes Secret containing the PEM-encoded CA certificate for the provisioning container registry. The secret is mounted as /var/registry-ca/ca.crt in each init container and sets PROVISIONING_CONTAINER_REGISTRY_CA_FILE accordingly.",
+          "required": [
+            "name",
+            "key"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the Kubernetes Secret.",
+              "examples": [
+                "registry-ca"
+              ]
+            },
+            "key": {
+              "type": "string",
+              "description": "Key within the Secret that holds the PEM certificate data.",
+              "examples": [
+                "ca.crt"
+              ]
+            }
+          },
+          "examples": [
+            {
+              "name": "ssl-trusted-cert",
+              "key": "ca.crt"
+            }
           ]
         },
         "resources": {
@@ -910,6 +1270,12 @@
             }
           }
         },
+        "logDecisions": {
+          "type": "boolean"
+        },
+        "logStatusUpdates": {
+          "type": "boolean"
+        },
         "provisioningProcessor": {
           "type": "object",
           "properties": {
@@ -981,12 +1347,8 @@
           "description": "OPA server log level."
         },
         "image": {
-          "type": "string",
-          "description": "Full OPA container image reference.",
-          "examples": [
-            "openpolicyagent/opa:1.14.1-static",
-            "docker.io/openpolicyagent/opa:1.11.0-static"
-          ]
+          "$ref": "#/$defs/ZetaImage",
+          "description": "Container image overrides for opa deployments."
         },
         "imagePullPolicy": {
           "description": "Kubernetes image pull policy for the OPA container.",
@@ -1123,6 +1485,32 @@
               }
             }
           }
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable or disable the OPA deployment."
+        },
+        "podLabels": {
+          "type": "object",
+          "description": "Additional labels to add to the OPA pod.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "podAnnotations": {
+          "type": "object",
+          "description": "Additional Kubernetes annotations for the OPA pod.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Kubernetes affinity rules for OPA pod scheduling."
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Kubernetes tolerations for OPA pod scheduling."
         }
       },
       "allOf": [
@@ -1202,6 +1590,14 @@
         }
       ]
     },
+    "opaPolicy": {
+      "type": "object",
+      "properties": {
+        "policyRego": {
+          "type": "string"
+        }
+      }
+    },
     "ingressMasterAnnotations": {
       "type": "object",
       "description": "Extra annotations added to the master Ingress resource.",
@@ -1260,6 +1656,10 @@
       "type": "boolean",
       "description": "When true, deploy the bundled NGINX Ingress Controller and add specific annotations for this ingress controller."
     },
+    "nginxIngressHsm": {
+      "type": "boolean",
+      "description": "When true, disable spec.tls of the master ingress to enable custom TLS configuration via ingressMasterAnnotations.\"nginx.org/server-snippets\", as required for ossl_hsm support."
+    },
     "nginx-ingress": {
       "type": "object",
       "description": "Configuration passed to the bundled nginx-ingress subchart.",
@@ -1282,6 +1682,20 @@
                   ]
                 }
               }
+            },
+            "pod": {
+              "type": "object",
+              "description": "Settings applied to the NIC controller pod template.",
+              "properties": {
+                "annotations": {
+                  "type": "object",
+                  "description": "Annotations on the NIC controller pod template. Changing any value triggers a rolling restart.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true
             },
             "config": {
               "type": "object",
@@ -1409,6 +1823,146 @@
       "examples": [
         "zeta/zeta-guard/"
       ]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "Egress NetworkPolicy configuration (A_27864-01). When enabled, each ZETA Guard pod receives an egress NetworkPolicy restricting outbound traffic to the explicitly listed IP blocks. Internal cluster traffic (DNS, pod-to-pod) is always allowed.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable egress NetworkPolicies for all ZETA Guard pods.",
+          "examples": [
+            false,
+            true
+          ]
+        },
+        "egress": {
+          "type": "object",
+          "description": "Egress rule sets, one per external destination category.",
+          "properties": {
+            "telemetry": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — gematik Telemetriedaten-Empfänger (OTLP endpoint)."
+            },
+            "siem": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — SIEM der gematik."
+            },
+            "artifactRegistry": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — ZETA Artifact Registry at gematik (image pulls, OPA bundles)."
+            },
+            "providerArtifactRegistry": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — Provider-internal Artifact Registry."
+            },
+            "ocspCabForum": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — OCSP/CRL for TLS TSPs per CAB Forum."
+            },
+            "ocspSmcbTsp": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — SMC-B TSP OCSP Responder."
+            },
+            "ocspTiPki": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "A_27864-01 — OCSP Responder TSP Komponenten PKI der TI."
+            },
+            "pip": {
+              "$ref": "#/$defs/NetPolIpBlockRule",
+              "description": "PIP — source of OPA policy bundles."
+            },
+            "popp": {
+              "type": "object",
+              "description": "PoPP service egress rules.",
+              "properties": {
+                "ipBlocks": {
+                  "$ref": "#/$defs/NetPolIpBlockList"
+                },
+                "mock": {
+                  "type": "boolean",
+                  "description": "Allow egress to the local popp-mock pod via podSelector (app=popp-mock) on targetPort 8080. For use with the popp-mocks subchart in local KIND stages only.",
+                  "examples": [
+                    false,
+                    true
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "providerInternal": {
+              "type": "object",
+              "description": "Provider specific (German anbieterspezifisch) egress rules for resource servers, telemetry systems, and cluster-local pods.",
+              "properties": {
+                "allowAll": {
+                  "type": "boolean",
+                  "description": "When true, all egress is permitted without IP filtering (overrides all other providerInternal rules). Use only in controlled environments.",
+                  "examples": [
+                    false,
+                    true
+                  ]
+                },
+                "resourceServers": {
+                  "$ref": "#/$defs/NetPolIpBlockRule",
+                  "description": "IP blocks for provider-internal resource servers (e.g. JWK fetch endpoint via ingress). Use HOST_IP/32 for local KIND stages."
+                },
+                "telemetrySystems": {
+                  "$ref": "#/$defs/NetPolIpBlockRule",
+                  "description": "IP blocks for provider-internal telemetry systems."
+                },
+                "podSelectors": {
+                  "type": "array",
+                  "description": "Allow egress to cluster-local pods by label selector (post-DNAT, kindnet pattern). Use for test-only cluster-local backends such as testfachdienst in local KIND stages.",
+                  "items": {
+                    "type": "object",
+                    "description": "A single pod-selector egress rule.",
+                    "properties": {
+                      "matchLabels": {
+                        "type": "object",
+                        "description": "Label selector that identifies the target pods.",
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "examples": [
+                          {
+                            "app": "testfachdienst"
+                          }
+                        ]
+                      },
+                      "port": {
+                        "type": "integer",
+                        "description": "Target port (post-DNAT) on the destination pod. Must be the container port, not the Service port.",
+                        "examples": [
+                          8080,
+                          8443
+                        ]
+                      }
+                    },
+                    "required": [
+                      "matchLabels",
+                      "port"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "examples": [
+                    [
+                      {
+                        "matchLabels": {
+                          "app": "testfachdienst"
+                        },
+                        "port": 8080
+                      }
+                    ]
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [
@@ -1508,6 +2062,107 @@
       "$comment": "https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#security-context",
       "type": "object",
       "description": "Security Context for a container"
+    },
+    "K8sPodSecurityContext": {
+      "$comment": "https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#security-context-1",
+      "type": "object",
+      "description": "Pod-level security context. Applied to all containers in the pod."
+    },
+    "K8sServiceAccount": {
+      "type": "object",
+      "description": "ServiceAccount configuration for a workload.",
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Create a dedicated ServiceAccount for this workload."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the ServiceAccount to use."
+        }
+      }
+    },
+    "K8sProbe": {
+      "$comment": "https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#Probe",
+      "type": "object",
+      "description": "Probe configuration for a container.",
+      "properties": {
+        "initialDelaySeconds": {
+          "type": "integer",
+          "description": "Number of seconds after the container has started before the probe is initiated."
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "description": "How often (in seconds) to perform the probe."
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "description": "Number of consecutive failures before the probe is considered failed."
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Number of seconds after which the probe times out."
+        },
+        "successThreshold": {
+          "type": "integer",
+          "description": "Minimum consecutive successes for the probe to be considered successful after having failed."
+        }
+      }
+    },
+    "K8sPodDisruptionBudget": {
+      "type": "object",
+      "description": "PodDisruptionBudget configuration. Either minAvailable or maxUnavailable can be set, but not both.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create a PodDisruptionBudget for this workload."
+        },
+        "minAvailable": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Minimum number/percentage of pods that must remain available."
+        },
+        "maxUnavailable": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Maximum number/percentage of pods that can be unavailable."
+        }
+      }
+    },
+    "NetPolIpBlockList": {
+      "type": "array",
+      "description": "List of CIDR blocks for a NetworkPolicy egress rule.",
+      "items": {
+        "type": "string",
+        "description": "A CIDR block in prefix/length notation.",
+        "examples": [
+          "10.0.0.1/32",
+          "203.0.113.0/24"
+        ]
+      },
+      "examples": [
+        [
+          "10.0.0.1/32"
+        ],
+        [
+          "203.0.113.10/32",
+          "203.0.113.11/32"
+        ]
+      ]
+    },
+    "NetPolIpBlockRule": {
+      "type": "object",
+      "description": "Egress rule containing a list of CIDR blocks for one external destination category.",
+      "properties": {
+        "ipBlocks": {
+          "$ref": "#/$defs/NetPolIpBlockList"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

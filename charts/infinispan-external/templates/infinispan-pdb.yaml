@@ -1,0 +1,22 @@
+{{- if and .Values.global.infinispanExternal.enabled (not .Values.global.infinispanExternal.remote.host) (not .Values.global.infinispanExternal.remote.port) .Values.global.infinispanExternal.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: infinispan
+  labels:
+    app: infinispan
+    app.kubernetes.io/name: infinispan
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
+spec:
+  {{- with .Values.global.infinispanExternal.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.global.infinispanExternal.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: infinispan
+{{- end }}

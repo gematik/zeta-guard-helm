@@ -117,7 +117,7 @@ spec:
                     "$IAM_CRED_URL" \
                     -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
                     -H "Content-Type: application/json" \
-                    -d '{"audience": "{{ .Values.gematik.clientId }}", "includeEmail": true}')
+                    -d '{"audience": "{{ .Values.gematik.idTokenAudience }}", "includeEmail": true}')
                   IMP_TOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/imp.json")).get("token",""))')
 
                   if [ "$IMP_HTTP_CODE" != "200" ] || [ -z "$IMP_TOKEN" ] || [ "$IMP_TOKEN" = "null" ]; then

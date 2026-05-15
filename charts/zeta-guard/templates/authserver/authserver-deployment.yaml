@@ -26,24 +26,66 @@ spec:
         {{- end }}
       {{- end }}
     spec:
-      {{- with .Values.authserver.resources }}
-      resources:
+      {{- if and .Values.authserver.serviceAccount .Values.authserver.serviceAccount.create }}
+      serviceAccountName: {{ .Values.authserver.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.authserver.podSecurityContext }}
+      securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      securityContext:
-        seccompProfile:
-          type: RuntimeDefault
       {{- with .Values.authserver.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.authserver.hostAlias }}
+      {{- if or .Values.authserver.hostAlias .Values.global.enableDNSRedirect }}
       hostAliases:
+        {{- with .Values.authserver.hostAlias }}
         - ip: {{ .ip | quote }}
           hostnames:
             - {{ .name | quote }}
+        {{- end }}
+        {{- if .Values.global.enableDNSRedirect }}
+          {{- template "global.tigerDNSRedirectEntryOnly" . }}
+        {{- end }}
       {{- end }}
       initContainers:
+        {{- if .Values.authserver.dbEnc.enabled }}
+        {{- with .Values.authserver.dbEnc.initContainerProvideKeys }}
+        - {{ tpl (toYaml .) $ | nindent 10 }}
+        {{- end}}
+        - name: keychain-generator
+          image: "{{ include "keychainGenerator.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.authserver.dbEnc.keychainGenerator.imagePullPolicy }}"
+          env:
+          {{- with .Values.authserver.dbEnc.keychainFileName }}
+            - name: SPREE_KEYCHAIN_FILE
+              value: {{ . | quote }}
+          {{- end }}
+          {{- if .Values.authserver.hsm.enabled }}
+            - name: HSM_PROXY_ENDPOINT
+              value: {{ .Values.authserver.hsm.endpoint | quote }}
+          {{- with .Values.authserver.hsm.dbEnc.keyId }}
+            - name: HSM_PROXY_KEK_ID
+              value: {{ . | quote }}
+          {{- end }}
+          {{- end }}
+          {{- with .Values.authserver.dbEnc.keychainGenerator.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.authserver.dbEnc.keychainGenerator.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- with .Values.authserver.dbEnc.keychainGenerator.extraVolumeMounts }}
+            {{- tpl (toYaml .) $ | nindent 12 }}
+            {{- end }}
+        {{- with .Values.authserver.dbEnc.initContainerStoreKeys }}
+        - {{ tpl (toYaml .) $ | nindent 10 }}
+        {{- end}}
+        {{- end}}
         - name: keycloak-build
           image: "{{ include "authserver.image" . | trim }}"
           imagePullPolicy: "{{ .Values.authserver.imagePullPolicy }}"
@@ -71,24 +113,9 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
                   key: password
-            - name: KC_HEALTH_ENABLED
-              value: "true"
-            - name: KC_METRICS_ENABLED
-              value: {{ quote .Values.authServerMetricsEnabled }}
-            - name: KC_TRACING_ENABLED
-              value: {{ quote .Values.authServerTracingEnabled }}
+            {{- include "keycloak.buildOptions" . | nindent 12 }}
             - name: KC_DB
               value: "{{ include "authserver.kcDb" . }}"
-            - name: KC_HTTP_RELATIVE_PATH
-              value: "/auth"
-            - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
-              value: "/auth-mgmt"
-            {{- if .Values.global.infinispanExternal.enabled }}
-            - name: KC_FEATURES
-              value: clusterless
-            - name: KC_FEATURES_DISABLED
-              value: persistent-user-sessions
-            {{- end }}
           volumeMounts:
             - name: keycloak-home
               mountPath: /work
@@ -96,10 +123,14 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.authserver.initContainer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         - name: trust-anchor-provisioning-processor
-          image: "{{ include "authserver.provisioningProcessor.image" . | trim }}"
-          imagePullPolicy: "{{ .Values.authserver.provisioningProcessor.imagePullPolicy }}"
-          {{- with .Values.authserver.provisioningProcessor.containerSecurityContext }}
+          image: "{{ include "provisioningProcessor.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy }}"
+          {{- with .Values.provisioningProcessor.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -112,9 +143,15 @@ spec:
             value: "ECC-RSA_TSL-test.xml"
           - name: PROCESSORS_TPM_ENABLED
             value: "true"
+          - name: PROVISIONING_CONTAINER_NAME
+            value: {{ .Values.provisioningProcessor.provisioningContainer | quote }}
+          {{- if .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+          - name: PROVISIONING_CONTAINER_REGISTRY_CA_FILE
+            value: "/var/registry-ca/ca.crt"
+          {{- end }}
           - name: TRUST_CERTCHAIN_FILE
             value: "/var/image-trustchain/certchain.pem"
-          {{- with .Values.authserver.provisioningProcessor.resources }}
+          {{- with .Values.provisioningProcessor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -125,11 +162,19 @@ spec:
           - name: image-trustchain
             mountPath: "/var/image-trustchain"
             readOnly: true
+          - name: tmp
+            mountPath: "/tmp"
+            readOnly: false
+          {{- if .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+          - name: registry-ca
+            mountPath: /var/registry-ca
+            readOnly: true
+          {{- end }}
       containers:
         - name: keycloak
           image: "{{ include "authserver.image" . | trim }}"
           imagePullPolicy: "{{ .Values.authserver.imagePullPolicy }}"
-          {{- with .Values.authserver.resources }}
+          {{- with .Values.authserver.container.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -141,7 +186,15 @@ spec:
             - --http-pool-max-threads={{ .Values.authserver.httpPool.maxThreads }}
             - --hostname-strict=false
             - --proxy-headers=xforwarded
+            {{- if .Values.authserver.adminHostname }}
+            {{- /* KC26: --hostname must be a full URL when --hostname-admin is set.
+                 The path (/auth) must be explicit to preserve the context path;
+                 omitting it would cause KC to drop the /auth prefix from all endpoints. */}}
+            - --hostname=https://{{ .Values.authserver.hostname }}/auth
+            - --hostname-admin=https://{{ .Values.authserver.adminHostname }}
+            {{- else }}
             - --hostname={{ .Values.authserver.hostname }}
+            {{- end }}
             - --http-access-log-enabled=true
           livenessProbe:
             httpGet:
@@ -150,9 +203,9 @@ spec:
               {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
               scheme: HTTPS
               {{- end }}
-            initialDelaySeconds: 0
-            periodSeconds: 15
-            failureThreshold: 5
+            initialDelaySeconds: {{ .Values.authserver.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.authserver.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.authserver.probes.liveness.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /auth-mgmt/health/ready/  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
@@ -160,9 +213,9 @@ spec:
               {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
               scheme: HTTPS
               {{- end }}
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 5
+            initialDelaySeconds: {{ .Values.authserver.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.authserver.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.authserver.probes.readiness.failureThreshold }}
           startupProbe:
             httpGet:
               path: /auth-mgmt/health/ready/  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
@@ -170,9 +223,9 @@ spec:
               {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
               scheme: HTTPS
               {{- end }}
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 20
+            initialDelaySeconds: {{ .Values.authserver.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.authserver.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.authserver.probes.startup.failureThreshold }}
           env:
             # Environment variable 'KEYCLOAK_ADMIN' is deprecated, use 'KC_BOOTSTRAP_ADMIN_USERNAME' instead
             - name: KEYCLOAK_ADMIN
@@ -209,14 +262,9 @@ spec:
             {{- end }}
             - name: KC_LOG_LEVEL
               value: "{{ .Values.authserver.log.level }}"
-            - name: KC_HEALTH_ENABLED
-              value: "true"
+            {{- include "keycloak.buildOptions" . | nindent 12 }}
             - name: KC_HTTP_ENABLED
               value: "true"
-            - name: KC_HTTP_RELATIVE_PATH
-              value: "/auth"
-            - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
-              value: "/auth-mgmt"
             - name: JAVA_LOCALE
               value: "-Duser.timezone=Europe/Berlin"
             - name: JAVA_OPTS_APPEND
@@ -229,14 +277,18 @@ spec:
                 -XX:MaxMetaspaceSize=256m
                 -XX:+UseG1GC
                 -XX:MaxGCPauseMillis=200
+            {{- if .Values.authServerLogConsoleOutput | eq "json" }}
             - name: KC_LOG_CONSOLE_JSON_FORMAT
               value: "ecs"
+            {{- end }}
             - name: KC_LOG_CONSOLE_OUTPUT
               value: {{ quote .Values.authServerLogConsoleOutput }}
-            - name: KC_METRICS_ENABLED
-              value: {{ quote .Values.authServerMetricsEnabled }}
-            - name: KC_TRACING_ENDPOINT
+            - name: KC_TELEMETRY_ENDPOINT
               value: "http://{{ include "telemetryGateway.hostname" . }}:4317"
+            - name: KC_TELEMETRY_RESOURCE_ATTRIBUTES
+              value: "service.version={{ .Values.authserver.image.tag }}"
+            - name: KC_TELEMETRY_SERVICE_NAME
+              value: "ZETA Guard PDP authorization server"
             # OPA endpoints and behavior
             # Configure ZETA SMC-B token-exchange provider and OPA toggle
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
@@ -266,7 +318,31 @@ spec:
             - name: HSM_PROXY_ENDPOINT
               value: {{ .Values.authserver.hsm.endpoint | quote }}
             - name: HSM_PROXY_KEY_ID
-              value: {{ .Values.authserver.hsm.keyId | quote }}
+              value: {{ .Values.authserver.hsm.tls.keyId | quote }}
+            {{- if .Values.authserver.dbEnc.enabled }}
+            {{- with .Values.authserver.hsm.dbEnc.keyId }}
+            - name: HSM_PROXY_KEK_ID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.authserver.dbEnc.keychainFileName }}
+            - name: SPREE_KEYCHAIN_FILE
+              value: {{ . | quote }}
+            {{- end }}
+            - name: SPREE_INTEGRITY_ENABLED
+              value: {{ .Values.authserver.dbEnc.enabled | toString | quote }}
+            - name: SPREE_ENCRYPTED_REALM
+              value: "zeta-guard"
+            - name: SPREE_BOOTSTRAP_INTERVAL
+              value: {{ .Values.authserver.dbEnc.bootstrapInterval | quote }}
+            - name: SPREE_BOOTSTRAP_ATTEMPTS
+              value: {{ .Values.authserver.dbEnc.bootstrapAttempts | toString | quote }}
+            - name: SPREE_SHUTDOWN_ON_ERROR
+              value: "true"
+            {{- end }}
+            {{- if .Values.authserver.hsm.tokenSigning.enabled }}
+            - name: HSM_PROXY_TOKEN_KEY_ID
+              value: {{ .Values.authserver.hsm.tokenSigning.keyId | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.authserver.hsm.tls.enabled }}
             # pod-level TLS via HSM-backed HSMPROXY KeyStore
@@ -301,19 +377,19 @@ spec:
             - name: KC_DB
               value: "postgres"
             - name: KC_DB_URL
-              value: "jdbc:postgresql://keycloak-db-rw:5432/keycloak"
+              value: {{ .Values.cloudnativeDbUrl | quote }}
             - name: KC_DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "keycloak-db-app"
+                  name: {{ .Values.cloudnativeDbSecretName | quote }}
                   key: username
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "keycloak-db-app"
+                  name: {{ .Values.cloudnativeDbSecretName | quote }}
                   key: password
             - name: KC_DB_SCHEMA
-              value: "public"
+              value: {{ .Values.cloudnativeDbSchema | quote }}
             {{- else }}
             # DB settings for external DB
             - name: KC_DB
@@ -339,7 +415,7 @@ spec:
               value: {{ .Values.global.infinispanExternal.remote.host }}
             - name: KC_CACHE_REMOTE_PORT
               value: {{ .Values.global.infinispanExternal.remote.port }}
-            {{- else}}
+            {{- else }}
             - name: KC_CACHE_REMOTE_HOST
               value: infinispan
             - name: KC_CACHE_REMOTE_PORT
@@ -365,10 +441,6 @@ spec:
                   key: password
             - name: KC_CACHE_REMOTE_TLS_ENABLED
               value: "false"
-            - name: KC_FEATURES
-              value: clusterless
-            - name: KC_FEATURES_DISABLED
-              value: persistent-user-sessions
             {{- end }}
           ports:
             - containerPort: 8080 # align with KC_HTTP_PORT
@@ -400,11 +472,13 @@ spec:
               mountPath: /opt/keycloak/conf/tls
               readOnly: true
             {{- end }}
+            {{- with .Values.authserver.container.extraVolumeMounts }}
+            {{- tpl (toYaml .) $ | nindent 12 }}
+            {{- end }}
           {{- with .Values.authserver.container.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-
       volumes:
         - name: keycloak-home
           emptyDir: {}
@@ -415,10 +489,21 @@ spec:
         - name: image-trustchain
           secret:
             secretName: {{ required "SecretRef for image verification certchain is missing, see imageTrustCertchainSecretRef" .Values.imageTrustCertchainSecretRef }}
+        {{- with .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+        - name: registry-ca
+          secret:
+            secretName: {{ .name }}
+            items:
+              - key: {{ .key }}
+                path: ca.crt
+        {{- end }}
         {{- if .Values.authserver.tls.enabled }}
         - name: tls-cert
           secret:
             secretName: {{ .Values.authserver.tls.certSecretName }}
+        {{- end }}
+        {{- with .Values.authserver.extraVolumes }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
         {{- end }}
       {{- with .Values.authserver.affinity }}
       affinity:

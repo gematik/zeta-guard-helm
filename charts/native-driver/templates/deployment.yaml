@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nativedriver
+  labels:
+    component: nativedriver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nativedriver
+  template:
+    metadata:
+      labels:
+        app: nativedriver
+        component: nativedriver
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nativedriver
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /nativedriver-api/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 10
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+              name: http
+          volumeMounts:
+            - name: smcb-keystore
+              mountPath: "/{{ .Values.smcbCertificateFileName }}"
+              subPath: {{ .Values.smcbCertificateFileName | quote }}
+              readOnly: true
+          env:
+            - name: FACHDIENST_URL
+              value: {{ .Values.fachdienst_url }}
+            - name: DISABLE_SERVER_VALIDATION
+              value: {{ quote .Values.disableServerValidation }}
+            - name: ASL_PROD
+              value: {{ quote .Values.aslProdEnv }}
+            - name: POPP_TOKEN
+              value: {{ .Values.PoppToken | quote }}
+            - name: SMB_KEYSTORE_FILE
+              value: "/{{ .Values.smcbCertificateFileName }}"
+            - name: SMB_KEYSTORE_B64
+              value: {{ .Values.smcbCertificateB64 | quote }}
+            - name: SMB_KEYSTORE_ALIAS
+              value: {{ .Values.smcbCertificateAlias | quote }}
+            - name: SMB_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: test-smcb-keystore
+                  key: password
+            - name: SMCB_BASE_URL
+              value: {{ .Values.connector_base_url }}
+            - name: SMCB_MANDANT_ID
+              value: {{ .Values.connector_mandant_id }}
+            - name: SMCB_CLIENT_SYSTEM_ID
+              value: {{ .Values.connector_client_system_id }}
+            - name: SMCB_WORKSPACE_ID
+              value: {{ .Values.connector_workspace_id }}
+            - name: SMCB_USER_ID
+              value: {{ .Values.connector_user_id }}
+            - name: SMCB_CARD_HANDLE
+              value: {{ .Values.connector_card_handle }}
+            - name: REQUIRED_ROLE_OID
+              value: {{ .Values.requiredOid }}
+      volumes:
+        - name: smcb-keystore
+          secret:
+            secretName: test-smcb-keystore
+            items:
+              - key: keystore
+                path: {{ .Values.smcbCertificateFileName | quote }}

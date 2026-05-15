@@ -5,7 +5,7 @@ metadata:
   labels:
     component: exauthsim
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app: exauthsim
@@ -19,9 +19,14 @@ spec:
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
       {{- end }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
       securityContext:
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -52,6 +57,10 @@ spec:
                   key: password
           {{- with .Values.containerSecurityContext }}
           securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:

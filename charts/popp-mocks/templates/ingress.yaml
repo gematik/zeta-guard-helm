@@ -1,0 +1,21 @@
+{{- if and .Values.tokenGenerator.enabled .Values.tokenGenerator.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: popp-token-generator
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+spec:
+  ingressClassName: {{ .Values.tokenGenerator.ingress.className }}
+  rules:
+    - host: {{ .Values.tokenGenerator.ingress.hostname }}
+      http:
+        paths:
+          - path: {{ .Values.tokenGenerator.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: popp-token-generator
+                port:
+                  number: 80
+{{- end }}

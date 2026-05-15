@@ -16,6 +16,7 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
   - `charts/test-driver`
   - `charts/tiger-testsuite` (Tiger based regression service + Workflow UI)
   - `charts/zeta-tls-test-tool-service` (optional TLS Test Tool control service)
+  - `charts/zeta-cert-validation-mock` (optional local OCSP/CRL responder mock)
 
 ## Notes
 - Re-run `make deps` after changing `Chart.yaml` or any `charts/*/Chart.yaml`.
@@ -92,6 +93,32 @@ make deploy stage=local
 
 The service is reachable inside the cluster at
 `http://zeta-tls-test-tool-service.<namespace>.svc.cluster.local`.
+
+#### Local OCSP responder mock with KIND
+
+The umbrella chart includes an optional `zeta-cert-validation-mock` subchart for OCSP/CRL certificate-validation tests.
+The local values profile enables it and configures `zeta-guard.pepproxy.aslOcsp` to `http://zeta-cert-validation-mock/ocsp`.
+
+1. Deploy or patch the local profile:
+
+```shell
+make deploy stage=local
+```
+
+The image is pulled from the repository configured in
+`zeta-cert-validation-mock.image.repository`.
+
+The responder is reachable inside the cluster at
+`http://zeta-cert-validation-mock.<namespace>.svc.cluster.local`.
+
+The responder offers differnt endpoints for different usecases:
+- `/ocsp/tls`
+- `/ocsp/smb`
+
+The OCSP request can be provided through
+- URL parameter `ocspRequest=<b64-encoded-request>` in HTTP GET requests
+- raw binary format in POST request body
+
 
 #### Registry & Tag
 
@@ -224,8 +251,8 @@ Render checks:
     * [How to manage authserver DB](docs/how-to_guides/How_to_manage_authserver_DB.md)
     * [How to set up TLS](docs/how-to_guides/How_to_set_up_TLS.md)
     * [How to trigger the Tiger testsuite inside the cluster](docs/how-to_guides/How_to_run_tiger_testsuite.md)
+  * [How to configure Ingress](docs/how-to_guides/How_to_configure_Ingress.md)
 * Reference
-* [How to configure Ingress](docs/how-to_guides/How_to_configure_Ingress.md)
     * [Makefile reference](docs/reference/Makefile_reference.md)
 
 ## License

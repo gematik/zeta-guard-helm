@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "tiger-proxy.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       {{- include "tiger-proxy.selectorLabels" . | nindent 6 }}
@@ -18,48 +18,31 @@ spec:
       labels:
         {{- include "tiger-proxy.selectorLabels" . | nindent 8 }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
       securityContext:
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # initContainers:
-      #   - name: iptables-init
-      #     image: alpine:3.20
-      #     # Needs NET_ADMIN (and often privileged) to modify iptables
-      #     securityContext:
-      #       privileged: true
-      #       capabilities:
-      #         add:
-      #           - NET_ADMIN
-      #     command:
-      #       - /bin/sh
-      #       - -c
-      #       - |
-      #         set -e
-
-      #         # Install iptables
-      #         apk add --no-cache iptables
-
-      #         # Traffic coming from outside the pod (to this pod IP:4138)
-      #         iptables -t nat -A PREROUTING -p tcp --dport 4138 -j REDIRECT --to-ports 8080
-
-      #         # Traffic originating from inside the pod going to :80 (localhost)
-      #         # iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
-
-      #         # Done - exit and let main containers start
-      #         echo "iptables rules configured"
-
       containers:
         - name: nginx-sidecar
-          image: "docker.io/nginxinc/nginx-unprivileged:alpine3.22-slim"
+          image: "{{ .Values.nginxSidecar.image.registry | default "" }}{{ .Values.nginxSidecar.image.repository | default "nginxinc/nginx-unprivileged" }}:{{ .Values.nginxSidecar.image.tag | default "alpine3.22-slim" }}"
+          imagePullPolicy: "{{ .Values.nginxSidecar.imagePullPolicy }}"
           ports:
             - name: otlp-http-port
               containerPort: 4138
           {{- with .Values.containerSecurityContext }}
           securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.nginxSidecar.resources }}
+          resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
@@ -97,9 +80,10 @@ spec:
             failureThreshold: {{ default .Values.startup.failureThreshold .Values.startup.readinessProbe.failureThreshold }}
             periodSeconds: {{ default .Values.startup.startupPeriodSeconds .Values.startup.readinessProbe.periodSeconds }}
             initialDelaySeconds: {{ default 120 .Values.startup.readinessProbe.initialDelaySeconds }}
+          {{- with .Values.resources }}
           resources:
-            limits:
-              cpu: {{ .Values.resources.limits.cpu }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: tiger-application-config
               mountPath: /app/application.yaml
@@ -109,6 +93,7 @@ spec:
               mountPath: /app/target
             - name: tmp
               mountPath: /tmp
+
       volumes:
         - name: tiger-application-config
           configMap:

@@ -49,9 +49,9 @@ spec:
       {{- end }}
       initContainers:
         - name: trust-anchor-provisioning-processor
-          image: "{{ include "opa.provisioningProcessor.image" . | trim }}"
-          imagePullPolicy: "{{ .Values.opa.provisioningProcessor.imagePullPolicy }}"
-          {{- with .Values.opa.provisioningProcessor.containerSecurityContext }}
+          image: "{{ include "provisioningProcessor.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy }}"
+          {{- with .Values.provisioningProcessor.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -60,9 +60,15 @@ spec:
               value: "/var/trust-data"
             - name: PROCESSORS_POLICY_SIGNER_ENABLED
               value: "true"
+            - name: PROVISIONING_CONTAINER_NAME
+              value: {{ .Values.provisioningProcessor.provisioningContainer | quote }}
+            {{- if .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+            - name: PROVISIONING_CONTAINER_REGISTRY_CA_FILE
+              value: "/var/registry-ca/ca.crt"
+            {{- end }}
             - name: TRUST_CERTCHAIN_FILE
               value: "/var/image-trustchain/certchain.pem"
-          {{- with .Values.opa.provisioningProcessor.resources }}
+          {{- with .Values.provisioningProcessor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -70,16 +76,24 @@ spec:
             - name: trust-data
               mountPath: "/var/trust-data"
               readOnly: false
+            - name: tmpfs
+              mountPath: "/tmp"
+              readOnly: false
             - name: image-trustchain
               mountPath: "/var/image-trustchain"
               readOnly: true
+            {{- if .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+            - name: registry-ca
+              mountPath: /var/registry-ca
+              readOnly: true
+            {{- end }}
       containers:
         - name: opa
           {{- with .Values.opa.containerSecurityContext }}
           securityContext:
           {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: "{{ .Values.opa.image }}"
+          image: "{{ include "opa.image" . | trim }}"
           imagePullPolicy: "{{ .Values.opa.imagePullPolicy }}"
           env:
             - name: CHECKSUM_OPA
@@ -164,9 +178,20 @@ spec:
           emptyDir: {}
         - name: trust-data
           emptyDir: {}
+        - name: tmpfs
+          emptyDir:
+            medium: "Memory"
         - name: image-trustchain
           secret:
             secretName: {{ required "SecretRef for image verification certchain is missing, see imageTrustCertchainSecretRef" .Values.imageTrustCertchainSecretRef }}
+        {{- with .Values.provisioningProcessor.provisioningContainerCaSecretRef }}
+        - name: registry-ca
+          secret:
+            secretName: {{ .name }}
+            items:
+              - key: {{ .key }}
+                path: ca.crt
+        {{- end }}
         {{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) }}
         - name: gcp-token-volume
           secret:

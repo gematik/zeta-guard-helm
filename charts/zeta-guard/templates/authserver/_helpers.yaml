@@ -1,0 +1,25 @@
+{{/* Keycloak build option environment variables */}}
+{{ define "keycloak.buildOptions" -}}
+- name: KC_FEATURE_OPENTELEMETRY_LOGS
+  value: v1
+- name: KC_HEALTH_ENABLED
+  value: "true"
+- name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
+  value: "/auth-mgmt"
+- name: KC_HTTP_RELATIVE_PATH
+  value: "/auth"
+- name: KC_METRICS_ENABLED
+  value: {{ quote .Values.authServerMetricsEnabled }}
+- name: KC_TELEMETRY_LOGS_ENABLED
+  value: "true"
+- name: KC_TRACING_ENABLED
+  value: {{ quote .Values.authServerTracingEnabled }}
+
+{{- if .Values.global.infinispanExternal.enabled }}
+- name: KC_FEATURES
+  value: clusterless
+- name: KC_FEATURES_DISABLED
+  value: persistent-user-sessions
+{{- end }}
+
+{{- end }}

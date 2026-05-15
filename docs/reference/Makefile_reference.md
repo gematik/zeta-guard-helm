@@ -17,11 +17,15 @@
  - `make install-cnpg-operator [namespace=cnpg-system]` – install CloudNativePG operator (clusterWide=true) into the specified namespace (create it first if needed)
  - `make uninstall-cnpg-operator [namespace=cnpg-system]` – uninstall the CNPG operator release (keeps CRDs)
  - `make reset-cnpg-operator [namespace=cnpg-system]` – uninstall the operator and delete CNPG CRDs (destructive)
-- `make generate-main-and-backend` – generates `main.tf` and backend config from templates based on `TF_VAR_use_kubernetes`
+- `make generate-main-and-backend` – generates `main.tf`, `providers.tf`, and
+  backend config from templates based on `TF_VAR_use_kubernetes`; the Kubernetes
+  provider is only included when `TF_VAR_use_kubernetes=true`
 - `make config-init stage=STAGE [namespace=NAMESPACE]` – runs `generate-main-and-backend` and initializes the Terraform backend
 - `make config-plan stage=STAGE [namespace=NAMESPACE]` – view incoming changes to the authserver by make config
 - `make config stage=STAGE [namespace=NAMESPACE]` – configure the authserver
 - `make status stage=STAGE [namespace=NAMESPACE]` – show release status
+- `make versions stage=STAGE [namespace=NAMESPACE]` – Show deployed component images and versions
+- `make versions-debug stage=STAGE [namespace=NAMESPACE]` – Show deployed components with all images and digests
 - `make clean` – remove rendered.yaml and local terraform files
 - `make uninstall stage=STAGE [namespace=NAMESPACE]` – uninstall and remove tf state secret
 - `make kind-up [HOST_IP=<ip>] [KIND_INGRESS_HOSTS="<host1> <host2>"]` – create local kind cluster and patch CoreDNS so in-cluster clients resolve ingress hostnames to your host IP (hosts are auto-detected from local values by default)
@@ -32,7 +36,12 @@
 - The Makefile expects `SMB_KEYSTORE_PW_FILE` and `SMB_KEYSTORE_FILE_B64` to be set for most targets.
 - `VALUES_DIR` is selected automatically: `private/` when present, otherwise `local-test/`.
 - For `make config` and `make config-plan`, set `TF_VAR_keycloak_password` to the Keycloak admin password (used by Terraform).
-- `TF_VAR_use_kubernetes` controls the Terraform operating mode (default: `true`). Set to `false` for local mode without Kubernetes backend. See [How to configure authserver](../how-to_guides/How_to_configure_authserver.md) for details.
+- `TF_VAR_use_kubernetes` controls the Terraform operating mode (default:
+  `true`). Set to `false` for local mode without Kubernetes backend — this also
+  omits the `hashicorp/kubernetes` provider from the generated `providers.tf`,
+  so no Kubernetes installation is required.
+  See [How to configure authserver](../how-to_guides/How_to_configure_authserver.md)
+  for details.
 - `KIND_INGRESS_HOSTS` is auto-derived from ingress-related host keys in `values.local.yaml` (`ingressRulesHost`, `hostname`, `zetaBaseUrl`, `wellKnownBase`, `requiredAudience`, `pepIssuer`). If auto-detection yields nothing, it falls back to `zeta-kind.local`.
 - CloudNativePG: install a single operator per cluster. If you previously installed the operator in another namespace and hit Helm ownership errors, remove the old release and CNPG CRDs before installing into the desired namespace.
 

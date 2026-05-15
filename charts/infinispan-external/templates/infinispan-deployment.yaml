@@ -13,12 +13,17 @@ spec:
       labels:
         app: infinispan
     spec:
+      {{- if .Values.global.infinispanExternal.serviceAccount.create }}
+      serviceAccountName: {{ .Values.global.infinispanExternal.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.global.infinispanExternal.podSecurityContext }}
       securityContext:
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: infinispan
-          image: infinispan/server:15.2
+          image: "{{ .Values.global.infinispanExternal.image.repository }}:{{ .Values.global.infinispanExternal.image.tag }}"
           ports:
             - containerPort: 11222
             - containerPort: 7800
@@ -44,20 +49,25 @@ spec:
                   {{- end }}
                   key: password
             - name: JAVA_OPTIONS
-              value: >
+              value: >-
                 -Djgroups.dns.query=infinispan
                 -Djgroups.dns.record.type=A
                 -Dinfinispan.cluster.name=k8s-cluster
                 -Dinfinispan.cluster.stack=kubernetes
+                {{- with .Values.global.infinispanExternal.extraJavaOptions }}
+                {{ . | trim }}
+                {{- end }}
           volumeMounts:
             - name: infinispan-config
               mountPath: /server/conf-custom/
+          {{- with .Values.global.infinispanExternal.containerSecurityContext }}
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 1000
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ "ALL" ]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.global.infinispanExternal.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: infinispan-config
           configMap:

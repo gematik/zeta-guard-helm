@@ -10,6 +10,8 @@ image:
   tag: "latest"
 imagePullPolicy: Always
 
+replicaCount: 1
+
 containerPort: 8080
 
 service:
@@ -21,3 +23,32 @@ hostname: ""
 # When enabled, injects a changing annotation to force pod rollouts
 # on each helm upgrade/apply even if image tag is unchanged.
 devMode: false
+
+serviceAccount:
+  create: true
+  name: exauthsim
+
+resources: {}
+# resources:
+#   limits:
+#     cpu: "2"
+#     memory: "1Gi"
+#   requests:
+#     cpu: "500m"
+#     memory: "512Mi"
+
+podDisruptionBudget:
+  enabled: false
+  # minAvailable: 1
+  # maxUnavailable: 1
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext: {}
+#  allowPrivilegeEscalation: false
+#  readOnlyRootFilesystem: true
+#  runAsNonRoot: true
+#  capabilities:
+#    drop: [ "ALL" ]

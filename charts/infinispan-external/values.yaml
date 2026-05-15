@@ -1,2 +1,47 @@
 global:
-  infinispanExternal: {}
+  infinispanExternal:
+    replicaCount: 1
+    remote:
+      host: ""
+      port: ""
+    admin:
+      secretName: ""
+      username: ""
+      password: ""
+
+    image:
+      repository: infinispan/server
+      tag: "15.2"
+
+    serviceAccount:
+      create: true
+      name: infinispan
+
+    resources: {}
+    # resources:
+    #   limits:
+    #     cpu: "2"
+    #     memory: "1Gi"
+    #   requests:
+    #     cpu: "500m"
+    #     memory: "512Mi"
+
+    podDisruptionBudget:
+      enabled: false
+      # minAvailable: 1
+      # maxUnavailable: 1
+
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+
+    containerSecurityContext: {}
+    #      allowPrivilegeEscalation: false
+    #      readOnlyRootFilesystem: true
+    #      runAsNonRoot: true
+    #      runAsUser: 1000
+    #      capabilities:
+    #        drop: [ "ALL" ]
+
+    extraJavaOptions: ""
+    # extraJavaOptions: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:MinRAMPercentage=25.0"

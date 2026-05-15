@@ -10,6 +10,7 @@ resource "keycloak_realm" "zeta_realm" {
   attributes = {
     webauthn_passwordless_require_resident_key          = "NOT_SPECIFIED"
     webauthn_passwordless_user_verification_requirement = "NOT_SPECIFIED"
+    "spree.config.realm.enable.integrity-provider"      = tostring(var.use_vau_db_enc)
   }
 }
 

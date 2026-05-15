@@ -1,6 +1,6 @@
 resource "keycloak_openid_client_scope" "zero_audience" {
   realm_id               = keycloak_realm.zeta_realm.id
-  name                   = "zero:audience"
+  name                   = var.audience_scope_name
   description            = "Zero Trust scope for audience mapper"
   include_in_token_scope = true
 }
@@ -9,7 +9,7 @@ resource "keycloak_openid_audience_protocol_mapper" "pdp_audience_mapper" {
   realm_id                 = keycloak_realm.zeta_realm.id
   client_scope_id          = keycloak_openid_client_scope.zero_audience.id
   name                     = "audience-mapper"
-  included_custom_audience = replace(var.keycloak_url, "/auth", "")
+  included_custom_audience = var.audience != "" ? var.audience : trimsuffix(var.keycloak_url, "/auth")
 }
 
 resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper" {

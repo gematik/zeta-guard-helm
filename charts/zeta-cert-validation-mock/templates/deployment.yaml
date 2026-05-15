@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zeta-cert-validation-mock
+  labels:
+    app.kubernetes.io/name: zeta-cert-validation-mock
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zeta-cert-validation-mock
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zeta-cert-validation-mock
+        component: zeta-test-infra
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: signing-material
+          secret:
+            secretName: {{ .Values.signing.secretName | quote }}
+            items:
+              - key: smb-signing-keystore
+                path: "smb.keystore"
+              - key: tls-signing-keystore
+                path: "tls.keystore"
+      containers:
+        - name: zeta-cert-validation-mock
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          env:
+            - name: ZETA_MOCK_MODE
+              value: {{ .Values.mock.mode | quote }}
+            - name: ZETA_MOCK_GOOD_PROBABILITY
+              value: {{ .Values.mock.goodProbability | quote }}
+            - name: ZETA_MOCK_REVOKED_PROBABILITY
+              value: {{ .Values.mock.revokedProbability | quote }}
+            - name: ZETA_MOCK_ENABLE_ADMIN_ENDPOINTS
+              value: {{ .Values.mock.enableAdminEndpoints | quote }}
+            - name: OCSP_SMB_KEYSTORE_FILE
+              value: "{{ .Values.signing.mountBase }}/smb.keystore"
+            - name: OCSP_SMB_KEYSTORE_PW
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.signing.secretName | quote }}
+                  key: "smb-signing-keystore-password"
+            - name: OCSP_TLS_KEYSTORE_FILE
+              value: "{{ .Values.signing.mountBase }}/tls.keystore"
+            - name: OCSP_TLS_KEYSTORE_PW
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.signing.secretName | quote }}
+                  key: "tls-signing-keystore-password"
+            {{- with .Values.mock.seed }}
+            - name: ZETA_MOCK_SEED
+              value: {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.ports.httpTargetPort }}
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health/liveness
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+              readOnly: false
+            - name: signing-material
+              mountPath: "{{ .Values.signing.mountBase }}"
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -6,9 +6,30 @@ global:
   imagePullSecrets: []
   registry: ""
   registry_host: ""
+  enableDNSRedirect: false
+  dns: {} 
   infinispanExternal:
     enabled: false
     replicaCount: 3
+    image:
+      repository: infinispan/server
+      tag: "15.2"
+    serviceAccount:
+      create: true
+      name: infinispan
+    resources: {}
+    podDisruptionBudget:
+      enabled: false
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      runAsNonRoot: true
+      capabilities:
+        drop: [ "ALL" ]
+    extraJavaOptions: ""
     remote:
       host:
       port:
@@ -82,11 +103,21 @@ global:
 # Keep tags empty by default; env files can enable as needed
 tags: { }
 
-exauthsim: { }
+exauthsim:
+  serviceAccount:
+    create: true
+    name: exauthsim
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
 
 zetaTlsTestToolServiceEnabled: false
 
 zeta-tls-test-tool-service: { }
+
+zetaCertValidationMockEnabled: false
+
+zeta-cert-validation-mock: { }
 
 hsmsim:
   enabled: false
@@ -106,7 +137,21 @@ popp-mocks:
   enabled: false
   # Needed when poppIssuer points to popp-statics (JWKS), or adjust /popp target + poppIssuer to your JWKS endpoint.
 
-testdriver: { }
+testdriver:
+  serviceAccount:
+    create: true
+    name: testdriver
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+nativedriver:
+  serviceAccount:
+    create: true
+    name: nativedriver
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
 
 testfachdienst: { }
 
@@ -185,24 +230,56 @@ testMonitoringService:
 
 zeta-guard:
   authserver:
+    dbEnc:
+      keychainGenerator:
+        image:
+          repository: vau/keychain-generator
+          tag: latest
     image:
       tag: main
-    resources:
-      limits:
-        cpu: "4"
-        memory: "4Gi"
-      requests:
-        cpu: "2"
-        memory: "4Gi"
+    container:
+      resources:
+        limits:
+          cpu: "4"
+          memory: "4Gi"
+        requests:
+          cpu: "2"
+          memory: "4Gi"
   authServerLogConsoleOutput: default
   authServerMetricsEnabled: true
   authServerTracingEnabled: true
+  cloudnativePg:
+    imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
   gematikConnectionEnabled: false
+  # Name of the Kubernetes Secret containing the gematik certificate chain for
+  # verifying the cosign signature of the provisioning data image. The Secret
+  # must have a key 'certchain.pem' holding a PEM-encoded X.509 certificate
+  # chain (CA and intermediate certs, no leaf cert). Required — the Helm chart
+  # fails without this value.
+  # See: Referenz_des_Helm_Charts.md#cosign-vertrauenskette-für-image-verifikation
   imageTrustCertchainSecretRef: gematik-image-signer-test
+  nginx-ingress:
+    controller:
+      image:
+        tag: main
+  opa:
+    image:
+      registry: docker.io/
+      repository: openpolicyagent/opa
   opaDistributedTracingEnabled: true
   opaStatusPrometheus: false
   openshiftRoute:
     enabled: false
+  provisioningProcessor:
+    image:
+      tag: main
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      capabilities:
+        drop: [ "ALL" ]
   pepproxy:
     image:
       tag: main
@@ -224,22 +301,19 @@ zeta-guard:
 
       locations: |-
         {{- $fd := .Values.pepproxy.nginxConf.fachdienstUrl -}}
-        location / {
-            pep off;
-            proxy_pass {{ $fd }}/;
-            proxy_ssl_verify off;
-
-            location /achelos_testfachdienst/ws {
-                proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
-                proxy_http_version 1.1;
-                proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection $connection_upgrade;
-                proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
-
-                location /achelos_testfachdienst/ws/ {
-                    proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
-                }
-            }
+        location /achelos_testfachdienst/ws/ {
+            proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+        }
+        location /achelos_testfachdienst/ws {
+            proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
         }
         location /pep/ {
             proxy_pass {{ $fd }}/;
@@ -248,19 +322,34 @@ zeta-guard:
             {{- if .Values.openshiftIngress.enabled }}
             proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
             {{- end }}
-
-            location /pep/achelos_testfachdienst/ws {
-                proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
-                proxy_http_version 1.1;
-                proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection $connection_upgrade;
-                proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
-
-                location /pep/achelos_testfachdienst/ws/ {
-                    proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
-                }
-            }
         }
+        location /pep/achelos_testfachdienst/ws/ {
+            proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+        
+            # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
+            # This is ok and desired for this test setup.
+            # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
+            satisfy all;
+            allow all;
+        }
+        location /pep/achelos_testfachdienst/ws {
+            proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+        
+            # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
+            # This is ok and desired for this test setup.
+            # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
+            satisfy all;
+            allow all;
+        }
+  pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter@sha256:0bf30a7c0ec24554a87063905f505a4ae4ea49043eab68f03660474512ba5fc8
   pepproxyMetricsEnabled: true
   pepproxyTracingEnabled: true
   telemetryGatewayEnabled: true

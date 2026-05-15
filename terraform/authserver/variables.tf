@@ -69,6 +69,28 @@ variable "smc_b_client_secret" {
   sensitive   = true
 }
 
+variable "audience" {
+  description = "Custom audience value included in access tokens by the audience mapper"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.audience == "" || can(regex("^https?://", var.audience))
+    error_message = "audience must be empty or start with http:// or https://."
+  }
+}
+
+variable "audience_scope_name" {
+  description = "Name of the audience scope (zero:audience)"
+  type        = string
+  default     = "zero:audience"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_:-]+$", var.audience_scope_name))
+    error_message = "audience_scope_name must only contain alphanumeric characters, underscores, colons, or hyphens."
+  }
+}
+
 variable "pdp_scopes" {
   description = "List of additional PDP scopes"
   type        = list(string)
@@ -78,4 +100,10 @@ variable "pdp_scopes" {
     condition     = alltrue([for s in var.pdp_scopes : can(regex("^[a-zA-Z0-9_:-]+$", s))])
     error_message = "Each pdp_scope must only contain alphanumeric characters, underscores, colons, or hyphens."
   }
+}
+
+variable "use_vau_db_enc" {
+  description = "Whether to apply client side encryption to this realm. Use recommended only if you have to run in a trusted execution environment (German VAU)."
+  type        = bool
+  default     = false
 }

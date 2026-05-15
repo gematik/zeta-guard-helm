@@ -1,0 +1,33 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Separate TLS-terminating ingress for the Keycloak admin hostname.
+     /auth on this hostname routes directly to authserver (no PEP, no admin block),
+     allowing Terraform and CI/CD runners to reach the admin REST API.
+     IP-based access restriction must be configured at the infrastructure layer
+     (e.g. Cloud Armor, NetworkPolicy, firewall rules). */ -}}
+{{- if and .Values.ingressEnabled .Values.authserver.adminHostname }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeta-guard-admin
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "master"
+    {{- end }}
+    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt" | quote }}
+    nginx.org/ssl-redirect: "true"
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/hsts: "true"
+    nginx.org/hsts-max-age: "31536000"
+    nginx.org/hsts-include-subdomains: "true"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  tls:
+    - hosts:
+        - {{ .Values.authserver.adminHostname | quote }}
+      secretName: {{ .Values.authserver.adminTlsSecretName | default "zeta-guard-admin-tls" | quote }}
+  rules:
+    - host: {{ .Values.authserver.adminHostname | quote }}
+{{- end }}

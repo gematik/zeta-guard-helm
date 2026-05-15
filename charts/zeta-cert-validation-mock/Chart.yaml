@@ -1,0 +1,6 @@
+apiVersion: v2
+name: zeta-cert-validation-mock
+description: OCSP and CRL responder mock for ZETA integration tests
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
