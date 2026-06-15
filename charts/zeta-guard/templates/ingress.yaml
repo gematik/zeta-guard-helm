@@ -11,9 +11,7 @@ metadata:
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "minion"
     nginx.org/websocket-services: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "pep-proxy-svc" }}
-    {{- if .Values.ingress.sessionAffinity.enabled }}
-    nginx.org/lb-method: "hash $http_x_forwarded_for consistent"
-    {{- end }}
+    nginx.org/lb-method: "hash $zeta_route consistent"
     {{- if and (or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled) (not .Values.routeViaTigerProxy) }}
     nginx.org/ssl-services: "authserver"
     {{- end }}

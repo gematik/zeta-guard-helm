@@ -14,10 +14,218 @@
         }
       ],
       "status": "not_affected",
-      "status_note": "GnuPG is not in use in combination with a TPM here.",
+      "status_note": "GnuPG wird hier nicht in Kombination mit einem TPM verwendet.",
       "justification": "vulnerable_code_not_in_execute_path",
       "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4878"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "TOCTOU-Racecondition in cap_set_file(). libcap2 gelangt transitiv über postgresql-17 → libsystemd0 → libcap2 in das Image. Weder das Postgres-Binary noch libsystemd0 importiert oder ruft cap_set_file() auf; kein PostgreSQL-Binary referenziert das Symbol (überprüft mittels nm -D und binärem Zeichenketten-Scan), es sind keine Dateifähigkeiten (File Capabilities) auf PostgreSQL-Binaries gesetzt (getcap -r), und kein Skript ruft setcap/getcap auf. Der Exploit erfordert zusätzlich einen lokalen nicht privilegierten Angreifer, der einen gleichzeitigen setcap-Aufruf ausnutzt – keine dieser Vorbedingungen ist im Container erfüllt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33845"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Keine Postgres binary lädt libgnutls30t64. Postgres verwendet kein DTLS. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33846"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Keine Postgres binary lädt libgnutls30t64. Postgres verwendet kein DTLS. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42010"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Postgres ist nicht mit RSA-PSK (Rivest–Shamir–Adleman – Pre-Shared Key) konfiguriert. Kein anderer Service im Container ist mit RSA-PSK (Rivest–Shamir–Adleman – Pre-Shared Key) konfiguriert. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-40356"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgssapi-krb5-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libk5crypto3"
+        },
+        {
+          "@id": "pkg:deb/debian/libkrb5-3"
+        },
+        {
+          "@id": "pkg:deb/debian/libkrb5support0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "NegoEx Mechanismus nicht konfiguriert unter etc/gss/mech oder the /etc/gss/mech.d/.",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42009"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Keine Postgres binary lädt libgnutls30t64. Postgres verwendet kein DTLS. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-21T09:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-8376"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Der Container läuft mit einem 64bit-Image. Daher kann die Schwachstelle nicht ausgenutzt werden. Die PL/Perl-Extension von PostgreSQL zum Schreiben von Funktionen in PERL wird nicht genutzt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42496"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die PL/Perl-Extension von PostgreSQL zum Schreiben von Funktionen in PERL wird nicht genutzt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42497"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die PL/Perl-Extension von PostgreSQL zum Schreiben von Funktionen in PERL wird nicht genutzt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-48962"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die PL/Perl-Extension von PostgreSQL zum Schreiben von Funktionen in PERL wird nicht genutzt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-9538"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die PL/Perl-Extension von PostgreSQL zum Schreiben von Funktionen in PERL wird nicht genutzt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z"
     }
   ],
-  "timestamp": "2026-02-27T15:41:26Z"
+  "timestamp": "2026-05-21T09:30:00Z"
 }

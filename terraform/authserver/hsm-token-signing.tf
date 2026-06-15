@@ -38,13 +38,16 @@ resource "terraform_data" "hsm_token_signing" {
   }
 
   provisioner "local-exec" {
-    command     = "${path.module}/scripts/configure-hsm-token-signing.sh"
+    command = "${path.module}/scripts/configure-hsm-token-signing.sh"
+
     environment = {
-      KC_URL      = var.keycloak_url
-      KC_REALM    = keycloak_realm.zeta_realm.realm
-      KC_USERNAME = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username : data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
-      KC_PASSWORD = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password : data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
-      KC_INSECURE = var.insecure_tls ? "true" : "false"
+      KC_URL   = var.keycloak_url
+      KC_REALM = keycloak_realm.zeta_realm.realm
+      KC_USERNAME = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username :
+      data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
+      KC_PASSWORD = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password :
+      data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
+      KC_INSECURE  = var.insecure_tls ? "true" : "false"
       HSM_ENDPOINT = var.hsm_token_signing_endpoint
       HSM_KEY_ID   = var.hsm_token_signing_key_id
       HSM_PRIORITY = var.hsm_token_signing_priority
@@ -54,6 +57,7 @@ resource "terraform_data" "hsm_token_signing" {
   provisioner "local-exec" {
     when    = destroy
     command = "${path.module}/scripts/remove-hsm-token-signing.sh"
+
     environment = {
       KC_URL      = self.output.kc_url
       KC_REALM    = self.output.kc_realm
@@ -76,7 +80,8 @@ resource "terraform_data" "hsm_remove_software_keys" {
   }
 
   provisioner "local-exec" {
-    command     = "${path.module}/scripts/remove-software-signing-keys.sh"
+    command = "${path.module}/scripts/remove-software-signing-keys.sh"
+
     environment = {
       KC_URL      = var.keycloak_url
       KC_REALM    = keycloak_realm.zeta_realm.realm

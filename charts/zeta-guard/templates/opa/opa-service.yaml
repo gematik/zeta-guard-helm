@@ -1,4 +1,3 @@
-{{- if .Values.opa.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -29,5 +28,4 @@ spec:
       port: 8181
       targetPort: http
   type: ClusterIP
-{{- end }}
 {{- end }}

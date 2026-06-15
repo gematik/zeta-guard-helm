@@ -2,6 +2,7 @@
 
 global:
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
+  enableDNSRedirect: true
 
 tags:
   exauthsim: true
@@ -10,6 +11,29 @@ tags:
   tiger-testsuite: true
   zeta-guard: true
   zeta-tls-test-tool-service: true
+
+zetaCertValidationMockEnabled: false
+
+zeta-cert-validation-mock:
+  devMode: true
+  image:
+    tag: 1.2.0
+  mock:
+    mode: always_good
+    enableAdminEndpoints: true
+  opentelemetry:
+    enabled: true
+    endpoint: http://telemetry-gateway-local:4318
+
+hsmsim:
+  enabled: true
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
 
 exauthsim:
   containerSecurityContext:
@@ -28,7 +52,7 @@ zetaTlsTestToolServiceEnabled: true
 zeta-tls-test-tool-service:
   devMode: true
   image:
-    tag: 1.0.0
+    tag: 1.2.0
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
@@ -100,9 +124,9 @@ testdriver: &localDriver
   fachdienst_url: "https://zeta-kind.local/pep/"
   hostname: zeta-kind.local
   image:
-    tag: v1.0.1
+    tag: v1.2.0
   ingressClassName: nginx
-  PoppToken: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZuZC50ZWxlbWF0aWsucG9wcCtqd3QiLCJraWQiOiJhbGlhcyIsIng1YyI6WyJNSUlEQmpDQ0FxeWdBd0lCQWdJSEFtQ25LeHIvUnpBS0JnZ3Foa2pPUFFRREFqQ0JoREVMTUFrR0ExVUVCaE1DUkVVeEh6QWRCZ05WQkFvTUZtZGxiV0YwYVdzZ1IyMWlTQ0JPVDFRdFZrRk1TVVF4TWpBd0JnTlZCQXNNS1V0dmJYQnZibVZ1ZEdWdUxVTkJJR1JsY2lCVVpXeGxiV0YwYVd0cGJtWnlZWE4wY25WcmRIVnlNU0F3SGdZRFZRUUREQmRIUlUwdVMwOU5VQzFEUVRZeElGUkZVMVF0VDA1TVdUQWVGdzB5TlRBM01qZ3lNakF3TURCYUZ3MHpNREEzTWpneU1UVTVOVGxhTUdzeEN6QUpCZ05WQkFZVEFrUkZNU1l3SkFZRFZRUUtEQjFuWlcxaGRHbHJJRlJGVTFRdFQwNU1XU0F0SUU1UFZDMVdRVXhKUkRFME1ESUdBMVVFQXd3cmNHOXdjQzEwYjJ0bGJpNW5aVzFoZEdsckxuUmxiR1Z0WVhScGF5MTBaWE4wSUhOcGJYVnNZWFJ2Y2pCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkhBdkkzclBpTTRVNUhCekhUSXllc24vWmNaUkh0djlWeHVqbGJUYVJQdHYyc3FPNXZ5dmEyNEVRbjhBZ1M2bU9ObmVSaElJOHFoUkxxL1ZJMDZEeE9HamdnRWZNSUlCR3pBN0JnZ3JCZ0VGQlFjQkFRUXZNQzB3S3dZSUt3WUJCUVVITUFHR0gyaDBkSEE2THk5bGFHTmhMbWRsYldGMGFXc3VaR1V2WldOakxXOWpjM0F3SFFZRFZSME9CQllFRkRobnRHbnFueEVRTnpRdkRTTUpLSFllRUROYU1DRUdBMVVkSUFRYU1CZ3dDZ1lJS29JVUFFd0VnaDh3Q2dZSUtvSVVBRXdFZ1NNd0h3WURWUjBqQkJnd0ZvQVVuelhnTUtsL3l2aG1uNUFLUXMyN2dXV2ZTZjR3RGdZRFZSMFBBUUgvQkFRREFnWkFNRnNHQlNza0NBTURCRkl3VURCT01Fd3dTakJJTURvTU9GUnZhMlZ1TFZOcFoyNWhkSFZ5TFVsa1pXNTBhWFREcEhRZ1pzTzhjaUJRY205dlppQnZaaUJRWVhScFpXNTBJRkJ5WlhObGJtTmxNQW9HQ0NxQ0ZBQk1CSUpBTUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBS3VDdi9ZczBMd3lQRTh2eVBZWVF5UFpBTGltendwRjJHallVWUlwZ3QyNUFpQUhucVpubEV0dEhzL0Y0SEExckYyZWNmMjd0L2NMMlM4b0VvSFZaMmpra2c9PSJdfQ.eyJpYXQiOjE3NzcwMTQ1MDUsInZlcnNpb24iOiIxLjAuMCIsImlzcyI6Imh0dHBzOi8vcG9wcC5leGFtcGxlLmNvbSIsInByb29mTWV0aG9kIjoiZWhjLXByYWN0aXRpb25lci11c2VyLXg1MDkiLCJwYXRpZW50UHJvb2ZUaW1lIjoxNzUzODc3MDMwLCJwYXRpZW50SWQiOiJYMTEwNjM5NDkxIiwiaW5zdXJlcklkIjoiMTA5NTAwOTY5IiwiYWN0b3JJZCI6IjEtMjAwMTQwNjA2MjUiLCJhY3RvclByb2Zlc3Npb25PaWQiOiIxLjIuMjc2LjAuNzYuNC4zMiJ9.vvc0t-tB7kspfVRrVucvQsuenQEwIgsaOTFf-iEljwG2WYv6n3AwZSAibd_ZKZXwFhysrI3m6cNBevK30XRFOw"
+  PoppToken: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZuZC50ZWxlbWF0aWsucG9wcCtqd3QiLCJraWQiOiJhbGlhcyIsIng1YyI6WyJNSUlEQmpDQ0FxeWdBd0lCQWdJSEFtQ25LeHIvUnpBS0JnZ3Foa2pPUFFRREFqQ0JoREVMTUFrR0ExVUVCaE1DUkVVeEh6QWRCZ05WQkFvTUZtZGxiV0YwYVdzZ1IyMWlTQ0JPVDFRdFZrRk1TVVF4TWpBd0JnTlZCQXNNS1V0dmJYQnZibVZ1ZEdWdUxVTkJJR1JsY2lCVVpXeGxiV0YwYVd0cGJtWnlZWE4wY25WcmRIVnlNU0F3SGdZRFZRUUREQmRIUlUwdVMwOU5VQzFEUVRZeElGUkZVMVF0VDA1TVdUQWVGdzB5TlRBM01qZ3lNakF3TURCYUZ3MHpNREEzTWpneU1UVTVOVGxhTUdzeEN6QUpCZ05WQkFZVEFrUkZNU1l3SkFZRFZRUUtEQjFuWlcxaGRHbHJJRlJGVTFRdFQwNU1XU0F0SUU1UFZDMVdRVXhKUkRFME1ESUdBMVVFQXd3cmNHOXdjQzEwYjJ0bGJpNW5aVzFoZEdsckxuUmxiR1Z0WVhScGF5MTBaWE4wSUhOcGJYVnNZWFJ2Y2pCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkhBdkkzclBpTTRVNUhCekhUSXllc24vWmNaUkh0djlWeHVqbGJUYVJQdHYyc3FPNXZ5dmEyNEVRbjhBZ1M2bU9ObmVSaElJOHFoUkxxL1ZJMDZEeE9HamdnRWZNSUlCR3pBN0JnZ3JCZ0VGQlFjQkFRUXZNQzB3S3dZSUt3WUJCUVVITUFHR0gyaDBkSEE2THk5bGFHTmhMbWRsYldGMGFXc3VaR1V2WldOakxXOWpjM0F3SFFZRFZSME9CQllFRkRobnRHbnFueEVRTnpRdkRTTUpLSFllRUROYU1DRUdBMVVkSUFRYU1CZ3dDZ1lJS29JVUFFd0VnaDh3Q2dZSUtvSVVBRXdFZ1NNd0h3WURWUjBqQkJnd0ZvQVVuelhnTUtsL3l2aG1uNUFLUXMyN2dXV2ZTZjR3RGdZRFZSMFBBUUgvQkFRREFnWkFNRnNHQlNza0NBTURCRkl3VURCT01Fd3dTakJJTURvTU9GUnZhMlZ1TFZOcFoyNWhkSFZ5TFVsa1pXNTBhWFREcEhRZ1pzTzhjaUJRY205dlppQnZaaUJRWVhScFpXNTBJRkJ5WlhObGJtTmxNQW9HQ0NxQ0ZBQk1CSUpBTUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBS3VDdi9ZczBMd3lQRTh2eVBZWVF5UFpBTGltendwRjJHallVWUlwZ3QyNUFpQUhucVpubEV0dEhzL0Y0SEExckYyZWNmMjd0L2NMMlM4b0VvSFZaMmpra2c9PSJdfQ.eyJpYXQiOjE3NzcwMTQ1MDUsInZlcnNpb24iOiIxLjAuMCIsImlzcyI6Imh0dHBzOi8vcG9wcC5leGFtcGxlLmNvbSIsInByb29mTWV0aG9kIjoiZWhjLXByYWN0aXRpb25lci11c2VyLXg1MDkiLCJwYXRpZW50UHJvb2ZUaW1lIjoxNzUzODc3MDMwLCJwYXRpZW50SWQiOiJYMTEwNjM5NDkxIiwiaW5zdXJlcklkIjoiMTA5NTAwOTY5IiwiYWN0b3JJZCI6IjEtMjAwMDAzMDAxMzkiLCJhY3RvclByb2Zlc3Npb25PaWQiOiIxLjIuMjc2LjAuNzYuNC4zMiJ9.onXSbpnxyZlDI1N_f418ePYOPb0lDE5eb9HIFvLChV7rMH41PtZYzFN6CatwcsL0sWKwRRdUwAoqoLfFxXl9Jw"
   routeViaTigerProxy: true
   smcbCertificateFileName: smcb-certificates.p12
   smcbCertificateAlias: zeta.c_smcb_aut
@@ -124,7 +148,14 @@ testfachdienst:
     - name: SERVER_SSL_ENABLED
       value: "true"
   image:
-    tag: 1.0.0
+    tag: 1.2.0
+  opentelemetry:
+    enabled: true
+    endpoint: http://telemetry-gateway-local:4318
+    resourceAttributes:
+      service.namespace: zeta-local
+      service.version: 1.0.0
+      deployment.environment.name: local
 
 testMonitoringServiceEnabled: true
 
@@ -172,7 +203,7 @@ tiger-proxy:
       drop: [ "ALL" ]
   devMode: true
   image:
-    tag: 1.0.0
+    tag: 1.2.0
   proxyConfig:
     proxyRoutes:
       - from: /testfachdienst
@@ -191,10 +222,10 @@ tiger-proxy:
         to: http://popp-statics/.well-known/signed-jwks
       - from: /popp
         to: http://popp-statics
-      - from: /ocsp/tls
-        to: http://zeta-cert-validation-mock/ocsp/tls
-      - from: /ocsp/smb
-        to: http://zeta-cert-validation-mock/ocsp/smb
+#      - from: /ocsp/tls
+#        to: http://zeta-cert-validation-mock/ocsp/tls
+#      - from: /ocsp/smb
+#        to: http://zeta-cert-validation-mock/ocsp/smb
       - from: /
         to: http://pep-proxy-svc
     tls:
@@ -225,7 +256,7 @@ tiger-testsuite:
     mvnAdditionalArgs: ""
     serenityExportDir: ""
   image:
-    tag: 1.0.1
+    tag: 1.2.0
   proxyAdminService:
     enabled: true
     type: NodePort
@@ -257,7 +288,7 @@ zeta-guard:
     initContainer:
       containerSecurityContext:
         allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: false
+        readOnlyRootFilesystem: true
         runAsNonRoot: true
         runAsUser: 1000
         capabilities:
@@ -272,23 +303,21 @@ zeta-guard:
           drop: [ "ALL" ]
     hostname: zeta-kind.local
     hsm:
-      enabled: false
+      enabled: true
       endpoint: "hsm-sim:50051"
       tls:
-        enabled: false
+        enabled: true
         keyId: "zeta-guard-keycloak-tls-es256-v1.p256"
       tokenSigning:
         enabled: false
         keyId: "zeta-guard-keycloak-token-es256-v1.p256"
     image:
-      tag: 1.0.1
+      tag: 1.2.1
     imagePullPolicy: IfNotPresent
     log:
       level: "INFO,de.gematik.zeta.zetaguard:debug"
     provider:
       smcB:
-        opa:
-          enabled: true
         # opaBaseUrl value has to be aligned with tags.tiger-proxy state
         # see docs/How_to_configure_tiger-proxy.md for reference
         opaBaseUrl: "http://tiger-proxy/opa"
@@ -296,6 +325,7 @@ zeta-guard:
     smcbHashingPepper: 085c1245-dc0d-4d39-95b4-97496bec6182
     tls:
       enabled: false
+      certSecretName: authserver-tls
   databaseMode: cloudnative
   devMode: true
   ingressClassName: nginx
@@ -303,7 +333,7 @@ zeta-guard:
   nginx-ingress:
     controller:
       image:
-        tag: 1.0.1
+        tag: 1.2.0
       ingressClass:
         name: nginx
       service:
@@ -345,7 +375,7 @@ zeta-guard:
         host: europe-west3-docker.pkg.dev
   provisioningProcessor:
     image:
-      tag: 1.0.0
+      tag: 1.2.0
     containerSecurityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: false
@@ -355,7 +385,7 @@ zeta-guard:
         drop: [ "ALL" ]
   pepproxy:
     asl_enabled: false
-    aslOcsp: "http://zeta-cert-validation-mock/ocsp"
+#    aslOcsp: "http://zeta-cert-validation-mock/ocsp"
     containerSecurityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
@@ -364,7 +394,7 @@ zeta-guard:
       capabilities:
         drop: [ "ALL" ]
     image:
-      tag: 1.0.1
+      tag: 1.2.0
     nginxConf:
       generateConfigMap: true
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard
@@ -389,13 +419,18 @@ zeta-guard:
           timeout: 60s
           send_batch_size: 1
       exporters:
-        otlp_http/test-monitoring-service:
+        otlp_http/tms_dienst_hersteller:
           endpoint: http://test-monitoring-collector-local:4328
           encoding: json
           tls:
             insecure: true
-        otlp_http/ti_siem:
+        otlp_http/tms_gematik:
           endpoint: http://test-monitoring-collector-local:4338
+          encoding: json
+          tls:
+            insecure: true
+        otlp_http/tms_ti_siem:
+          endpoint: http://test-monitoring-collector-local:4348
           encoding: json
           tls:
             insecure: true
@@ -403,34 +438,39 @@ zeta-guard:
         extensions:
           - health_check
         pipelines:
-          logs:
-            processors:
-              - memory_limiter
-              - redaction/betreiber
-              - batch
+          logs/dienst_hersteller:
             exporters:
-              - otlp_http/test-monitoring-service
+              - otlp_http/tms_dienst_hersteller
+
+          logs/ti_sim:
+            exporters:
+              - otlp_http/tms_gematik
+
           logs/ti_siem:
             exporters:
               - count/siem
-              - otlp_http/ti_siem
-          metrics:
-            processors:
-              - memory_limiter
-              - redaction/betreiber
-              - batch
+              - otlp_http/tms_ti_siem
+
+          metrics/dienst_hersteller:
             exporters:
-              - otlp_http/test-monitoring-service
+              - otlp_http/tms_dienst_hersteller
+
+          metrics/ti_sim:
+            exporters:
+              - otlp_http/tms_gematik
+
           metrics/ti_siem:
             exporters:
-              - otlp_http/ti_siem
-          traces:
-            processors:
-              - memory_limiter
-              - redaction/betreiber
-              - batch
+              - otlp_http/tms_ti_siem
+
+          traces/dienst_hersteller:
             exporters:
-              - otlp_http/test-monitoring-service
+              - otlp_http/tms_dienst_hersteller
+
+          traces/ti_sim:
+            exporters:
+              - otlp_http/tms_gematik
+
           traces/ti_siem:
             exporters:
-              - otlp_http/ti_siem
+              - otlp_http/tms_ti_siem

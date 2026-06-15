@@ -7,13 +7,25 @@ global:
   registry: ""
   registry_host: ""
   enableDNSRedirect: false
-  dns: {} 
+  dns:
+    tigerStaticClusterIP: "10.96.3.11"
+    redirects:
+      - fqdn: ehca.gematik.de
+        proxyRoutes:
+          - from: /ecc-ocsp
+            to: http://ehca.gematik.de/ecc-ocsp
+      - fqdn: ocsp-testref.root-ca.ti-dienste.de
+        proxyRoutes:
+          - from: /ocsp
+            to: http://ocsp-testref.root-ca.ti-dienste.de/ocsp
   infinispanExternal:
     enabled: false
     replicaCount: 3
     image:
-      repository: infinispan/server
+      repository: infinispan-zeta
       tag: "15.2"
+    imagePullPolicy: Always
+    imagePullSecrets: [ ]
     serviceAccount:
       create: true
       name: infinispan
@@ -37,6 +49,13 @@ global:
       username: "please set me"
       password: "please set me"
       secretName:
+    hsm:
+      enabled: false
+      endpoint: ""  # gRPC address of the HSM Proxy, e.g. "hsm-sim:50051"
+      keyId: ""  # TLS key ID in the HSM, e.g. "zeta-guard-infinispan-tls-es256-v1.p256"
+      caCert: |
+        -----BEGIN CERTIFICATE-----
+        -----END CERTIFICATE-----
     config: |-
       <infinispan xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:infinispan:config:15.0 https://infinispan.org/schemas/infinispan-config-15.0.xsd
                             urn:infinispan:server:15.0 https://infinispan.org/schemas/infinispan-server-15.0.xsd" xmlns="urn:infinispan:config:15.0" xmlns:server="urn:infinispan:server:15.0">
@@ -58,16 +77,33 @@ global:
             <security>
                 <security-realms>
                     <security-realm name="default">
-                        <!-- Uncomment to enable TLS on the realm -->
-                        <!-- server-identities>
-                      <ssl>
-                         <keystore path="server.pfx"
-                                   password="password" alias="server"
-                                   generate-self-signed-certificate-host="localhost"/>
-                      </ssl>
-                   </server-identities-->
-                        <properties-realm />
+                    {{- if .Values.global.infinispanExternal.hsm.enabled }}
+                      <server-identities>
+                        <ssl>
+                          <keystore
+                            type="HSMPROXY"
+                            provider="HSMPROXY"
+                            password=""
+                            alias="tls"/>
+                        </ssl>
+                      </server-identities>
+                    {{- end }}
+                      <properties-realm />
                     </security-realm>
+                    {{- if .Values.global.infinispanExternal.hsm.enabled }}
+                    <security-realm name="cluster-transport">
+                      <server-identities>
+                        <ssl>
+                          <keystore
+                            type="HSMPROXY"
+                            provider="HSMPROXY"
+                            password=""
+                            alias="tls"/>
+                          <truststore path="${env.HSM_TRUSTSTORE_PATH}" password="" />
+                        </ssl>
+                      </server-identities>
+                    </security-realm>
+                    {{- end }}
                 </security-realms>
             </security>
             <endpoints socket-binding="default" security-realm="default" />
@@ -97,6 +133,9 @@ global:
             <distributed-cache name="loginFailures" statistics="true">
                 <encoding media-type="application/x-protostream" />
             </distributed-cache>
+            {{- if .Values.global.infinispanExternal.hsm.enabled }}
+            <transport server:security-realm="cluster-transport"/>
+            {{- end }}
         </cache-container>
       </infinispan>
 
@@ -202,7 +241,7 @@ testMonitoringService:
             sending_queue:
               queue_size: 100
           otlphttp/prometheus:
-            endpoint: http://prometheus:9090/prometheus/api/v1/otlp
+            endpoint: http://prometheus:9090/api/v1/otlp
         service:
           pipelines:
             traces:
@@ -217,7 +256,6 @@ testMonitoringService:
                 - opensearch
     prometheus:
       server:
-        prefixURL: "/prometheus"
         # Environments should override baseURL with their public host.
         extraFlags:
           - web.enable-otlp-receiver
@@ -249,7 +287,7 @@ zeta-guard:
   authServerMetricsEnabled: true
   authServerTracingEnabled: true
   cloudnativePg:
-    imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
+    imageName: ghcr.io/cloudnative-pg/postgresql:17.10-standard-trixie
   gematikConnectionEnabled: false
   # Name of the Kubernetes Secret containing the gematik certificate chain for
   # verifying the cosign signature of the provisioning data image. The Secret
@@ -302,6 +340,7 @@ zeta-guard:
       locations: |-
         {{- $fd := .Values.pepproxy.nginxConf.fachdienstUrl -}}
         location /achelos_testfachdienst/ws/ {
+            include proxy_headers.conf;
             proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -309,6 +348,7 @@ zeta-guard:
             proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
         }
         location /achelos_testfachdienst/ws {
+            include proxy_headers.conf;
             proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -316,14 +356,19 @@ zeta-guard:
             proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
         }
         location /pep/ {
+            # inherits proxy_headers.conf from the server block
             proxy_pass {{ $fd }}/;
             proxy_ssl_verify off;
 
             {{- if .Values.openshiftIngress.enabled }}
+            # declares its own proxy_set_header (cookie strip) and therefore does NOT inherit
+            # the server-level proxy_headers.conf (non-additive) — re-include it here
+            include proxy_headers.conf;
             proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
             {{- end }}
         }
         location /pep/achelos_testfachdienst/ws/ {
+            include proxy_headers.conf;
             proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -337,6 +382,7 @@ zeta-guard:
             allow all;
         }
         location /pep/achelos_testfachdienst/ws {
+            include proxy_headers.conf;
             proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -359,13 +405,32 @@ zeta-guard:
         extensions:
           - health_check
         pipelines:
-          logs:
+          logs/dienst_hersteller:
             exporters:
               - debug
-          metrics:
+          logs/ti_sim:
             exporters:
               - debug
-          traces:
+          logs/ti_siem:
+            exporters:
+              - count/siem
+              - debug
+          metrics/dienst_hersteller:
+            exporters:
+              - debug
+          metrics/ti_sim:
+            exporters:
+              - debug
+          metrics/ti_siem:
+            exporters:
+              - debug
+          traces/dienst_hersteller:
+            exporters:
+              - debug
+          traces/ti_sim:
+            exporters:
+              - debug
+          traces/ti_siem:
             exporters:
               - debug
     extraVolumeMounts: [ ]

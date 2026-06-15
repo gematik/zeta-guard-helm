@@ -86,8 +86,8 @@ variable "audience_scope_name" {
   default     = "zero:audience"
 
   validation {
-    condition     = can(regex("^[a-zA-Z0-9_:-]+$", var.audience_scope_name))
-    error_message = "audience_scope_name must only contain alphanumeric characters, underscores, colons, or hyphens."
+    condition     = can(regex("^[a-zA-Z0-9_:.-]+$", var.audience_scope_name))
+    error_message = "audience_scope_name must only contain alphanumeric characters, underscores, colons, periods, or hyphens."
   }
 }
 
@@ -97,8 +97,8 @@ variable "pdp_scopes" {
   default     = []
 
   validation {
-    condition     = alltrue([for s in var.pdp_scopes : can(regex("^[a-zA-Z0-9_:-]+$", s))])
-    error_message = "Each pdp_scope must only contain alphanumeric characters, underscores, colons, or hyphens."
+    condition     = alltrue([for s in var.pdp_scopes : can(regex("^[a-zA-Z0-9_:.-]+$", s))])
+    error_message = "Each pdp_scope must only contain alphanumeric characters, underscores, colons, periods, or hyphens."
   }
 }
 

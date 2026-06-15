@@ -79,27 +79,61 @@ After setting these values the Tiger proxy chart will be deployed when running `
 ### DNS redirection for non-configurable domains
 
 In some cases clients need to contact a domain that is not or not easily configurable (e.g. CRL endpoints or OCSP responders in TLS certificates).
-The ZETA Guard deployment can be configured to redirect DNS resolution of such domains to the statically assigned IP of the standalone Tiger proxy.
-Additionally, the (unique) URL path for the target domains has to be added to the `tiger-proxy.proxyConfig.proxyRoutes[]` or else the client will not 
-be able to receive a useful response.
+The ZETA Guard deployment can be configured to redirect DNS resolution of such domains to a statically assigned in-cluster service IP.
+This can point to the standalone Tiger proxy or, for direct OCSP mock routing, to the OCSP mock service itself.
+When routing through Tiger proxy, `global.dns.redirects[].proxyRoutes[]` are inserted before the catch-all `/` Tiger proxy route.
+This keeps OCSP routes after any more specific routes and before the fallback route.
 
 See `values.yaml` for the following `global` section:
 
 ```yaml
 global:
-  enableDNSRedirect: true
+  enableDNSRedirect: false
   dns:
     tigerStaticClusterIP: "10.96.3.11"
     redirects:
-      - fqdn: ocsp.example.com
-        ip: "10.96.3.11"
+      - fqdn: ehca.gematik.de
+        proxyRoutes:
+          - from: /ecc-ocsp
+            to: http://ehca.gematik.de/ecc-ocsp
+      - fqdn: ocsp-testref.root-ca.ti-dienste.de
+        proxyRoutes:
+          - from: /ocsp
+            to: http://ocsp-testref.root-ca.ti-dienste.de/ocsp
 ```
 
 This section is used to:
-- assign a static ClusterIP to the Tiger proxy `Service`
+- assign a static ClusterIP to the Tiger proxy `Service` when Tiger proxy is deployed
 - add `hostAliases` to the `template.spec.hostAliases` key of the PEP, PDP and testdriver deployments
+- add the matching OCSP proxy routes to the Tiger proxy configuration when Tiger proxy is deployed
 
-**Note**: The full list of DNS redirections (`global.dns.redirects[]`) is written to the `hosts` file of the PEP, PDP and testdriver containers. This means that if there are domains that are contacted for multiple purposes, all unique URL paths have to be added to `tiger-proxy.proxyConfig.proxyRoutes[]`.
+`Service.spec.clusterIP` is immutable after Kubernetes creates the Service. If `tiger-proxy` already exists,
+set `global.dns.tigerStaticClusterIP` to the current `tiger-proxy` Service IP, or deploy through the Makefile
+targets so the live Service IP is injected automatically before rendering.
+For direct mock routing, the same applies to `zeta-cert-validation-mock.service.clusterIP`.
+
+Enable `global.enableDNSRedirect` in each environment that should route certificate AIA domains through Tiger proxy.
+
+For direct OCSP mock routing without Tiger proxy, override the static IP and give the OCSP mock service that ClusterIP.
+This is used by the achelos performance environment, where the OCSP calls cannot pass through Tiger proxy:
+
+```yaml
+global:
+  enableDNSRedirect: true
+  dns:
+    tigerStaticClusterIP: "10.96.3.12"
+    redirects:
+      - fqdn: ehca.gematik.de
+      - fqdn: ocsp-testref.root-ca.ti-dienste.de
+
+zeta-cert-validation-mock:
+  service:
+    clusterIP: "10.96.3.12"
+```
+
+**Note**: The full list of DNS redirections (`global.dns.redirects[]`) is written to the `hosts` file of the PEP, PDP and testdriver containers.
+If a redirect is routed through Tiger proxy and the domain is contacted for multiple purposes, all unique URL paths have to be added to `global.dns.redirects[].proxyRoutes[]`.
+If a redirect is routed directly to a backend service, the backend must expose the exact path embedded in the certificate AIA, for example `/ecc-ocsp` or `/ocsp`.
 
 
 ## Deactivate routing via tiger proxy

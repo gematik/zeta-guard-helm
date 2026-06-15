@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: testdriver-image
-  tag: v1.0.1
+  tag: v1.2.0
 imagePullPolicy: Always
 
 replicaCount: 1

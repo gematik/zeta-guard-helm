@@ -7,6 +7,10 @@ metadata:
     app.kubernetes.io/part-of: zeta-guard
 spec:
   instances: {{ .Values.cloudnativePg.instances }}
+  postgresql:
+    parameters:
+      shared_buffers: {{ .Values.cloudnativePg.parameters.sharedBuffers | quote }}
+      max_connections: {{ .Values.cloudnativePg.parameters.maxConnections | quote }}
   imageName: {{ .Values.cloudnativePg.imageName | quote }}
   storage:
     size: {{ .Values.cloudnativePg.storage.size | quote }}

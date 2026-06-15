@@ -50,6 +50,12 @@ spec:
               port: service-mgmt
             initialDelaySeconds: 10
             periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health/liveness
+              port: service-mgmt
+            failureThreshold: 30
+            periodSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

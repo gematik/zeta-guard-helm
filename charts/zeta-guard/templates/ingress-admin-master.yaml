@@ -15,12 +15,21 @@ metadata:
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "master"
     {{- end }}
+    {{- if not .Values.authserver.adminTlsSecretName }}
     cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt" | quote }}
+    cert-manager.io/private-key-algorithm: ECDSA
+    cert-manager.io/private-key-size: "256"
+    {{- end }}
+    {{- if not .Values.nginxIngressEnabled }}
     nginx.org/ssl-redirect: "true"
+    {{- end }}
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/hsts: "true"
     nginx.org/hsts-max-age: "31536000"
     nginx.org/hsts-include-subdomains: "true"
+    {{- end }}
+    {{- with .Values.ingressMasterAnnotations }}
+    {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
@@ -30,4 +39,19 @@ spec:
       secretName: {{ .Values.authserver.adminTlsSecretName | default "zeta-guard-admin-tls" | quote }}
   rules:
     - host: {{ .Values.authserver.adminHostname | quote }}
+      {{- if not .Values.nginxIngressEnabled }}
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: authserver
+                port:
+                  {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
+                  name: https
+                  {{- else }}
+                  name: http
+                  {{- end }}
+      {{- end }}
 {{- end }}

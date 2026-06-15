@@ -99,6 +99,13 @@ spec:
               cd /work
               ./bin/kc.sh build
           env:
+            - name: OCSP_KEYSTORE_LOCATION
+              value: "/var/trust-data/ocsp-signers.p12"
+            - name: OCSP_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
+                  key: password
             - name: SMCB_KEYSTORE_LOCATION
               value: "/var/trust-data/smcb-trust-roots.p12"
             - name: SMCB_KEYSTORE_PASSWORD
@@ -119,6 +126,8 @@ spec:
           volumeMounts:
             - name: keycloak-home
               mountPath: /work
+            - name: tmp
+              mountPath: /tmp
           {{- with .Values.authserver.initContainer.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -139,6 +148,8 @@ spec:
             value: "/var/trust-data"
           - name: PROCESSORS_TSL_SMB_ENABLED
             value: "true"
+          - name: PROCESSORS_TSL_OCSP_ENABLED
+            value: "true"
           - name: TSL_FILENAME
             value: "ECC-RSA_TSL-test.xml"
           - name: PROCESSORS_TPM_ENABLED
@@ -151,6 +162,7 @@ spec:
           {{- end }}
           - name: TRUST_CERTCHAIN_FILE
             value: "/var/image-trustchain/certchain.pem"
+          {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 10 }}
           {{- with .Values.provisioningProcessor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -239,6 +251,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.authserver.admin.secretRef | default "authserver-admin" | quote }}
                   key: password
+            - name: OCSP_KEYSTORE_LOCATION
+              value: "/var/trust-data/ocsp-signers.p12"
+            - name: OCSP_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
+                  key: password
             - name: SMCB_KEYSTORE_LOCATION
               value: "/var/trust-data/smcb-trust-roots.p12"
             - name: SMCB_KEYSTORE_PASSWORD
@@ -277,6 +296,9 @@ spec:
                 -XX:MaxMetaspaceSize=256m
                 -XX:+UseG1GC
                 -XX:MaxGCPauseMillis=200
+                {{- with .Values.global.noProxy }}
+                -Dhttp.nonProxyHosts={{ . | replace ",." ",*." | replace "," "|" }}
+                {{- end }}
             {{- if .Values.authServerLogConsoleOutput | eq "json" }}
             - name: KC_LOG_CONSOLE_JSON_FORMAT
               value: "ecs"
@@ -290,9 +312,6 @@ spec:
             - name: KC_TELEMETRY_SERVICE_NAME
               value: "ZETA Guard PDP authorization server"
             # OPA endpoints and behavior
-            # Configure ZETA SMC-B token-exchange provider and OPA toggle
-            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_ENABLED
-              value: "{{ .Values.authserver.provider.smcB.opa.enabled }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_BASE_URL
               value: "{{ .Values.authserver.provider.smcB.opaBaseUrl }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_SIMULATION_BASE_URL
@@ -303,8 +322,6 @@ spec:
               value: "{{ .Values.authserver.provider.smcB.connectionTimeoutMs }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_READ_TIMEOUT_MS
               value: "{{ .Values.authserver.provider.smcB.readTimeoutMs }}"
-            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_FAIL_CLOSED
-              value: "{{ .Values.authserver.provider.smcB.failClosed }}"
             # https://www.keycloak.org/docs/latest/upgrading/#maximum-length-of-the-parameters-in-the-oidc-token-endpoint
             - name: KC_SPI_LOGIN_PROTOCOL_OPENID_CONNECT_REQ_PARAMS_DEFAULT_MAX_SIZE
               value: "10000"
@@ -342,6 +359,9 @@ spec:
             {{- if .Values.authserver.hsm.tokenSigning.enabled }}
             - name: HSM_PROXY_TOKEN_KEY_ID
               value: {{ .Values.authserver.hsm.tokenSigning.keyId | quote }}
+            # Fail-closed guard: refuse software signing-key fallback when HSM is unreachable.
+            - name: KC_SPI_KEYS_ZETA_HSM_TOKEN_SIGNING_FAIL_CLOSED
+              value: {{ .Values.authserver.hsm.tokenSigning.failClosed | quote }}
             {{- end }}
             {{- end }}
             {{- if .Values.authserver.hsm.tls.enabled }}
@@ -440,8 +460,13 @@ spec:
                   {{- end }}
                   key: password
             - name: KC_CACHE_REMOTE_TLS_ENABLED
+            {{- if .Values.global.infinispanExternal.hsm.enabled }}
+              value: "true"
+            {{- else }}
               value: "false"
             {{- end }}
+            {{- end }}
+            {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           ports:
             - containerPort: 8080 # align with KC_HTTP_PORT
               name: http-port
@@ -475,6 +500,14 @@ spec:
             {{- with .Values.authserver.container.extraVolumeMounts }}
             {{- tpl (toYaml .) $ | nindent 12 }}
             {{- end }}
+            {{- if and .Values.global.infinispanExternal.enabled .Values.global.infinispanExternal.hsm.enabled }}
+            - name: infinispan-ca
+              mountPath: /opt/keycloak/conf/truststores/infinispan
+              readOnly: true
+            {{- end }}
+            {{- with .Values.authserver.container.extraVolumeMounts }}
+            {{- tpl (toYaml .) $ | nindent 12 }}
+            {{- end }}
           {{- with .Values.authserver.container.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -501,6 +534,15 @@ spec:
         - name: tls-cert
           secret:
             secretName: {{ .Values.authserver.tls.certSecretName }}
+        {{- end }}
+        {{- with .Values.authserver.extraVolumes }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
+        {{- end }}
+        {{- if and .Values.global.infinispanExternal.enabled .Values.global.infinispanExternal.hsm.enabled }}
+        - name: infinispan-ca
+          configMap:
+            name: infinispan-ca-cert
+            defaultMode: 0444
         {{- end }}
         {{- with .Values.authserver.extraVolumes }}
         {{- tpl (toYaml .) $ | nindent 8 }}

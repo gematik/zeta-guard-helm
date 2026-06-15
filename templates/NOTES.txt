@@ -29,7 +29,7 @@ Deployed component versions:
   provisioning-processor:    {{ $zg.Values.authserver.provisioningProcessor.image.tag | default "default" }}
 {{- end }}
   pepproxy:                  {{ $zg.Values.pepproxy.image.tag | default "default" }}
-  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}{{ if not $zg.Values.opa.enabled }} (disabled){{ end }}
+  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}
     opa-wif: {{ (and $zg.Values.opa.workloadIdentityFederation $zg.Values.opa.workloadIdentityFederation.enabled) | ternary "enabled" "disabled" }}
   telemetry-gateway:         {{ (index $zg.Values "telemetry-gateway").image.tag | default "default" }}{{ if not $zg.Values.telemetryGatewayEnabled }} (disabled){{ end }}
     gematik-connection: {{ $zg.Values.gematikConnectionEnabled | ternary "enabled" "disabled" }}

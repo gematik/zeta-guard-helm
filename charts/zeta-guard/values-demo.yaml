@@ -14,6 +14,20 @@ global:
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
   # infinispanExternal: see umbrella chart values for full Infinispan config
 
+  # HTTP forward proxy for outbound requests from all ZETA Guard components.
+  # Applies to: pepproxy (nginx), authserver (Keycloak), opa, opa-simulation,
+  #             provisioning-processor (init container), opa-token-renewer (CronJob).
+  # Example: "http://proxy.example.com:8080"
+  #
+  # This is a chart-wide setting — there is no per-component proxy value.
+  # To exclude a specific component's targets from the proxy, add those
+  # hostnames/suffixes to noProxy instead of configuring the proxy per-component.
+  # Example: noProxy: ".cluster.local,europe-west3-docker.pkg.dev"
+  httpProxy: null
+  httpsProxy: null
+  noProxy: null
+  allProxy: null
+
 # Registry path prefix prepended to image repository names (e.g. "zeta/zeta-guard/")
 registry_name: ""
 
@@ -52,6 +66,7 @@ authserver:
   # --- Hostname ---
   # Public hostname used in Keycloak's frontend URL.
   hostname: "zeta-demo.example"
+  wellKnownAuthServerPath: /
   # Separate hostname for the Keycloak admin console and admin REST API.
   # When set, /auth/admin is blocked via the PEP proxy and a dedicated admin
   # ingress is created. Terraform and CI/CD runners must use this hostname.
@@ -77,14 +92,11 @@ authserver:
   # --- Provider configuration (ZETA SMC-B token-exchange) ---
   provider:
     smcB:
-      opa:
-        enabled: true
       opaBaseUrl: "http://opa:8181"
       opaSimulationBaseUrl: "http://opa-simulation:8181"
       decisionPath: "/v1/data/policies/zeta/authz/decision"
       connectionTimeoutMs: 1000
       readTimeoutMs: 2000
-      failClosed: true
 
   # --- Client registration ---
   config:
@@ -107,6 +119,7 @@ authserver:
       # JWT token signing via HSM-backed ES256 key. Requires hsm.enabled: true.
       enabled: false
       keyId: ""    # Token signing key ID in the HSM
+      failClosed: true   # Refuse software-key fallback when HSM is unreachable
 
   # --- TLS (non-HSM) ---
   tls:
@@ -119,7 +132,7 @@ authserver:
   initContainer:
     containerSecurityContext:
       allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: false
+      readOnlyRootFilesystem: true
       runAsNonRoot: true
       capabilities:
         drop: [ "ALL" ]
@@ -242,6 +255,7 @@ pepproxy:
 
   # --- Well-known base URL ---
   wellKnownBase: http://localhost
+  wellKnownResourceSuffix: /pep/
 
   # --- ASL (Application Security Layer) ---
   # Controls whether ASL is enabled (true) or disabled (false).
@@ -283,7 +297,14 @@ pepproxy:
     # Scopes required for a valid access token
     requiredScopes: [ ]
 
-    # Custom nginx location blocks (Go template string)
+    # Custom nginx `location` blocks (with `proxy_pass`) for the resource server (Go template string).
+    # The PEP header handling (`include proxy_headers.conf;` — strips client-supplied
+    # credentials and ZETA-* headers, sets the PEP's own headers + Forwarded) is included
+    # once at the `server` level, so plain `proxy_pass` locations inherit it automatically.
+    # nginx `proxy_set_header` inheritance is non-additive: a location that declares its own
+    # `proxy_set_header` (e.g. a WebSocket upgrade) does NOT inherit it and must repeat
+    # `include proxy_headers.conf;` itself — otherwise a `pep on;` location returns HTTP 500
+    # (ProxyHeadersMissing).
     locations: ""
 
   # --- HSM integration for PEP ---
@@ -331,7 +352,7 @@ cloudnativeDbSchema: "public"
 # For production use instances >= 3.
 cloudnativePg:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.10-standard-trixie
   resources:
     requests:
       cpu: 500m
@@ -341,6 +362,9 @@ cloudnativePg:
       memory: 1Gi
   storage:
     size: 10Gi
+  parameters:
+    sharedBuffers: 24MB
+    maxConnections: 100
 
 # ---------------------------------------------------------------------------
 # Ingress & TLS
@@ -366,11 +390,6 @@ ingressClassName: "nginx"
 ingressEnabled: true
 ingressMasterAnnotations: {}
 ingressMinionAnnotations: {}
-
-ingress:
-  sessionAffinity:
-    # Set to true when replicaCount > 1; uses ip-hash via NIC
-    enabled: false
 
 # Deploy the bundled nginx-ingress controller
 nginxIngressEnabled: true
@@ -429,7 +448,6 @@ devMode: false
 # OPA (Open Policy Agent)
 # ---------------------------------------------------------------------------
 opa:
-  enabled: true
   replicaCount: 1
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
@@ -636,13 +654,13 @@ telemetry-gateway:
   config:
     exporters:
       # Override with environment-specific exporter, e.g.:
-      # otlp_grpc/gematik:
+      # otlp_grpc/ti_sim:
       #   endpoint: https://otlp.v1.bd.prod.ccs.gematik.solutions:443
       #   auth:
       #     authenticator: bearertokenauth/gematik
       debug: {}
     processors:
-      redaction/betreiber:
+      redaction/zeta_guard:
         allow_all_keys: true
         blocked_key_patterns:
           - ".*token.*"
@@ -664,15 +682,12 @@ telemetry-gateway:
       extensions:
         - health_check
       pipelines:
-        logs:
-          exporters:
-            - debug
-        metrics:
-          exporters:
-            - debug
-        traces:
-          exporters:
-            - debug
+        logs/ti_sim: null
+        logs/ti_siem: null
+        metrics/ti_sim: null
+        metrics/ti_siem: null
+        traces/ti_sim: null
+        traces/ti_siem: null
 
 # ---------------------------------------------------------------------------
 # Egress NetworkPolicies (A_27864-01)
@@ -696,27 +711,27 @@ networkPolicy:
   enabled: false
 
   egress:
-    telemetry: # gematik Telemetriedaten-Empfänger (OTLP)
+    telemetry: # gematik telemetry data receiver (OTLP)
       ipBlocks: [ ]               # e.g. ["<gematik-otlp-ip>/32"]
-    siem: # SIEM der gematik
+    siem: # gematik SIEM
       ipBlocks: [ ]
-    artifactRegistry: # ZETA Artifact Registry bei gematik (OPA bundles, images)
+    artifactRegistry: # ZETA Artifact Registry at gematik (OPA bundles, images)
       ipBlocks: [ ]               # e.g. Google Artifact Registry europe-west3-docker.pkg.dev
-    providerArtifactRegistry: # Provider-interne Registry
+    providerArtifactRegistry: # provider-internal artifact registry
       ipBlocks: [ ]
-    ocspCabForum: # OCSP/CRL TLS TSPs nach CAB Forum
+    ocspCabForum: # OCSP/CRL for TLS TSPs per CAB Forum
       ipBlocks: [ ]
     ocspSmcbTsp: # SMC-B TSP OCSP Responder
       ipBlocks: [ ]
-    ocspTiPki: # OCSP Responder TSP Komponenten PKI der TI
+    ocspTiPki: # OCSP Responder for TI component PKI
       ipBlocks: [ ]
-    pip: # PIP — Quelle der OPA Policy Bundles
+    pip: # PIP — OPA policy bundle source
       ipBlocks: [ ]
-    popp: # PoPP Dienst
+    popp: # PoPP service
       ipBlocks: [ ]
       mock: false                # set true when popp-mocks subchart is deployed (allows egress to app=popp-mock pod, targetPort 8080)
-    providerInternal: # Anbieter-interner Verkehr
-      allowAll: false            # true = gesamter Egress erlaubt (kein IP-Filter)
+    providerInternal: # provider-internal traffic
+      allowAll: false            # true = all egress allowed (no IP filter)
       resourceServers:
         ipBlocks: [ ]
       telemetrySystems:

@@ -1,7 +1,7 @@
 {
-  "resource": "{{ .Values.pepproxy.wellKnownBase }}/pep/",
+  "resource": "{{ .Values.pepproxy.wellKnownBase }}{{ .Values.pepproxy.wellKnownResourceSuffix }}",
   "authorization_servers": [
-    "https://{{ .Values.authserver.hostname }}/"
+    "https://{{ .Values.authserver.hostname }}{{ .Values.authserver.wellKnownAuthServerPath }}"
   ],
   "zeta_asl_use": "{{ if .Values.pepproxy.asl_enabled }}required{{ else }}not_supported{{ end}}"
 }

@@ -12,6 +12,9 @@ spec:
   selector:
     app.kubernetes.io/name: zeta-cert-validation-mock
   type: {{ default "ClusterIP" .Values.service.type }}
+  {{- with .Values.service.clusterIP }}
+  clusterIP: {{ . | quote }}
+  {{- end }}
   ports:
     - name: http
       port: {{ default 80 .Values.service.ports.http }}
