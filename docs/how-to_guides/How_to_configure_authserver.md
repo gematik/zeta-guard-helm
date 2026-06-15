@@ -23,6 +23,8 @@ authserver without the need to deploy it from scratch.
 > Predefined settings:
 > - PDP scopes `zero:manage` and `zero:register` are automatically created
 > - Realm token encryption is set to ES256
+> - All RSA key providers are removed; only ECC keys (ES256/P-256) appear in the
+    JWKS endpoint
 > - Trusted Hosts, Max Clients Limit, Consent Required Policies are removed
 > - ZETA Max Clients Limit Policy added
 
@@ -83,13 +85,15 @@ Set environment-specific variables in `environments/STAGE.tfvars` (or
 `private/STAGE.tfvars` for local development). Key variables include:
 
 ```hcl
-insecure_tls = true                       # Set to true if using self-signed certificates
-use_kubernetes = true                     # Set to false for local mode (no K8s backend)
-keycloak_url = "https://.../auth"         # URL of the Keycloak instance
-keycloak_namespace = "zeta-demo"          # Kubernetes namespace where Keycloak runs
-pdp_scopes = ["zero:read", "zero:write"]  # Optional additional scope list
-# audience_scope_name = "zero:audience"     # Optional: rename the audience scope (default: "zero:audience")
-# audience            = "https://..."       # Optional: explicit audience value (default: derived from keycloak_url)
+insecure_tls = true                                     # Set to true if using self-signed certificates
+use_kubernetes = true                                   # Set to false for local mode (no K8s backend)
+keycloak_url = "https://.../auth"                       # URL of the Keycloak instance
+keycloak_namespace = "zeta-demo"                        # Kubernetes namespace where Keycloak runs
+pdp_scopes = [
+  "zero:read", "practitionerAccount.crud"
+]  # Optional additional scope list
+# audience_scope_name = "zero:audience"                 # Optional: rename the audience scope (default: "zero:audience")
+# audience            = "https://..."                   # Optional: explicit audience value (default: derived from keycloak_url)
 ```
 
 The following validations are enforced:
@@ -98,9 +102,9 @@ The following validations are enforced:
 - `keycloak_url` must start with `http://` or `https://`
 - `audience` must be empty or start with `http://` or `https://`
 - `pdp_scopes` entries may only contain alphanumeric characters, underscores,
-  colons, or hyphens
+  colons, periods, or hyphens
 - `audience_scope_name` may only contain alphanumeric characters, underscores,
-  colons, or hyphens
+  colons, periods, or hyphens
 - When `use_kubernetes = false`, both `keycloak_username` and
   `keycloak_password` must be set
 
@@ -454,7 +458,7 @@ zeta-guard:
     initContainer:
       containerSecurityContext:
         allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: false
+        readOnlyRootFilesystem: true
         runAsNonRoot: true
         capabilities:
           drop: [ "ALL" ]
@@ -507,6 +511,37 @@ zeta-guard:
 
 ---
 
+## ECC-Only Key Configuration
+
+The `zeta-guard` realm must only contain ECC keys in its JWKS endpoint
+(`/auth/realms/zeta-guard/protocol/openid-connect/certs`). RSA keys are
+not permitted — access tokens are always signed with ES256 (P-256).
+
+### Why RSA keys appear by default
+
+Keycloak automatically creates default key providers when a realm is
+initialized, including `rsa-enc-generated` (RSA-OAEP encryption key). This key
+appears in the JWKS endpoint even though no component in ZETA Guard uses RSA
+token encryption.
+
+### How RSA keys are removed
+
+`make config` unconditionally runs a Terraform-managed cleanup script
+(`terraform/authserver/scripts/remove-rsa-keys.sh`) that queries the
+`org.keycloak.keys.KeyProvider` components of the `zeta-guard` realm and deletes
+every provider whose `providerId` starts with `rsa`. The script is idempotent —
+it is safe to run repeatedly.
+
+### Verify
+
+```bash
+curl -sk https://<hostname>/auth/realms/zeta-guard/protocol/openid-connect/certs | jq '.keys[].kty'
+```
+
+Expected output: only `"EC"` entries. No `"RSA"` entries should be present.
+
+---
+
 ## HSM Token Signing
 
 HSM-backed ES256 token signing ensures that the private key used to sign JWTs
@@ -533,12 +568,18 @@ zeta-guard:
       tokenSigning:
         enabled: true
         keyId: "zeta-guard-keycloak-token-es256-v1.p256"   # Token signing key
+        failClosed: true                                   # Refuse software-key fallback if HSM unreachable (default)
   hsmsim:
     enabled: true   # Deploy hsm-sim pod (non-production only)
 ```
 
-This sets `HSM_PROXY_ENDPOINT` and `HSM_PROXY_TOKEN_KEY_ID` as environment
-variables on the authserver pod.
+This sets `HSM_PROXY_ENDPOINT`, `HSM_PROXY_TOKEN_KEY_ID`, and
+`KC_SPI_KEYS_ZETA_HSM_TOKEN_SIGNING_FAIL_CLOSED` on the authserver pod.
+
+With `failClosed: true` (default), token issuance fails 500 when the HSM is
+unreachable — no software-key fallback. Only applies to realms with a
+registered `zeta-hsm-token-signing` component; `master` falls through at first
+boot so admin auth can bootstrap. Set `false` only for HSM maintenance windows.
 
 ### Step 2 — Deploy
 

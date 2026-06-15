@@ -1,7 +1,5 @@
 {{- /* vim: set ft=helm: */ -}}
-{{- /* Routes /auth on the admin hostname directly to authserver.
-     No PEP enforcement, no admin blocking — this hostname is for Terraform / CI/CD. */ -}}
-{{- if and .Values.ingressEnabled .Values.authserver.adminHostname }}
+{{- if and .Values.ingressEnabled .Values.authserver.adminHostname .Values.nginxIngressEnabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -14,6 +12,12 @@ metadata:
     {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.authserver.adminHostname | quote }}
+      secretName: {{ .Values.authserver.adminTlsSecretName | default "zeta-guard-admin-tls" | quote }}
+  {{- end }}
   rules:
     - host: {{ .Values.authserver.adminHostname | quote }}
       http:

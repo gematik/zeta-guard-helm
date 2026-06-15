@@ -53,8 +53,30 @@ ifneq ($(strip $(OCSP_SMB_KEYSTORE_FILE_B64)),)
 override HELM_EXTRA_VALUES_PARAMS += --set-file "zeta-cert-validation-mock.signing.smb.keyStore=${OCSP_SMB_KEYSTORE_FILE_B64}"
 endif
 
+ifeq ($(STAGE),achelos)
+override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-guard.authserver.admin.password=$(KEYCLOAK_ACHELOS_PW)"
+override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-guard.authserver.genesisHash=4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c"
+override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-guard.authserver.smcbHashingPepper=085c1245-dc0d-4d39-95b4-97496bec6182"
+endif
+
 # add override to allow additional params, e.g. `make <cmd> HELM_EXTRA_VALUES_PARAMS=--debug`
 override HELM_EXTRA_VALUES_PARAMS += --set-file "smcb_keystore.password=${SMB_KEYSTORE_PW_FILE}" --set-file "smcb_keystore.keystore=${SMB_KEYSTORE_FILE_B64}"
+
+# Preserve immutable Service IPs when rendering against an existing cluster.
+# This covers `helm template | kubectl apply --dry-run=server`, where Helm's
+# lookup function does not have the live object state available.
+ifeq ($(STAGE),achelos)
+ZETA_CERT_VALIDATION_MOCK_CLUSTER_IP := $(shell kubectl --request-timeout=3s -n $(NAMESPACE) get service zeta-cert-validation-mock -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+ifneq ($(strip $(filter-out None,$(ZETA_CERT_VALIDATION_MOCK_CLUSTER_IP))),)
+override HELM_EXTRA_VALUES_PARAMS += --set-string "global.dns.tigerStaticClusterIP=$(ZETA_CERT_VALIDATION_MOCK_CLUSTER_IP)"
+override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-cert-validation-mock.service.clusterIP=$(ZETA_CERT_VALIDATION_MOCK_CLUSTER_IP)"
+endif
+else
+TIGER_PROXY_CLUSTER_IP := $(shell kubectl --request-timeout=3s -n $(NAMESPACE) get service tiger-proxy -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+ifneq ($(strip $(filter-out None,$(TIGER_PROXY_CLUSTER_IP))),)
+override HELM_EXTRA_VALUES_PARAMS += --set-string "global.dns.tigerStaticClusterIP=$(TIGER_PROXY_CLUSTER_IP)"
+endif
+endif
 
 endif
 
@@ -77,7 +99,7 @@ endif
   renew-opa-token \
   kind-up kind-down \
   trivy
-  
+
 FORCE:
 
 help: ## Show available targets, usage, and effective vars
@@ -277,11 +299,14 @@ versions-debug: ## Show deployed components with all images and digests
 
 ### UNINSTALL / CLEAN ###
 uninstall: ## Uninstall the release from the namespace
-	helm uninstall $(RELEASE) -n $(NAMESPACE) || true
-	# Remove CNPG Cluster (created via hook) and residual PVCs
-	kubectl delete cluster.postgresql.cnpg.io keycloak-db -n $(NAMESPACE) --ignore-not-found=true || true
+	# Delete CNPG Cluster first so its finalizer resolves before helm uninstall — otherwise helm hits its timeout and leaves the release stuck in `uninstalling`
+	kubectl delete cluster.postgresql.cnpg.io keycloak-db -n $(NAMESPACE) --ignore-not-found=true --wait=true --timeout=2m || true
+	helm uninstall $(RELEASE) -n $(NAMESPACE) --wait --timeout 5m || true
+	# Safety net: drop any stuck release record so the next `helm upgrade --install` isn't blocked with "no deployed releases"
+	kubectl -n $(NAMESPACE) delete secret -l owner=helm,name=$(RELEASE) --ignore-not-found=true
 	kubectl delete pvc -l cnpg.io/cluster=keycloak-db -n $(NAMESPACE) --ignore-not-found=true
 	kubectl delete secret tfstate-default-state -n $(NAMESPACE) --ignore-not-found=true
+	$(MAKE) proxy-down
 
 clean: ## Remove the generated rendered.yaml and terraform files
 	rm -f rendered.yaml
@@ -370,6 +395,52 @@ create-secrets:
 
 kind-down: ##! Delete KIND cluster
 	kind delete cluster --name zeta-local
+
+SQUID_MANIFEST := private/proxy
+
+proxy-up: ##! Deploy Squid forward proxy in KIND/OpenShift cluster for local proxy testing
+	kubectl apply -n $(NAMESPACE) -f $(SQUID_MANIFEST)
+	@if kubectl api-resources 2>/dev/null | grep -q securitycontextconstraints; then \
+	  echo "OpenShift detected — granting anyuid SCC to squid-proxy ..."; \
+	  if command -v oc >/dev/null 2>&1; then \
+  		eval $(crc oc-env) \
+	    oc adm policy add-scc-to-user anyuid -z squid-proxy -n $(NAMESPACE); \
+	  else \
+	    kubectl create rolebinding squid-proxy-anyuid \
+	      --clusterrole=system:openshift:scc:anyuid \
+	      --serviceaccount=$(NAMESPACE):squid-proxy \
+	      -n $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -; \
+	  fi; \
+	fi
+	kubectl -n $(NAMESPACE) rollout status deploy/squid-proxy --timeout=60s
+	@echo ""
+	@echo "Squid running: http://squid-proxy.$(NAMESPACE).svc.cluster.local:3128"
+	@echo ""
+	@echo "Enable proxy values in values.$(STAGE).yaml (uncomment httpsProxy/httpProxy),"
+	@echo "then: make deploy && make proxy-verify"
+
+proxy-down: ##! Remove Squid forward proxy from KIND/OpenShift cluster
+	kubectl delete -n $(NAMESPACE) -f $(SQUID_MANIFEST) --ignore-not-found
+	@if kubectl api-resources 2>/dev/null | grep -q securitycontextconstraints; then \
+	  if command -v oc >/dev/null 2>&1; then \
+	    eval $(crc oc-env) \
+	    oc adm policy remove-scc-from-user anyuid -z squid-proxy -n $(NAMESPACE) 2>/dev/null || true; \
+	  else \
+	    kubectl delete rolebinding squid-proxy-anyuid -n $(NAMESPACE) --ignore-not-found; \
+	  fi; \
+	fi
+	@echo "Squid removed."
+
+proxy-verify: ##! Verify that the PEP routes outbound traffic through Squid (requires proxy-up + deploy)
+	@echo "=== Env vars in PEP container ==="
+	kubectl exec -n $(NAMESPACE) deploy/pep-deployment -- env | grep -i proxy || echo "(no PROXY vars set)"
+	@echo ""
+	@echo "=== nginx.conf env directives ==="
+	kubectl exec -n $(NAMESPACE) deploy/pep-deployment -- \
+	  sh -c 'grep "^env" /etc/nginx/nginx.conf' || true
+	@echo ""
+	@echo "=== Squid access log (last 20 lines) ==="
+	kubectl logs -n $(NAMESPACE) deploy/squid-proxy --tail=20
 
 dry-run-security-restricted: ## Test PSS violations without modifying namespace.
 	kubectl label --dry-run=server --overwrite ns $(NAMESPACE) \

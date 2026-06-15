@@ -1,0 +1,377 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
+  "author": "Unknown Author",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-25646"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libpng16-16t64"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-68431"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libheif-plugin-dav1d"
+        },
+        {
+          "@id": "pkg:deb/debian/libheif-plugin-libde265"
+        },
+        {
+          "@id": "pkg:deb/debian/libheif1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-59375"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libexpat1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-24051"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/go.opentelemetry.io/otel/sdk"
+        }
+      ],
+      "status": "not_affected",
+      "status_note": "MacOS ist keine unterstützte Produktionsplattform.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33186"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Betrifft gRPC-Server mit Auth-Interceptoren auf :path. nginx-agent ist ausschließlich ein gRPC-Client (verbindet sich mit NMS); es wird kein gRPC-Server betrieben. NMS ist nicht im Einsatz.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-03-23T11:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33164"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libde265-0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Im Container werden keine Videos gerendert. Das Binary '/nginx-ingress' verwendet weder libde265-0 noch davon abhängige Bibliotheken, da es sich um statisch gelinktes Go-Binary handelt. Nur das Paket libheif1 verwendet libde265-0 (libde265-0 <- libheif-plugin-libde265 <- libheif1). Verifiziert mit ldd, nm -D und grep -aF.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45186"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libexpat1"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Das Binary '/nginx-ingress' verwendet weder libexpat1 noch davon abhängige Bibliotheken, da es sich um ein statisch gelinktes Go-Binary handelt. Das einzige Paket, das libexpat1 verwendet ist nginx-module-image-filter (libexpat1 <- libfontconfig1 <- libgd3 <- nginx-module-image-filter). Verifiziert mit ldd, nm -D und grep -aF. Das Modul nginx-module-image-filter (/usr/lib/nginx/modules/ngx_http_image_filter_module.so) wird nicht von nginx geladen (verifiziert mit nginx -V in running container).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33811"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Binaries '/nginx-ingress' und '/usr/bin/nginx-agent' sind nicht mit CGO gebaut worden und daher statisch gelinkt. Verifiziert mit ldd und file.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39820"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen sieben Funktionen werden im aus dem Paket net/mail werden in '/nginx-ingress' und '/usr/bin/nginx-agent' nicht geladen. Verifiziert mit grep -aF (in stripped Go-Binaries sind Funktionsnamen noch in der 'PC Line Table' gehalten, solange nicht absichtlich entfernt).",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39836"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Es ist nur Windows betroffen. Das verwendete Betriebssystem ist debian-Linux.",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42499"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen fünf Funktionen werden im aus dem Paket net/mail werden in '/nginx-ingress' und '/usr/bin/nginx-agent' nicht geladen. Verifiziert mit grep -aF (in stripped Go-Binaries sind Funktionsnamen noch in der 'PC Line Table' gehalten, solange nicht absichtlich entfernt).",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42151"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/github.com/prometheus/prometheus"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Es wird von nginx-agent kein Prometheus-Server gestartet. Azure AD remote write wird nicht verwendet.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42154"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/github.com/prometheus/prometheus"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Es wird von nginx-agent kein Prometheus-Server gestartet. Daher kann der Endpunkt /api/v1/read nicht aufgerufen werden.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-19T14:16:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27456"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur das Tool mount. Es gibt keinen Eintrag in /etc/fstab. Daher kann der Angreifer die Schwachstelle nicht ausnutzen (s. https://nvd.nist.gov/vuln/detail/CVE-2026-27456). Ein Angreifer bräuchte zusätzlich Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42250"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libbz2-1.0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Das Tool bzip2recover, in dem die Schwachstelle besteht, wird nicht im Image nicht verwendet. Für einen erfolgreichen Angriff müsste ein Angreifer bzip2recover auf eine von ihm kontrollierte Datei aufrufen können. Ein Angreifer bräuchte Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5435"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc6"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen Funktionen ns_printrrf, ns_printrr und fp_nquery werden in keiner Nginx-Binary oder Nginx-Modul geladen. Durchsucht wurden '/usr/sbin/nginx' '/usr/lib/nginx/modules/' '/etc/nginx/modules/'. Keine Systembibliothek lädt ein der betroffenen Funktionen von libc6. Verifiziert mithilfe von von nm -D, ldd und grep -aF.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6238"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libc6"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen Funktionen ns_printrrf, ns_printrr und fp_nquery werden in keiner Nginx-Binary oder Nginx-Modul geladen. Durchsucht wurden '/usr/sbin/nginx' '/usr/lib/nginx/modules/' '/etc/nginx/modules/'. Keine Systembibliothek lädt ein der betroffenen Funktionen von libc6. Verifiziert mithilfe von von nm -D, ldd und grep -aF.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5450"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc6"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Eine Funktion der scanf-Familie wird in diversen Executables und Libraries importiert. Dabei ist unklar, ob %mc verwendet wird. Dies ist notwendig, um die Schwachstellen ausnutzen zu können. Es kann daher nicht ausgeschlossen werden, dass eine der Executables oder Libraries betroffen ist. Für das Ausnutzen der Schwachstelle müsste der Angreifer den Input kontrollieren und die Executable aufrufen oder die betroffene Libary-Funktion triggern. Das einzige nginx-bezogene Finding von scanf ist in /usr/lib/nginx/modules/ngx_otel_module.so. Dort wird sscanf() verwendet, allerdings nicht mit %mc. Die Schwachstelle wird von der NVD als Critical eingestuft (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H). Doch Red Hat bietet eine gut begründete Analyse (https://access.redhat.com/security/cve/cve-2026-5450), durch die diese Schwachstelle eine Kritikalität einen CVSS3.1-Score von 5 (Medium) erhält (CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:L/A:H).",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5928"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libc6"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen Funktion ungetwc wird von keiner Executable oder Library geladen. Verifiziert mithilfe von von nm -D, ldd und grep -aF.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5704"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/tar"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Tar wird von keinem im nginx-ingress ausgeführten Prozess verwendet. Es wird nur für das dpkg genutzt. Für das Ausnutzen der Schwachstelle bräuchte ein Angreifer Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-34743"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/liblzma5"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "liblzma wird von keinem im nginx-ingress ausgeführten Prozess verwendet.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33814"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Die Executable /nginx-ingress und /usr/bin/nginx-agent importieren betroffene Funktionen und sind somit betroffen.",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42504"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Die Executable /nginx-ingress importiert die betroffene Funktion mime.WordDecoder.DecodeHeader und ist somit vermutlich betroffen.",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27145"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen drei Funktionen werden im aus dem Paket net/mail werden in '/nginx-ingress' und '/usr/bin/nginx-agent' nicht geladen. Verifiziert mit grep -aF (in stripped Go-Binaries sind Funktionsnamen noch in der 'PC Line Table' gehalten, solange nicht absichtlich entfernt).",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-06-08T14:31:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42507"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Die Executable /nginx-ingress und /usr/bin/nginx-agent importieren betroffene Funktionen und sind somit vermutlich betroffen.",
+      "timestamp": "2026-06-08T14:31:00Z"
+    }
+  ],
+  "timestamp": "2026-02-27T15:41:26Z",
+  "last_updated": "2026-06-08T14:31:00Z"
+}

@@ -1,5 +1,5 @@
 {{- $wif := .Values.opa.workloadIdentityFederation -}}
-{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) | or .Values.gematikConnectionEnabled }}
+{{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) | or .Values.gematikConnectionEnabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

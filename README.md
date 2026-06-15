@@ -26,7 +26,7 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
 ## Installing zeta-guard
 
 > **Warning – insecure components**
-> Tiger Testsuite, Tiger Proxy, ExAuthSim and TestFachdienst may contain critical security flaws. Do **not** run them in
+> Tiger Testsuite, Tiger Proxy, ExAuthSim, zeta-tls-test-tool-service, zeta-cert-validation-mock and TestFachdienst may contain critical security flaws. Do **not** run them in
 > production or any security-sensitive environment. Remove the chart or keep the chart disabled unless you are testing
 > in an isolated sandbox:
 >
@@ -36,6 +36,8 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
 >   exauthsim: false
 >   tiger-proxy: false
 >   tiger-testsuite: false
+>   zeta-tls-test-tool-service: false
+>   zeta-cert-validation-mock: false
 > ```
 
 ### Prerequisites
@@ -245,13 +247,15 @@ Render checks:
     * [Postgres Operator](docs/explanations/CloudNativePG.md)
 * How-to guides
     * [How to configure ZETA Guard Authserver](docs/how-to_guides/How_to_configure_authserver.md)
-    * [How to create a docker-registry type secret for accessing the GitLab container registry](docs/how-to_guides/How_to_create_a_docker_registry_secret.md)
-    * [How to deploy ZETA Guard](docs/how-to_guides/How_to_deploy_ZETA_Guard.md)
-    * [How to install cert-manager](docs/how-to_guides/How_to_install_cert-manager.md)
-    * [How to manage authserver DB](docs/how-to_guides/How_to_manage_authserver_DB.md)
-    * [How to set up TLS](docs/how-to_guides/How_to_set_up_TLS.md)
-    * [How to trigger the Tiger testsuite inside the cluster](docs/how-to_guides/How_to_run_tiger_testsuite.md)
+  * [How to configure a forward proxy](docs/how-to_guides/How_to_configure_forward_proxy.md)
+  * [How to configure Egress NetworkPolicies](docs/how-to_guides/How_to_configure_NetworkPolicies.md)
   * [How to configure Ingress](docs/how-to_guides/How_to_configure_Ingress.md)
+  * [How to create a docker-registry type secret for accessing the GitLab container registry](docs/how-to_guides/How_to_create_a_docker_registry_secret.md)
+  * [How to deploy ZETA Guard](docs/how-to_guides/How_to_deploy_ZETA_Guard.md)
+  * [How to install cert-manager](docs/how-to_guides/How_to_install_cert-manager.md)
+  * [How to manage authserver DB](docs/how-to_guides/How_to_manage_authserver_DB.md)
+  * [How to set up TLS](docs/how-to_guides/How_to_set_up_TLS.md)
+  * [How to trigger the Tiger testsuite inside the cluster](docs/how-to_guides/How_to_run_tiger_testsuite.md)
 * Reference
     * [Makefile reference](docs/reference/Makefile_reference.md)
 

@@ -1,5 +1,5 @@
 {{- $wif := .Values.opa.workloadIdentityFederation -}}
-{{- if and .Values.opa.enabled .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) }}
+{{- if and .Values.opa.bundle.enabled (and $wif $wif.enabled) (and $wif.tokenRenewer $wif.tokenRenewer.enabled) }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -43,6 +43,10 @@ spec:
               {{- with .Values.opa.cronjobSecurityContext }}
               securityContext:
                 {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with include "zeta-guard.proxyEnvVars" .Values.global | trim }}
+              env:
+                {{- . | nindent 16 }}
               {{- end }}
               command: ["/bin/bash", "-c"]
               args:

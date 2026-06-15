@@ -21,9 +21,14 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.global.infinispanExternal.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: infinispan
-          image: "{{ .Values.global.infinispanExternal.image.repository }}:{{ .Values.global.infinispanExternal.image.tag }}"
+          image: "{{ include "infinispan.image" . | trim }}"
+          imagePullPolicy: "{{ .Values.global.infinispanExternal.imagePullPolicy }}"
           ports:
             - containerPort: 11222
             - containerPort: 7800
@@ -48,18 +53,34 @@ spec:
                   name: infinispan-admin
                   {{- end }}
                   key: password
+            {{- if .Values.global.infinispanExternal.hsm.enabled }}
+            - name: HSM_PROXY_ENDPOINT
+              value: {{ required "hsm endpoint is missing" .Values.global.infinispanExternal.hsm.endpoint | quote }}
+            - name: HSM_PROXY_KEY_ID
+              value: {{ required "hsm keyId is missing" .Values.global.infinispanExternal.hsm.keyId | quote }}
+            - name: HSM_TRUSTSTORE_PATH
+              value: "/etc/infinispan/tls/ca.pem"
+            {{- end }}
             - name: JAVA_OPTIONS
               value: >-
                 -Djgroups.dns.query=infinispan
                 -Djgroups.dns.record.type=A
                 -Dinfinispan.cluster.name=k8s-cluster
                 -Dinfinispan.cluster.stack=kubernetes
+                {{- if .Values.global.infinispanExternal.hsm.enabled }}
+                -Djava.security.properties=security-hsm.properties
+                {{- end }}
                 {{- with .Values.global.infinispanExternal.extraJavaOptions }}
                 {{ . | trim }}
                 {{- end }}
           volumeMounts:
             - name: infinispan-config
               mountPath: /server/conf-custom/
+            {{- if .Values.global.infinispanExternal.hsm.enabled }}
+            - name: truststore
+              mountPath: /etc/infinispan/tls
+              readOnly: true
+            {{- end }}
           {{- with .Values.global.infinispanExternal.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -72,4 +93,10 @@ spec:
         - name: infinispan-config
           configMap:
             name: infinispan-config
+        {{- if .Values.global.infinispanExternal.hsm.enabled }}
+        - name: truststore
+          configMap:
+            name: infinispan-ca-cert
+            defaultMode: 0444
+        {{- end }}
 {{- end}}

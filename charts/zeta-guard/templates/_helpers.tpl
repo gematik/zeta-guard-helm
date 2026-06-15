@@ -169,4 +169,37 @@ Selector labels
 {{- define "pep-proxy.selectorLabels" -}}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/name: pep-proxy
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.proxyEnvVars
+  Renders HTTP/HTTPS/NO/ALL proxy environment variables from a config map.
+  Pass a values sub-map that contains httpProxy, httpsProxy, noProxy, allProxy.
+  Usage: {{- include "zeta-guard.proxyEnvVars" .Values.someComponent | nindent N }}
+*/}}
+{{- define "zeta-guard.proxyEnvVars" -}}
+{{- with .httpProxy }}
+- name: HTTP_PROXY
+  value: {{ . | quote }}
+- name: http_proxy
+  value: {{ . | quote }}
 {{- end }}
+{{- with .httpsProxy }}
+- name: HTTPS_PROXY
+  value: {{ . | quote }}
+- name: https_proxy
+  value: {{ . | quote }}
+{{- end }}
+{{- with .noProxy }}
+- name: NO_PROXY
+  value: {{ . | quote }}
+- name: no_proxy
+  value: {{ . | quote }}
+{{- end }}
+{{- with .allProxy }}
+- name: ALL_PROXY
+  value: {{ . | quote }}
+- name: all_proxy
+  value: {{ . | quote }}
+{{- end }}
+{{- end -}}

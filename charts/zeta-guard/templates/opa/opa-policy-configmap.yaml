@@ -1,5 +1,3 @@
-{{ if .Values.opa.enabled -}}
-
 {{- if not .Values.opa.bundle.enabled }}
 ---
 apiVersion: v1
@@ -49,8 +47,6 @@ data:
     {{- end }}
     {{- $rectifiedOpaSimulationConfig := mergeOverwrite (fromYaml $opaSimulationConfig) (fromYaml (include "opa-simulation.config" .)) | toYamlPretty }}
     {{- $rectifiedOpaSimulationConfig | nindent 4 }}
-
-{{- end }}
 
 {{- end }}
 

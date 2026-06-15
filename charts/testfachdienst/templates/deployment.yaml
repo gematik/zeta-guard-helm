@@ -1,3 +1,10 @@
+{{- define "testfachdienst.otelResourceAttributes" -}}
+{{- $attributes := list -}}
+{{- range $key, $value := . -}}
+{{- $attributes = append $attributes (printf "%s=%v" $key $value) -}}
+{{- end -}}
+{{- join "," $attributes -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,6 +43,38 @@ spec:
           env:
             - name: MANAGEMENT_SERVER_PORT
               value: {{ .Values.managementPort | quote }}
+            - name: OTEL_SDK_DISABLED
+              value: {{ .Values.opentelemetry.enabled | ternary "false" "true" | quote }}
+          {{- if .Values.opentelemetry.enabled }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.opentelemetry.serviceName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.opentelemetry.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.opentelemetry.protocol | quote }}
+            - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+              value: "true"
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+              value: {{ printf "%s/v1/traces" .Values.opentelemetry.endpoint | quote }}
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT
+              value: "http"
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+              value: "true"
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+              value: {{ printf "%s/v1/metrics" .Values.opentelemetry.endpoint | quote }}
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_STEP
+              value: {{ .Values.opentelemetry.metricExportInterval | quote }}
+            - name: MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED
+              value: "true"
+            - name: MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT
+              value: {{ printf "%s/v1/logs" .Values.opentelemetry.endpoint | quote }}
+            - name: MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_TRANSPORT
+              value: "http"
+            {{- with .Values.opentelemetry.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ include "testfachdienst.otelResourceAttributes" . | quote }}
+            {{- end }}
+          {{- end }}
           {{- with .Values.env }}
           {{- range . }}
             - name: {{ .name | quote }}

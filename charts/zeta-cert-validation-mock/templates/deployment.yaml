@@ -49,6 +49,54 @@ spec:
               value: {{ .Values.mock.revokedProbability | quote }}
             - name: ZETA_MOCK_ENABLE_ADMIN_ENDPOINTS
               value: {{ .Values.mock.enableAdminEndpoints | quote }}
+            - name: ZETA_MOCK_OCSP_RESPONSE_CACHE_MAX_ENTRIES
+              value: {{ .Values.mock.ocspResponseCacheMaxEntries | quote }}
+            - name: ZETA_MOCK_OCSP_RESPONSE_CACHE_TTL
+              value: {{ .Values.mock.ocspResponseCacheTtl | quote }}
+            - name: APP_LOG_LEVEL
+              value: {{ .Values.logging.level | quote }}
+            - name: SERVER_TOMCAT_THREADS_MAX
+              value: {{ .Values.server.tomcat.threads.max | quote }}
+            - name: SERVER_TOMCAT_THREADS_MIN_SPARE
+              value: {{ .Values.server.tomcat.threads.minSpare | quote }}
+            - name: SERVER_TOMCAT_ACCEPT_COUNT
+              value: {{ .Values.server.tomcat.acceptCount | quote }}
+            - name: SERVER_TOMCAT_MAX_CONNECTIONS
+              value: {{ .Values.server.tomcat.maxConnections | quote }}
+            - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+              value: {{ .Values.opentelemetry.samplingProbability | quote }}
+            - name: OTEL_SDK_DISABLED
+              value: {{ .Values.opentelemetry.enabled | ternary "false" "true" | quote }}
+          {{- if .Values.opentelemetry.enabled }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.opentelemetry.serviceName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.opentelemetry.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.opentelemetry.protocol | quote }}
+            - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+              value: "true"
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+              value: {{ printf "%s/v1/traces" .Values.opentelemetry.endpoint | quote }}
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_TRANSPORT
+              value: "http"
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+              value: "true"
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+              value: {{ printf "%s/v1/metrics" .Values.opentelemetry.endpoint | quote }}
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_STEP
+              value: {{ .Values.opentelemetry.metricExportInterval | quote }}
+            - name: MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED
+              value: "true"
+            - name: MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT
+              value: {{ printf "%s/v1/logs" .Values.opentelemetry.endpoint | quote }}
+            - name: MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_TRANSPORT
+              value: "http"
+            {{- with .Values.opentelemetry.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ tpl . $ | quote }}
+            {{- end }}
+          {{- end }}
             - name: OCSP_SMB_KEYSTORE_FILE
               value: "{{ .Values.signing.mountBase }}/smb.keystore"
             - name: OCSP_SMB_KEYSTORE_PW

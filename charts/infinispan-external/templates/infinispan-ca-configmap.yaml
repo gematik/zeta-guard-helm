@@ -1,0 +1,9 @@
+{{- if and .Values.global.infinispanExternal.enabled .Values.global.infinispanExternal.hsm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infinispan-ca-cert
+data:
+  ca.pem: |
+{{ required "hsm.caCert is required when hsm.enabled=true" .Values.global.infinispanExternal.hsm.caCert | indent 4 }}
+{{- end }}

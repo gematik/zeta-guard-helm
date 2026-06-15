@@ -44,6 +44,9 @@ opentelemetry-demo:
     product-catalog:
       enabled: false
 
+    product-reviews:
+      enabled: false
+
     quote:
       enabled: false
 
@@ -59,6 +62,9 @@ opentelemetry-demo:
     kafka:
       enabled: false
 
+    llm:
+      enabled: false
+
     postgresql:
       enabled: false
 
@@ -71,9 +77,16 @@ opentelemetry-demo:
         spanmetrics:
           dimensions:
             - name: zeta-test.status.code
+            - name: zeta-test.oauth_grant
+              default: unknown
 
       processors:
-        attributes/ti_monitoring:
+        attributes/dienst_hersteller:
+          actions:
+            - key: gematik.zeta.kind
+              action: insert
+              value: dienst_hersteller
+        attributes/gematik:
           actions:
             - key: gematik.zeta.kind
               action: insert
@@ -83,6 +96,11 @@ opentelemetry-demo:
             - key: gematik.zeta.kind
               action: insert
               value: siem
+        attributes/ti_spanmetrics:
+          actions:
+            - key: gematik.zeta.kind
+              action: insert
+              value: spanmetrics
         # this is a workaround for https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45428
         resource/delete_k8s_labels:
           attributes:
@@ -99,50 +117,80 @@ opentelemetry-demo:
                 - set(attributes["zeta-test.status.code"], "STATUS_CODE_ERROR") where attributes["http.status_code"] != nil and attributes["http.status_code"] >= 400
                 - set(attributes["zeta-test.status.code"], "STATUS_CODE_ERROR") where attributes["http.response.status_code"] != nil and attributes["http.response.status_code"] >= 400
       receivers:
-        otlp/ti_monitoring:
+        otlp/dienst_hersteller:
           protocols:
             grpc:
               endpoint: "${env:MY_POD_IP}:4327"
             http:
               endpoint: "${env:MY_POD_IP}:4328"
-        otlp/ti_siem:
+        otlp/gematik:
           protocols:
             grpc:
               endpoint: "${env:MY_POD_IP}:4337"
             http:
               endpoint: "${env:MY_POD_IP}:4338"
+        otlp/ti_siem:
+          protocols:
+            grpc:
+              endpoint: "${env:MY_POD_IP}:4347"
+            http:
+              endpoint: "${env:MY_POD_IP}:4348"
 
       service:
         pipelines:
-          logs/ti_monitoring:
+          logs/dienst_hersteller:
             receivers:
-              - otlp/ti_monitoring
+              - otlp/dienst_hersteller
             processors:
               - memory_limiter
               - resource/delete_k8s_labels
-              - attributes/ti_monitoring
               - batch
+              - attributes/dienst_hersteller
             exporters:
               - opensearch
+
+          logs/ti_sim:
+            receivers:
+              - otlp/gematik
+            processors:
+              - memory_limiter
+              - resource/delete_k8s_labels
+              - batch
+              - attributes/gematik
+            exporters:
+              - opensearch
+
           logs/ti_siem:
             receivers:
               - otlp/ti_siem
             processors:
               - memory_limiter
               - resource/delete_k8s_labels
-              - attributes/ti_siem
               - batch
+              - attributes/ti_siem
             exporters:
               - opensearch
-          metrics/ti_monitoring:
+
+          metrics/dienst_hersteller:
             receivers:
-              - otlp/ti_monitoring
+              - otlp/dienst_hersteller
             processors:
               - memory_limiter
-              - attributes/ti_monitoring
               - batch
+              - attributes/dienst_hersteller
             exporters:
               - otlphttp/prometheus
+
+          metrics/ti_sim:
+            receivers:
+              - otlp/gematik
+            processors:
+              - memory_limiter
+              - batch
+              - attributes/gematik
+            exporters:
+              - otlphttp/prometheus
+
           metrics/ti_siem:
             receivers:
               - otlp/ti_siem
@@ -152,44 +200,101 @@ opentelemetry-demo:
               - batch
             exporters:
               - otlphttp/prometheus
-          traces/ti_monitoring:
+
+          traces/dienst_hersteller:
             receivers:
-              - otlp/ti_monitoring
+              - otlp/dienst_hersteller
             processors:
               - memory_limiter
               - transform/set_error_status
-              - attributes/ti_monitoring
               - batch
+              - attributes/dienst_hersteller
             exporters:
               - otlp
+
+          traces/ti_sim:
+            receivers:
+              - otlp/gematik
+            processors:
+              - memory_limiter
+              - transform/set_error_status
+              - batch
+              - attributes/gematik
+            exporters:
+              - otlp
+
+          traces/ti_spanmetrics:
+            receivers:
+              - otlp/gematik
+            processors:
+              - memory_limiter
+              - transform/set_error_status
+              - batch
+              - attributes/ti_spanmetrics
+            exporters:
+              - spanmetrics
+
+          metrics/ti_spanmetrics:
+            receivers:
+              - spanmetrics
+            processors:
+              - memory_limiter
+              - batch
+              - attributes/ti_spanmetrics
+            exporters:
+              - otlphttp/prometheus
+
           traces/ti_siem:
             receivers:
               - otlp/ti_siem
             processors:
               - memory_limiter
               - transform/set_error_status
-              - attributes/ti_siem
               - batch
+              - attributes/ti_siem
             exporters:
               - otlp
 
     ports:
-      otlp-ti-mntrng:
+      otlp-dihe:
+        enabled: true
+        containerPort: 4327
+        servicePort: 4327
+        hostPort: 4327
+        protocol: TCP
+        appProtocol: grpc
+      otlp-http-dihe:
         enabled: true
         containerPort: 4328
         servicePort: 4328
         hostPort: 4328
         protocol: TCP
-        # nodePort: 30317
+      otlp-gemat:
+        enabled: true
+        containerPort: 4337
+        servicePort: 4337
+        hostPort: 4337
+        protocol: TCP
         appProtocol: grpc
-      otlp-ti-siem:
+      otlp-http-gemat:
         enabled: true
         containerPort: 4338
         servicePort: 4338
         hostPort: 4338
         protocol: TCP
-        # nodePort: 30317
+      otlp-siem:
+        enabled: true
+        containerPort: 4347
+        servicePort: 4347
+        hostPort: 4347
+        protocol: TCP
         appProtocol: grpc
+      otlp-http-siem:
+        enabled: true
+        containerPort: 4348
+        servicePort: 4348
+        hostPort: 4348
+        protocol: TCP
 
 ingressClassName: "nginx"
 # ingressRulesHost defines the hostname for all ingress rules in this chart.

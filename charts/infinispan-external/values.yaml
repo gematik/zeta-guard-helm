@@ -8,10 +8,18 @@ global:
       secretName: ""
       username: ""
       password: ""
+    hsm:
+      enabled: false
+      endpoint: ""  # gRPC address of the HSM Proxy, e.g. "hsm-sim:50051"
+      keyId: ""  # TLS key ID in the HSM, e.g. "zeta-guard-infinispan-tls-es256-v1.p256"
+      caCert: ""  # PEM-encoded CA cert for TLS verification of the HSM proxy
 
     image:
-      repository: infinispan/server
+      repository: infinispan-zeta
       tag: "15.2"
+    imagePullPolicy: Always
+    imagePullSecrets: [ ]
+    registry_name: zeta/zeta-guard/
 
     serviceAccount:
       create: true

@@ -17,6 +17,14 @@ data:
         writeToFile: {{ .Values.proxyConfig.fileSaveInfo.writeToFile }}
         fileName: {{ .Values.proxyConfig.fileSaveInfo.fileName }}
       proxyRoutes:{{ range $route := .Values.proxyConfig.proxyRoutes }}
+      {{- if and $.Values.global.enableDNSRedirect (eq $route.from "/") }}
+        {{- range $redirect := $.Values.global.dns.redirects }}
+          {{- range $redirectRoute := (default list $redirect.proxyRoutes) }}
+      - from: {{ $redirectRoute.from }}
+        to: {{ $redirectRoute.to }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
       - from: {{ $route.from }}
         to: {{ $route.to }}
       {{- end }}

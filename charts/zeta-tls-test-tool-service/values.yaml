@@ -11,7 +11,7 @@ devMode: false
 
 image:
   repository: zeta-tls-test-tool-service
-  tag: "latest"
+  tag: 1.2.0
 imagePullPolicy: Always
 
 resources: {}

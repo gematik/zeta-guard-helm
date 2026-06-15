@@ -13,7 +13,7 @@ devMode: false
 
 image:
   repository: zeta-cert-validation-mock
-  tag: "latest"
+  tag: 1.2.0
 imagePullPolicy: Always
 
 imagePullSecrets: []
@@ -32,10 +32,28 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-resources: {}
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+server:
+  tomcat:
+    threads:
+      max: "400"
+      minSpare: "50"
+    acceptCount: "1000"
+    maxConnections: "20000"
+
+logging:
+  level: INFO
 
 service:
   type: ClusterIP
+  clusterIP: null
   annotations: {}
   ports:
     http: 80
@@ -49,6 +67,17 @@ mock:
   revokedProbability: "0.001"
   seed: ""
   enableAdminEndpoints: true
+  ocspResponseCacheMaxEntries: "100000"
+  ocspResponseCacheTtl: 10m
+
+opentelemetry:
+  enabled: true
+  serviceName: zeta-cert-validation-mock
+  endpoint: http://telemetry-gateway-local:4318
+  protocol: http/protobuf
+  metricExportInterval: 10s
+  samplingProbability: "0.01"
+  resourceAttributes: 'service.namespace={{ .Release.Namespace }},service.version={{ .Release.Revision }},deployment.environment.name={{ .Release.Namespace | trimPrefix "zeta-" }}'
 
 signing:
   createSecret: true
@@ -60,5 +89,3 @@ signing:
   tls:
     keyStore: Y2VydC1wbGFjZWhvbGRlcgo=
     keyStorePassword: cGFzc3dvcmQK
-
-

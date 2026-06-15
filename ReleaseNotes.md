@@ -2,9 +2,120 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.2.0
+
+### migration:
+
+- **Keycloak version bumps require a deployment cutover.** Plain`helm upgrade`
+  hangs when the new Keycloak version ships a different JGroups protocol
+  version; mixed-version pods can't form a cluster. Liquibase migrations and
+  Infinispan cache serialization can also clash across minor versions. Run one
+  of the following before/during the upgrade:
+
+  ```sh
+  kubectl -n <namespace> delete deployment authserver   # then helm upgrade as usual
+  # OR
+  helm upgrade --force ...                              # delete + recreate as part of the upgrade
+  ```
+
+  Not needed for deploys that don't change the Keycloak image tag (config
+  tweaks, label changes, resource bumps).
+  
+  NOTE: Once installations are in production this kind of update will be avoided / flanked
+  with measurements supporting availability.
+
+### added:
+
+- Added `include proxy_headers.conf;` to each `pep on;` location using
+  `proxy_pass` in PEP
+- New value `authserver.hsm.tokenSigning.failClosed` (default: `true`) — when
+  HSM token signing is enabled, refuse software-key fallback if HSM is
+  unreachable.
+- configuration for application level db encryption (only for VAU based
+  applications)
+- New values `pepproxy.wellKnownResourceSuffix` (default: `/pep/`) and
+  `authserver.wellKnownAuthServerPath` (default: `/`) make the path components
+  of the `/.well-known/oauth-protected-resource` document configurable.
+- Forward proxy support for all ZETA Guard components
+    - Env vars set in all affected pods: `HTTP_PROXY`, `http_proxy`,
+      `HTTPS_PROXY`, `https_proxy`, `NO_PROXY`, `no_proxy`, `ALL_PROXY`,
+      `all_proxy`.
+    - PEP (nginx): proxy vars propagated to worker processes via `env`
+      directives in `nginx.conf`, picked up by the `reqwest` HTTP client at
+      worker init.
+- Enabled SIEM telemetry delivery to gematik by default
+- Enabled metrics delivery to gematik
+- Filter telemetry sent to gematik (incl. SIEM).
+    - Drop all logs except logs about authorization server, HTTP proxy, policy
+      engine, and resource server.
+    - Drop all metrics about zeta-guard components.
+    - Drop all spans except for HTTP server spans about requests to public
+      endpoints of authorization server, HTTP proxy, policy engine, and resource
+      server.
+
+### changed:
+
+- Scope name validation in the Terraform authserver config (`pdp_scopes` and
+  `audience_scope_name`) now allows periods (`.`).
+- Updated OpenTelemetry collector to version 0.153.0.
+- The terraform config step now removes all RSA key providers from the
+  `zeta-guard` realm.
+  Only ECC keys (ES256 / P-256) remain in the JWKS endpoint
+  (`/auth/realms/zeta-guard/protocol/openid-connect/certs`). RSA keys that
+  Keycloak creates automatically on realm initialization (e.g.
+  `rsa-enc-generated`) are deleted unconditionally as part of every Terraform
+  run.
+- Copy OpenTelemetry attribute `http.status_code` to
+  `http.response.status_code`. This is a workaround to fulfill A_27725 required
+  until PEP adheres to OpenTelemetry semantic conventions 1.41.
+- some APIs of the authserver now conform with gemSpec_ZETA 1.3.0 better but
+  break compatibility with the client SDK 1.0.x . This affects OCSP for SMC-Bs
+  audiences and some expected token content among other things (See
+  keycloak-zeta release notes for more info)
+
+### removed:
+
+- `authserver.provider.smcB.opa.enabled`, `…opa.failClosed`, and chart-root
+  `opa.enabled` — OPA enforcement is now mandatory and always fail-closed.
+  **Migration**: stale toggle values in override files are silently ignored
+  after upgrade — OPA will start unconditionally and return
+  `503 temporarily_unavailable` when unreachable. Remove the keys from values to
+  avoid confusion.
+
+### known issues:
+
+- TLS termination directly at the authserver and PEP does not yet fully conform
+  to the spec. Therefore, this feature is *NOT PRODUCTION READY* yet.
+  Termination at the ingress controller works as specified and is production
+  ready.
+- The authserver returns incorrect HTTP status codes for some denied tokens
+  (some even return 500). These cases have been investigated, and no negative
+  security implications have been identified. Some fixes for these issues depend
+  on upstream pull requests.
+- Expired clients are not automatically deleted yet. Additionally, clients are
+  not removed when the maximum client limit per Telematik ID is reached.
+- Request processing by the authserver may be slow under load. Remediation
+  appears to be possible with a more powerful database (more memory, CPU, and
+  connections).
+- OCSP during token exchange does not yet support revoked issuer CAs and does
+  not enforce the same TSP for the OCSP signer and the certificate issuer.
+- Token signature keys do not yet support automatic rotation.
+- Some PEP response codes for denied requests do not match the specification.
+- Impossible/no travel is detected (and denied), but sessions are not
+  invalidated.
+- Telemetry delivery to gematik has some limitations regarding the exact fields
+  that are delivered. Delivery from the resource server is passed on correctly,
+  however.
+- Some security KPIs are missing.
+- Caching, ETags, etc., do not work yet.
+- Rate limiting can be configured and works. However, communication to the
+  client via headers does not work yet.
+
+
 ## Release 1.0.1
 
 ### added:
+
 - configuration for application level db encryption (only for VAU based
   applications)
 
@@ -15,6 +126,12 @@
   case there are locations that should be reachable without using ASL, you will
   now need to add `satisfy all; allow all;` to that location for it to be
   reachable. Make sure this is permitted by your spec.
+- session affinity is cookie-based now (zeta-route), instead of relying on
+  x-forwarded-for header from downstream
+
+### removed
+
+- `zeta-guard.sessionAffinity`, it is always enabled now (NIC)
 
 ## Release 1.0.0
 
@@ -90,8 +207,10 @@
 - Rename value of audience claim used in generateIdToken renamed from
   `zeta-guard.gematik.clientId` to `zeta-guard.gematik.IdTokenAudience`
 - The Authserver (Keycloak) will export its logs to telemetry-gateway
-- PDP (OPA) will export its decision logs and status updates to telemetry-gateway
-- OPA simulation will export its decision logs and status updates to telemetry-gateway
+- PDP (OPA) will export its decision logs and status updates to
+  telemetry-gateway
+- OPA simulation will export its decision logs and status updates to
+  telemetry-gateway
 - PEP (nginx) will export its logs to telemetry-gateway
 
 ### changed:

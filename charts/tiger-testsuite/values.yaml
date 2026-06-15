@@ -12,7 +12,7 @@ devMode: false
 replicaCount: 1
 
 image:
-  tag: latest
+  tag: 1.2.0
   repository: tiger-testsuite
 imagePullPolicy: Always
 

@@ -390,6 +390,10 @@
                 "keyId": {
                   "type": "string",
                   "description": "Token-signing key ID in the HSM, e.g. \"zeta-guard-keycloak-token-es256-v1.p256\"."
+                },
+                "failClosed": {
+                  "type": "boolean",
+                  "description": "When true (default), refuse software signing-key fallback if the HSM is unreachable. Set to false only for controlled HSM maintenance windows."
                 }
               }
             },
@@ -425,6 +429,14 @@
           "examples": [
             "zeta-kind.local",
             "my.fachdienst.example.com"
+          ]
+        },
+        "wellKnownAuthServerPath": {
+          "type": "string",
+          "description": "Path appended to authserver.hostname for the authorization_servers field in oauth-protected-resource.",
+          "examples": [
+            "/",
+            "/auth"
           ]
         },
         "dbPool": {
@@ -475,15 +487,6 @@
               "type": "object",
               "description": "SMC-B identity provider settings including OPA integration.",
               "properties": {
-                "opa": {
-                  "type": "object",
-                  "properties": {
-                    "enabled": {
-                      "type": "boolean",
-                      "description": "Enable OPA policy enforcement for SMC-B token exchange."
-                    }
-                  }
-                },
                 "opaBaseUrl": {
                   "type": "string",
                   "description": "Base URL of the active OPA instance. Only for test setups. DO NOT USE IN PRODUCTION!",
@@ -518,10 +521,6 @@
                   "examples": [
                     2000
                   ]
-                },
-                "failClosed": {
-                  "type": "boolean",
-                  "description": "When true, deny the token exchange if OPA is unreachable (503). When false, allow. HAS TO BE true IN PRODUCTION"
                 }
               }
             }
@@ -686,6 +685,34 @@
             "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/",
             "my.own.registry.mylocaldomain:443/"
           ]
+        },
+        "httpProxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "HTTP forward proxy URL for all ZETA Guard components. Maps to HTTP_PROXY env var. Example: \"http://proxy.example.com:8080\""
+        },
+        "httpsProxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "HTTPS forward proxy URL for all ZETA Guard components. Takes precedence over httpProxy for HTTPS traffic. Maps to HTTPS_PROXY env var. Example: \"http://proxy.example.com:8080\""
+        },
+        "noProxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Comma-separated list of hosts/suffixes to exclude from proxying (all components). Leading dot matches subdomains. Maps to NO_PROXY env var. Example: \"cluster.local,.svc.cluster.local\""
+        },
+        "allProxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fallback proxy URL for all protocols and all ZETA Guard components. Maps to ALL_PROXY env var. Example: \"http://proxy.example.com:8080\""
         }
       },
       "required": [
@@ -837,6 +864,14 @@
             "https://zeta-kind.local"
           ]
         },
+        "wellKnownResourceSuffix": {
+          "type": "string",
+          "description": "Path suffix appended to wellKnownBase for the resource field in oauth-protected-resource. Include trailing slash if needed.",
+          "examples": [
+            "/pep/",
+            "/"
+          ]
+        },
         "asl_enabled": {
           "type": "boolean",
           "description": "Enable ASL in the PEP proxy."
@@ -912,7 +947,7 @@
             },
             "locations": {
               "type": "string",
-              "description": "Additional Nginx location blocks injected into the generated config. Here you should configure connection to your Fachdienst."
+              "description": "Additional Nginx location blocks injected into the generated config. Here you should configure connection to your Fachdienst. NOTE: be sure to include `include proxy_headers.conf;` in each location that uses proxy_pass!"
             },
             "pepIssuer": {
               "type": "string",
@@ -1038,6 +1073,13 @@
         "tolerations": {
           "type": "array",
           "description": "Kubernetes tolerations for pepproxy pod scheduling."
+        },
+        "hsmProxyAddr": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "gRPC address of the HSM Proxy. Set to enable ossl_hsm integration. Example: \"hsm-sim:50051\""
         }
       },
       "required": [
@@ -1123,25 +1165,6 @@
         "resources": {
           "$ref": "#/$defs/K8sResourceRequirements",
           "description": "CPU and memory resource requests/limits for the HSM simulator."
-        }
-      }
-    },
-    "ingress": {
-      "type": "object",
-      "description": "Ingress controller settings for the zeta-guard services.",
-      "properties": {
-        "sessionAffinity": {
-          "type": "object",
-          "description": "Session affinity (sticky sessions) configuration.",
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Enable ip-hash sticky sessions via NIC (hash $http_x_forwarded_for). Required when replicaCount > 1."
-            }
-          },
-          "required": [
-            "enabled"
-          ]
         }
       }
     },
@@ -1485,10 +1508,6 @@
               }
             }
           }
-        },
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable or disable the OPA deployment."
         },
         "podLabels": {
           "type": "object",

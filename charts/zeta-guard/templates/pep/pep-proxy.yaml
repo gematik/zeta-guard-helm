@@ -68,6 +68,7 @@ spec:
             {{- end }}
             - name: TRUST_CERTCHAIN_FILE
               value: "/var/image-trustchain/certchain.pem"
+            {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           {{- with .Values.provisioningProcessor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -92,10 +93,16 @@ spec:
         - name: nginx
           image: "{{ include "pep-proxy.image" . | trim }}"
           imagePullPolicy: "{{ .Values.pepproxy.imagePullPolicy }}"
-          {{- with .Values.pepproxy.hsmProxyAddr }}
+          {{- $pepProxyEnvVars := include "zeta-guard.proxyEnvVars" .Values.global | trim }}
+          {{- if or .Values.pepproxy.hsmProxyAddr $pepProxyEnvVars }}
           env:
+            {{- with .Values.pepproxy.hsmProxyAddr }}
             - name: HSM_PROXY_ADDR
               value: {{ . }}
+            {{- end }}
+            {{- with $pepProxyEnvVars }}
+            {{- . | nindent 12 }}
+            {{- end }}
           {{- end }}
           ports:
             - name: http-main

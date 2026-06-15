@@ -29,10 +29,3 @@ spec:
                 name: frontend-proxy
                 port:
                   number: 8080
-          - path: /prometheus
-            pathType: Prefix
-            backend:
-              service:
-                name: prometheus
-                port:
-                  number: 9090

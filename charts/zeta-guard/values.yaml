@@ -2,6 +2,15 @@ global:
   imagePullSecrets: [ ]
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
   infinispanExternal: {}
+  # HTTP forward proxy for outbound requests from all ZETA Guard components.
+  # Applies to: pepproxy (nginx), authserver (Keycloak), opa, opa-simulation,
+  #             provisioning-processor (init container), opa-token-renewer (CronJob).
+  # httpsProxy takes precedence over httpProxy for HTTPS traffic.
+  # Example: "http://proxy.example.com:8080"
+  httpProxy: null
+  httpsProxy: null
+  noProxy: null
+  allProxy: null
 
 registry_name: ""
 
@@ -35,7 +44,7 @@ authserver:
   initContainer:
     containerSecurityContext:
       allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: false
+      readOnlyRootFilesystem: true
       runAsNonRoot: true
       capabilities:
         drop: [ "ALL" ]
@@ -64,6 +73,7 @@ authserver:
   extraVolumes: []
   replicaCount: 1
   hostname: ""
+  wellKnownAuthServerPath: /
   # When set, /auth/admin is blocked via the PEP proxy and a dedicated admin
   # ingress is created. Terraform/CI must use this hostname for keycloak_url.
   adminHostname: ""
@@ -80,7 +90,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 1.0.1
+    tag: 1.2.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
@@ -88,14 +98,11 @@ authserver:
   # Provider configuration for ZETA SMC-B token-exchange implementation
   provider:
     smcB:
-      opa:
-        enabled: true
       opaBaseUrl: "http://opa:8181"
       opaSimulationBaseUrl: "http://opa-simulation:8181"
       decisionPath: "/v1/data/policies/zeta/authz/decision"
       connectionTimeoutMs: 1000
       readTimeoutMs: 2000
-      failClosed: true
   # Secret pepper for SMC-B user hashes (SMCB_HASHING_PEPPER env var).
   # Required on first install (helm install); leave empty on upgrades — the chart
   # reads the existing cluster Secret automatically via lookup and leaves it unchanged.
@@ -124,6 +131,10 @@ authserver:
       # The KeyProvider component is registered via Terraform (make config), not by the plugin itself.
       enabled: false
       keyId: ""  # Token signing key ID in the HSM, e.g. "zeta-guard-keycloak-token-es256-v1.p256"
+      # failClosed: when true (default), HsmTokenSigningKeyProviderFactory throws on any SIG fallback attempt
+      # while the HSM is unreachable, instead of letting Keycloak silently generate a software signing key.
+      # Set to false ONLY for controlled HSM maintenance windows where temporary software fallback is acceptable.
+      failClosed: true
   tls:
     # pod-level HTTPS on port 8443 using a cert/key from a Kubernetes Secret.
     # The Secret must contain keys tls.crt and tls.key (standard kubernetes.io/tls format).
@@ -138,10 +149,10 @@ authserver:
   # Adds an entry to the authserver's host file, mapping hostAlias.ip to hostAlias.name
   hostAlias: { }
   dbPool:
-    minSize: 25
-    maxSize: 150
+    minSize: 100
+    maxSize: 500
   httpPool:
-    maxThreads: 200
+    maxThreads: 300
   log:
     level: "INFO"
   # podAnnotations is for setting additional Kubernetes Annotations to a Pod.
@@ -181,7 +192,7 @@ pepproxy:
   replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 1.0.1
+    tag: 1.2.0
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
@@ -194,6 +205,7 @@ pepproxy:
       cpu: "250m"
       memory: "200Mi"
   wellKnownBase: http://localhost
+  wellKnownResourceSuffix: /pep/
   # boolean that controls if ASL should be enabled (true) or not (false)
   asl_enabled: false
   #
@@ -238,6 +250,14 @@ pepproxy:
 
     # requiredScopes defines scopes required for a valid access token.
     requiredScopes: [ ]
+    # Custom nginx `location` blocks (with `proxy_pass`) for the resource server.
+    # The PEP header handling (`include proxy_headers.conf;` — strips client-supplied
+    # credentials and ZETA-* headers, sets the PEP's own headers + Forwarded) is included
+    # once at the `server` level, so plain `proxy_pass` locations inherit it automatically.
+    # nginx `proxy_set_header` inheritance is non-additive: a location that declares its own
+    # `proxy_set_header` (e.g. a WebSocket upgrade) does NOT inherit it and must repeat
+    # `include proxy_headers.conf;` itself — otherwise a `pep on;` location returns HTTP 500
+    # (ProxyHeadersMissing).
     locations: ""
   # set to gRPC URL of HSM Proxy to enable ossl_hsm integration
   hsmProxyAddr: null
@@ -294,6 +314,9 @@ cloudnativePg:
       memory: 1Gi
   storage:
     size: 10Gi
+  parameters:
+    sharedBuffers: 128MB
+    maxConnections: 400
 
 # Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
 clusterIssuer: ""
@@ -326,9 +349,6 @@ ingressClassName: "nginx"
 ingressEnabled: true
 ingressMasterAnnotations: { }
 ingressMinionAnnotations: { }
-ingress:
-  sessionAffinity:
-    enabled: false  # set to true when replicaCount > 1; uses ip-hash (X-Forwarded-For) via NIC
 
 # If nginxIngressEnabled is true, the nginx-ingress controller is deployed and Ingresses receive annotations.
 nginxIngressEnabled: true
@@ -351,7 +371,7 @@ nginx-ingress:
       name: nginx
     image:
       repository: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-ingress"
-      tag: 1.0.1
+      tag: 1.2.0
     service:
       # Default for standalone/cloud installs.
       type: LoadBalancer
@@ -361,8 +381,28 @@ nginx-ingress:
         # Bump on HSM/TLS-related config changes to force a NIC pod restart —
         # nginx -s reload does not re-init OpenSSL providers (e.g. ossl_hsm).
         config-rev: "2026-04-29-ecdsa-strict"
+    enableSnippets: true
     config:
       entries:
+        # impl. nginx.org/lb-method: "hash $zeta_route consistent"
+        main-snippets: |
+          # see https://github.com/openresty/headers-more-nginx-module
+          load_module modules/ngx_http_headers_more_filter_module.so;
+        http-snippets: |
+          map $cookie_zeta_route $zeta_route {
+              ""      $request_id;
+              default $cookie_zeta_route;
+          }
+          map $cookie_zeta_route $zeta_route_setcookie {
+              ""      "zeta_route=$zeta_route; path=/";
+              default ""; # no-op when empty
+          }
+
+          # add_header directives don't inherit as you'd expect: using add_header for
+          # *any* header invalidates all add_headers set by parent locations.
+          # -a for appending; don't override cookies set by upstream (or elsewhere in
+          # nginx config).
+          more_set_headers -a "Set-Cookie: $zeta_route_setcookie";
         # AFOs: GS-A_5035, GS-A_4387, A_18464, GS-A_4385, A_18467
         ssl-protocols: "TLSv1.3 TLSv1.2"
         # AFOs: A_17322, A_21275-01, A_17124-03, GS-A_5016; (GS-A_4384-03 omitted)
@@ -387,14 +427,13 @@ nginx-ingress:
         cpu: "250m"
         memory: "200Mi"
 opa:
-  enabled: true
   # opa.podLabels is a map of labels to add to the opa pod.
   podLabels: {}
   replicaCount: 1
   serviceAccountName: ""
   image:
     repository: opa
-    tag: 1.14.1-static
+    tag: 1.16.2-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
   # Set OPA server log level: debug|info|warn|error (default: info)
@@ -405,13 +444,13 @@ opa:
   logStatusUpdates: false
   # Bundle mode (disabled by default) — inline policyRego is used when disabled
   bundle:
-    enabled: false
+    enabled: true
     # Logical service name used in OPA config (e.g., 'gitlab-registry' or 'local-proxy')
     serviceName: registry
     # Base URL of registry
-    url: ""
+    url: https://europe-west3-docker.pkg.dev
     # fully qualified resource (including the registry host)
-    resource: ""
+    resource: europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies/test-fachdienst-policies:latest
     credentials:
       # Reference a Secret containing registry bearer credentials.
       secretRef:
@@ -559,7 +598,7 @@ provisioningProcessor:
       drop: [ "ALL" ]
   image:
     repository: provisioning-processor
-    tag: 1.0.0
+    tag: 1.2.0
   imagePullPolicy: Always
   provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
   resources:
@@ -577,8 +616,9 @@ telemetry-gateway:
   mode: deployment
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
-    tag: "v0.151.0-release.2"
+    tag: "v0.153.0"
     digest: "sha256:762feb0150d823e046325abf5f896d068cbadada7a8ee086faccb2f04d91fa59"
+    pullPolicy: Always
   command:
     name: /otelcol/zeta-telemetry-gateway
   resources:
@@ -588,6 +628,9 @@ telemetry-gateway:
     requests:
       cpu: "100m"
       memory: "200Mi"
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
   config:
     connectors:
       count/siem:
@@ -601,7 +644,7 @@ telemetry-gateway:
                 default_value: "unknown capec id"
 
     exporters:
-      otlp_grpc/gematik:
+      otlp_grpc/ti_sim:
         endpoint: https://otlp.v1.bd.prod.ccs.gematik.solutions:443
         auth:
           authenticator: bearertokenauth/gematik
@@ -611,6 +654,48 @@ telemetry-gateway:
         filename: "/etc/gcp/token"
 
     processors:
+      # Workaround for outdated implementation of OpenTelemetry semantic conventions in PEP. Remove when fixed in PEP.
+      attributes/semantic_conventions_migration:
+        actions:
+          - key: client.address
+            from_attribute: http.client_ip
+            action: insert
+          - key: http.request.method
+            from_attribute: http.method
+            action: insert
+          - key: http.response.status_code
+            from_attribute: http.status_code
+            action: insert
+          - key: user_agent.original
+            from_attribute: http.user_agent
+            action: insert
+          - key: server.address
+            from_attribute: net.host.name
+            action: insert
+        include:
+          match_type: strict
+          services:
+            - "ZETA Guard PEP HTTP proxy"
+
+      filter/ti_sim:
+        error_mode: ignore
+        log_conditions:
+          - |
+            resource.attributes["service.name"] != "ZETA Guard PDP authorization server" and
+            resource.attributes["service.name"] != "ZETA Guard PEP HTTP proxy" and
+            resource.attributes["service.name"] != "ZETA Guard PDP policy engine" and
+            resource.attributes["service.name"] != "resource server"
+        metric_conditions:
+          - HasPrefix(resource.attributes["service.name"], "ZETA Guard ")
+        trace_conditions:
+          - span.kind != SPAN_KIND_SERVER
+          - |
+            resource.attributes["service.name"] != "ZETA Guard PEP HTTP proxy" and
+            resource.attributes["service.name"] != "resource server"
+          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+            span.attributes["url.path"] == "/status"
+          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+            span.attributes["http.route"] == "/status"
       filter/ti_siem:
         error_mode: ignore
         log_conditions:     # ToDo align conditions with ZETA specification when released
@@ -618,8 +703,19 @@ telemetry-gateway:
         metric_conditions:  # ToDo align conditions with ZETA specification when released
           - resource.attributes["service.name"] == "none"
         trace_conditions:   # ToDo align conditions with ZETA specification when released
-          - resource.attributes["service.name"] == "none"
-      redaction/betreiber:
+          - span.kind != SPAN_KIND_SERVER
+          - |
+            resource.attributes["service.name"] != "ZETA Guard PDP authorization server" and
+            resource.attributes["service.name"] != "ZETA Guard PEP HTTP proxy" and
+            resource.attributes["service.name"] != "ZETA Guard PDP policy engine" and
+            resource.attributes["service.name"] != "resource server"
+          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+            span.attributes["url.path"] == "/status"
+          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+            span.attributes["http.route"] == "/status"
+          - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+            span.attributes["url.path"] == "/health"
+      redaction/zeta_guard:
         # by default, keep all attributes
         allow_all_keys: true
         # remove attributes with keys matching these patterns
@@ -755,14 +851,36 @@ telemetry-gateway:
         - bearertokenauth/gematik
         - health_check
       pipelines:
-        logs:
+        logs: null
+
+        logs/dienst_hersteller:
           receivers:
             - opa/policy_engine
             - opa/policy_engine_simulation
             - otlp
             - syslog/http_proxy
+          processors:
+            - memory_limiter
+            - batch
+            - redaction/zeta_guard
           exporters:
-            - otlp_grpc/gematik
+            # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
+            - debug
+
+        logs/ti_sim:
+          receivers:
+            - opa/policy_engine
+            - opa/policy_engine_simulation
+            - otlp
+            - syslog/http_proxy
+          processors:
+            - memory_limiter
+            - filter/ti_sim
+            - batch
+            - redaction/zeta_guard
+          exporters:
+            - otlp_grpc/ti_sim
+
         logs/ti_siem:
           receivers:
             - opa/policy_engine
@@ -772,17 +890,37 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_siem
-            - redaction/betreiber
             - batch
+            - redaction/zeta_guard
           exporters:
             - count/siem
-            - debug # replace with otlp_http/ti_siem when endpoint is available
-        metrics:
+            - otlp_grpc/ti_sim
+
+        metrics: null
+
+        metrics/dienst_hersteller:
           receivers:
             - otlp
             - prometheus
+          processors:
+            - memory_limiter
+            - batch
+            - redaction/zeta_guard
           exporters:
+            # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
             - debug
+
+        metrics/ti_sim:
+          receivers:
+            - otlp
+          processors:
+            - memory_limiter
+            - filter/ti_sim
+            - batch
+            - redaction/zeta_guard
+          exporters:
+            - otlp_grpc/ti_sim
+
         metrics/ti_siem:
           receivers:
             - count/siem
@@ -791,25 +929,47 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_siem
-            - redaction/betreiber
             - batch
+            - redaction/zeta_guard
           exporters:
-            - debug # replace with otlp_http/ti_siem when endpoint is available
-        traces:
+            - otlp_grpc/ti_sim
+
+        traces: null
+
+        traces/dienst_hersteller:
           receivers:
             - otlp
+          processors:
+            - memory_limiter
+            - batch
+            - redaction/zeta_guard
           exporters:
-            - otlp_grpc/gematik
+            # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
+            - debug
+
+        traces/ti_sim:
+          receivers:
+            - otlp
+          processors:
+            - memory_limiter
+            - filter/ti_sim
+            - batch
+            - redaction/zeta_guard
+            - attributes/semantic_conventions_migration
+          exporters:
+            - otlp_grpc/ti_sim
+
         traces/ti_siem:
           receivers:
             - otlp
           processors:
             - memory_limiter
             - filter/ti_siem
-            - redaction/betreiber
             - batch
+            - redaction/zeta_guard
+            - attributes/semantic_conventions_migration
           exporters:
-            - debug # replace with otlp_http/ti_siem when endpoint is available
+            - otlp_grpc/ti_sim
 
   extraVolumeMounts:
     - name: gcp-token
@@ -861,37 +1021,37 @@ networkPolicy:
   enabled: false
 
   egress:
-    # A_27864-01 — gematik Telemetriedaten-Empfänger (OTLP-Endpunkt)
+    # A_27864-01 — gematik telemetry data receiver (OTLP endpoint)
     telemetry:
       ipBlocks: [ ]
-    # A_27864-01 — SIEM der gematik
+    # A_27864-01 — gematik SIEM
     siem:
       ipBlocks: [ ]
-    # A_27864-01 — ZETA Artifact Registry bei gematik (image pull, OPA bundles)
+    # A_27864-01 — ZETA Artifact Registry at gematik (image pull, OPA bundles)
     artifactRegistry:
       ipBlocks: [ ]
-    # A_27864-01 — Provider-interne Artifact Registry
+    # A_27864-01 — provider-internal artifact registry
     providerArtifactRegistry:
       ipBlocks: [ ]
-    # A_27864-01 — OCSP/CRL für TLS TSPs nach CAB Forum
+    # A_27864-01 — OCSP/CRL for TLS TSPs per CAB Forum
     ocspCabForum:
       ipBlocks: [ ]
     # A_27864-01 — SMC-B TSP OCSP Responder
     ocspSmcbTsp:
       ipBlocks: [ ]
-    # A_27864-01 — OCSP Responder TSP Komponenten PKI der TI
+    # A_27864-01 — OCSP Responder for TI component PKI
     ocspTiPki:
       ipBlocks: [ ]
-    # PIP — Quelle der OPA Policy Bundles
+    # PIP — OPA policy bundle source
     pip:
       ipBlocks: [ ]
-    # PoPP Dienst
+    # PoPP service
     popp:
       ipBlocks: [ ]
       mock: false  # allow egress to local popp-mock pod (app=popp-mock); uses podSelector + targetPort 8080
-    # Anbieter-interner Verkehr
+    # provider-internal traffic
     providerInternal:
-      allowAll: false  # true = gesamter Egress erlaubt (kein IP-Filter)
+      allowAll: false  # true = all egress allowed (no IP filter)
       resourceServers:
         ipBlocks: [ ]
       telemetrySystems:

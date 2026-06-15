@@ -17,8 +17,36 @@
       "status_notes": "Affects gRPC servers with auth interceptors on :path. OPA is accessed via HTTP REST API (/v1/data) only; gRPC management API is not enabled.",
       "justification": "vulnerable_code_not_in_execute_path",
       "timestamp": "2026-03-23T11:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46680"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/github.com/containerd/containerd/v2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft containerd's Container-Laufzeitcode (User-ID-Auflösung beim Container-Start). OPA nutzt die Bibliothek ausschließlich für OCI-Image-Distribution (Bundle-Mode); der verwundbare Code-Pfad wird nie ausgeführt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-09T09:13:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42504"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Executable /opa importiert die betroffene Funktion mime.WordDecoder.DecodeHeader nicht.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-09T09:13:00Z"
     }
   ],
   "timestamp": "2026-02-27T15:41:26Z",
-  "last_updated": "2026-03-23T11:00:00Z"
+  "last_updated": "2026-06-09T09:13:00Z"
 }

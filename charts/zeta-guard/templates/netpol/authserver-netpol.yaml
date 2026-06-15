@@ -33,7 +33,6 @@ spec:
       ports:
         - port: 4317
           protocol: TCP
-    {{- if .Values.opa.enabled }}
     # OPA (policy decisions)
     - to:
         - podSelector:
@@ -42,8 +41,7 @@ spec:
       ports:
         - port: 8181
           protocol: TCP
-    {{- end }}
-    {{- if and .Values.opa.enabled .Values.opa.simulation.enabled }}
+    {{- if .Values.opa.simulation.enabled }}
     # OPA simulation
     - to:
         - podSelector:

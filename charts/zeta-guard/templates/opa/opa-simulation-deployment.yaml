@@ -1,4 +1,4 @@
-{{- if and .Values.opa.enabled .Values.opa.simulation.enabled }}
+{{- if .Values.opa.simulation.enabled }}
 # Precompute config snippets for checksum to avoid inline assignment
 {{- $bundleCfg := "" }}
 {{- if .Values.opa.bundle.enabled }}
@@ -69,6 +69,7 @@ spec:
             {{- end }}
             - name: TRUST_CERTCHAIN_FILE
               value: "/var/image-trustchain/certchain.pem"
+            {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           {{- with .Values.provisioningProcessor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -106,6 +107,7 @@ spec:
                   name: {{ .Values.opa.bundle.credentials.secretRef.name }}
                   key: token
           {{- end }}
+            {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           args:
             - "run"
             - "--server"

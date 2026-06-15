@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: testfachdienst
-  tag: "latest"
+  tag: 1.2.0
 imagePullPolicy: Always
 
 containerPort: 8080
@@ -43,6 +43,17 @@ livenessProbe:
   failureThreshold: 3
 
 env: []
+
+opentelemetry:
+  enabled: false
+  serviceName: resource server
+  endpoint: http://telemetry-gateway-local:4318
+  protocol: http/protobuf
+  metricExportInterval: 10s
+  resourceAttributes:
+    service.namespace: zeta-local
+    service.version: latest
+    deployment.environment.name: local
 
 hostname: ""
 

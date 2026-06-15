@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-guard
 description: ZETA Guard
 type: application
-version: 1.0.1
+version: 1.2.0
 dependencies:
   - name: nginx-ingress
     # F5 NGINX Ingress Controller (NIC)

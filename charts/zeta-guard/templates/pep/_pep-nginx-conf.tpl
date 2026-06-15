@@ -16,6 +16,19 @@ error_log syslog:server={{ include "telemetryGateway.hostname" $ }}:54526 debug;
 {{- end }}
 pid /tmp/nginx.pid;
 
+{{- if or $.Values.global.httpProxy $.Values.global.httpsProxy $.Values.global.allProxy }}
+env HTTP_PROXY;
+env http_proxy;
+env HTTPS_PROXY;
+env https_proxy;
+env ALL_PROXY;
+env all_proxy;
+{{- end }}
+{{- if $.Values.global.noProxy }}
+env NO_PROXY;
+env no_proxy;
+{{- end }}
+
 events {
     worker_connections 16384;
     multi_accept on;
@@ -112,6 +125,14 @@ http {
 
         include server_common.conf;
 
+        # A_25669-01 / A_28439: bind the PEP-set headers once for the whole server
+        # (strip client-supplied credentials and ZETA-* headers, Forwarded per RFC 7239).
+        # Locations inherit this automatically. Exception: nginx proxy_set_header inheritance is
+        # NOT additive — a location with its own proxy_set_header (e.g. a WebSocket upgrade or the
+        # OpenShift cookie strip in /pep/) does not inherit the strips and must re-include
+        # `proxy_headers.conf;` itself.
+        include proxy_headers.conf;
+
         root /usr/share/nginx/html;
 
         {{- if $.Values.pepproxy.asl_enabled }}
@@ -130,6 +151,7 @@ http {
             satisfy all;
             allow all;
 
+            gzip on;
             default_type application/json;
             alias /srv/.well-known/;
             autoindex off;
@@ -146,8 +168,15 @@ http {
             return 403;
         }
         # Route all other /auth/* requests to Keycloak (no token required).
+        # satisfy all + allow all override the server-level "deny all" set when asl_enabled.
         location /auth {
             pep off;
+
+            satisfy all;
+            allow all;
+
+            gzip on;
+
             proxy_pass http://authserver;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
