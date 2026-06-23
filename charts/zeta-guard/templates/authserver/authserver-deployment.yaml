@@ -497,9 +497,6 @@ spec:
               mountPath: /opt/keycloak/conf/tls
               readOnly: true
             {{- end }}
-            {{- with .Values.authserver.container.extraVolumeMounts }}
-            {{- tpl (toYaml .) $ | nindent 12 }}
-            {{- end }}
             {{- if and .Values.global.infinispanExternal.enabled .Values.global.infinispanExternal.hsm.enabled }}
             - name: infinispan-ca
               mountPath: /opt/keycloak/conf/truststores/infinispan
@@ -534,9 +531,6 @@ spec:
         - name: tls-cert
           secret:
             secretName: {{ .Values.authserver.tls.certSecretName }}
-        {{- end }}
-        {{- with .Values.authserver.extraVolumes }}
-        {{- tpl (toYaml .) $ | nindent 8 }}
         {{- end }}
         {{- if and .Values.global.infinispanExternal.enabled .Values.global.infinispanExternal.hsm.enabled }}
         - name: infinispan-ca

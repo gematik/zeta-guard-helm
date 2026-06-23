@@ -2,6 +2,15 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.2.1
+
+### changed:
+
+- Update authserver to 1.2.2 with an important VAU related bugfix
+  (Note: The authserver version is not a typo. In the 3rd digit release versions
+  of the individual components of the helm chart may differ from the helm chart
+  version.)
+
 ## Release 1.2.0
 
 ### migration:

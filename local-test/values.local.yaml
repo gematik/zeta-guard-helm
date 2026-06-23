@@ -312,7 +312,7 @@ zeta-guard:
         enabled: false
         keyId: "zeta-guard-keycloak-token-es256-v1.p256"
     image:
-      tag: 1.2.1
+      tag: 1.2.2
     imagePullPolicy: IfNotPresent
     log:
       level: "INFO,de.gematik.zeta.zetaguard:debug"

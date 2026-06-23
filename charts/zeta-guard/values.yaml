@@ -90,7 +90,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 1.2.1
+    tag: 1.2.2
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
@@ -617,7 +617,7 @@ telemetry-gateway:
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
     tag: "v0.153.0"
-    digest: "sha256:762feb0150d823e046325abf5f896d068cbadada7a8ee086faccb2f04d91fa59"
+    digest: "sha256:a2a435beb9a2ba74073367ee885bd266ad1708a8bd7d49ffe2d77c5f40fe94ae"
     pullPolicy: Always
   command:
     name: /otelcol/zeta-telemetry-gateway

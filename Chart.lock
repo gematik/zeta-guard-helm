@@ -16,7 +16,7 @@ dependencies:
   version: 0.0.1
 - name: zeta-guard
   repository: file://charts/zeta-guard
-  version: 1.2.0
+  version: 1.2.1
 - name: testdriver
   repository: file://charts/test-driver
   version: 0.0.1
@@ -38,5 +38,5 @@ dependencies:
 - name: infinispan-external
   repository: file://charts/infinispan-external
   version: 0.0.1
-digest: sha256:a0a564d351d06c0ab7449f0d5c6cee36221f200fb927d2cb47d363d24929ad04
-generated: "2026-06-11T10:38:37.01331081+02:00"
+digest: sha256:d58fcec2a47f575eef2446ad6e0a9c6d4a48de00516caf06c21bb86b29bd0bbe
+generated: "2026-06-18T10:05:25.943389784+02:00"
