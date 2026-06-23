@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-testenv
 description: ZETA Guard test installation
 type: application
-version: 1.2.0
+version: 1.2.1
 dependencies:
   - name: testfachdienst
     version: 0.0.1
@@ -32,7 +32,7 @@ dependencies:
     tags:
       - exauthsim
   - name: zeta-guard
-    version: 1.2.0
+    version: 1.2.1
     repository: file://charts/zeta-guard
     tags:
       - zeta-guard
