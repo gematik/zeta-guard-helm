@@ -1,0 +1,173 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sekidp-gsi-server
+  labels:
+    {{- include "sekidp-gsi-server.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sekidp-gsi-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sekidp-gsi-server.labels" . | nindent 8 }}
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      {{- if .Values.gsiServer.serviceAccount.create }}
+      serviceAccountName: {{ .Values.gsiServer.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.gsiServer.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gsiServer.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Fedmaster..."
+              while ! nc -z sekidp-fedmaster {{ .Values.fedmaster.service.apiPort }}; do sleep 2; done
+              echo "Fedmaster ready"
+          {{- with .Values.gsiServer.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- if .Values.gsiServer.additionalTrustedCAs }}
+        - name: build-truststore
+          image: "{{ include "sekidp-gsi-server.image" . }}"
+          imagePullPolicy: "{{ .Values.gsiServer.imagePullPolicy }}"
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # /truststore emptyDir survives restarts within the pod — start
+              # clean each run to avoid "alias already exists" on retry.
+              rm -f /truststore/truststore.p12
+              for f in /trusted-ca-sources/*; do
+                keytool -importcert -noprompt -trustcacerts \
+                  -alias "$(basename "$f" .pem)" -file "$f" \
+                  -keystore /truststore/truststore.p12 \
+                  -storetype PKCS12 -storepass changeit
+              done
+          volumeMounts:
+            - name: trusted-ca-sources
+              mountPath: /trusted-ca-sources
+              readOnly: true
+            - name: truststore
+              mountPath: /truststore
+          {{- with .Values.gsiServer.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      containers:
+        - name: gsi-server
+          image: "{{ include "sekidp-gsi-server.image" . }}"
+          imagePullPolicy: "{{ .Values.gsiServer.imagePullPolicy }}"
+          ports:
+            # App listens on fixed ports 8085/8185; service.*Port only set the Service ports.
+            - name: api
+              containerPort: 8085
+            - name: management
+              containerPort: 8185
+          env:
+            - name: SERVER_PORT
+              value: "8085"
+            - name: MANAGEMENT_PORT
+              value: "8185"
+            - name: GSI_SERVER_URL
+              value: {{ .Values.gsiServer.env.serverUrl | quote }}
+            - name: GSI_SERVER_URL_MTLS
+              value: {{ .Values.gsiServer.env.serverUrlMtls | default .Values.gsiServer.env.serverUrl | quote }}
+            - name: FEDMASTER_SERVER_URL
+              value: {{ .Values.gsiServer.env.fedmasterUrl | default (printf "http://sekidp-fedmaster:%v" .Values.fedmaster.service.apiPort) | quote }}
+            - name: LOG_LEVEL_GEMATIK
+              value: {{ .Values.gsiServer.env.logLevelGematik | quote }}
+            - name: REQUEST_LOGGING_ENABLED
+              value: {{ .Values.gsiServer.env.requestLoggingEnabled | quote }}
+            {{- if .Values.gsiServer.additionalTrustedCAs }}
+            - name: JDK_JAVA_OPTIONS
+              value: "-Djavax.net.ssl.trustStore=/truststore/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: certs-trusted
+              mountPath: /app/certs_trusted
+            {{- if .Values.gsiServer.additionalTrustedCAs }}
+            - name: truststore
+              mountPath: /truststore
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- with .Values.gsiServer.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.gsiServer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: certs-trusted
+          {{- if .Values.gsiServer.trustedCerts.configMapName }}
+          configMap:
+            name: {{ .Values.gsiServer.trustedCerts.configMapName }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.gsiServer.additionalTrustedCAs }}
+        - name: trusted-ca-sources
+          projected:
+            sources:
+              {{- range $i, $ca := .Values.gsiServer.additionalTrustedCAs }}
+              {{- if and $ca.secretName $ca.cert }}
+              {{- fail (printf "gsiServer.additionalTrustedCAs[%d]: set either secretName+secretKey or cert, not both" $i) }}
+              {{- else if $ca.secretName }}
+              - secret:
+                  name: {{ $ca.secretName }}
+                  items:
+                    - key: {{ $ca.secretKey }}
+                      path: {{ printf "ca-%d.pem" $i }}
+              {{- else if $ca.cert }}
+              - secret:
+                  name: sekidp-gsi-server-additional-cas
+                  items:
+                    - key: {{ printf "ca-%d.pem" $i }}
+                      path: {{ printf "ca-%d.pem" $i }}
+              {{- else }}
+              {{- fail (printf "gsiServer.additionalTrustedCAs[%d]: must set either secretName+secretKey or cert" $i) }}
+              {{- end }}
+              {{- end }}
+        - name: truststore
+          emptyDir: {}
+        {{- end }}

@@ -1,0 +1,16 @@
+{{- if and (eq .Values.databaseMode "cloudnative") .Values.cloudnativePg.backup.enabled .Values.cloudnativePg.backup.schedule }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: keycloak-db-backup
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  schedule: {{ .Values.cloudnativePg.backup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: keycloak-db
+  {{- with .Values.cloudnativePg.backup.method }}
+  method: {{ . | quote }}
+  {{- end }}
+{{- end }}

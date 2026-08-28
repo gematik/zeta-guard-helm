@@ -1,3 +1,8 @@
+{{- $sekidpMtls := .Values.authserver.sekidp.mtls -}}
+{{- $sekidpMtlsOn := $sekidpMtls.keystore.secretName -}}
+{{- if and $sekidpMtlsOn (not .Values.authserver.config.oidcFlowEnabled) -}}
+{{- fail "authserver.sekidp.mtls requires authserver.config.oidcFlowEnabled: true (the SE-KIDP mTLS keystore is ignored otherwise)" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -99,15 +104,27 @@ spec:
               cd /work
               ./bin/kc.sh build
           env:
+            {{- if .Values.authserver.testmode }}
+            - name: KC_SPI_CONNECTIONS_HTTP_CLIENT_DEFAULT_DISABLE_TRUST_MANAGER
+              value: "true"
+            {{- end }}
+            {{- if .Values.provisioningProcessor.tslOcspEnabled }}
+            # Unset when OCSP is off: the app treats a missing OCSP_KEYSTORE_LOCATION as
+            # "OCSP disabled"; leaving it set fails on the absent ocsp-signers.p12 at startup.
             - name: OCSP_KEYSTORE_LOCATION
               value: "/var/trust-data/ocsp-signers.p12"
+            - name: OCSP_KEYSTORE_META_LOCATION
+              value: "/var/trust-data/ocsp-signers-meta.json"
             - name: OCSP_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
                   key: password
+            {{- end }}
             - name: SMCB_KEYSTORE_LOCATION
               value: "/var/trust-data/smcb-trust-roots.p12"
+            - name: SMCB_KEYSTORE_META_LOCATION
+              value: "/var/trust-data/smcb-trust-roots-meta.json"
             - name: SMCB_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -120,6 +137,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
                   key: password
+            # Periodic reload of the truststores above, so a provisioning run takes effect without restarting the pod.
+            - name: TRUSTSTORE_RELOAD_ENABLED
+              value: {{ .Values.authserver.truststoreReload.enabled | quote }}
+            - name: TRUSTSTORE_RELOAD_INTERVAL
+              value: {{ .Values.authserver.truststoreReload.interval | quote }}
             {{- include "keycloak.buildOptions" . | nindent 12 }}
             - name: KC_DB
               value: "{{ include "authserver.kcDb" . }}"
@@ -139,42 +161,74 @@ spec:
         - name: trust-anchor-provisioning-processor
           image: "{{ include "provisioningProcessor.image" . | trim }}"
           imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy }}"
+          {{- if .Values.provisioningProcessor.schedule.enabled }}
+          # Native sidecar (needs Kubernetes >= 1.29; the chart's declared minimum is 1.32): the processor stays
+          # resident and repeats its run daily instead of exiting after the first pass, so Keycloak's truststores
+          # are refreshed without restarting the pod.
+          restartPolicy: Always
+          startupProbe:
+            # A sidecar only has to *start* before Keycloak does, not finish its first run — unlike a plain init
+            # container, which has to exit successfully. This probe restores that barrier: without it Keycloak could
+            # boot while /var/trust-data is still empty and fail on the missing truststores.
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  test -f /var/trust-data/smcb-trust-roots.p12 &&
+                  test -f /var/trust-data/smcb-trust-roots-meta.json &&
+                  test -f /var/trust-data/tpm-trust-roots.p12
+                  {{- if .Values.provisioningProcessor.tslOcspEnabled }} &&
+                  test -f /var/trust-data/ocsp-signers.p12 &&
+                  test -f /var/trust-data/ocsp-signers-meta.json
+                  {{- end }}
+            periodSeconds: 5
+            # Generous: the first pass pulls a signed OCI image and verifies its cosign signature.
+            failureThreshold: 120
+          {{- end }}
           {{- with .Values.provisioningProcessor.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
-          - name: RESULT_DIR
-            value: "/var/trust-data"
-          - name: PROCESSORS_TSL_SMB_ENABLED
-            value: "true"
-          - name: PROCESSORS_TSL_OCSP_ENABLED
-            value: "true"
-          - name: TSL_FILENAME
-            value: "ECC-RSA_TSL-test.xml"
-          - name: PROCESSORS_TPM_ENABLED
-            value: "true"
-          - name: PROVISIONING_CONTAINER_NAME
-            value: {{ .Values.provisioningProcessor.provisioningContainer | quote }}
-          {{- include "zeta-guard.provisioningProcessor.caEnv" . | nindent 10 }}
-          - name: TRUST_CERTCHAIN_FILE
-            value: "/var/image-trustchain/certchain.pem"
-          {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 10 }}
+            # Also read by the scheduler below: SCHEDULE_TIME is a wall-clock time, evaluated in this zone.
+            - name: TZ
+              value: {{ .Values.provisioningProcessor.schedule.timezone | quote }}
+            - name: RESULT_DIR
+              value: "/var/trust-data"
+            {{- if .Values.provisioningProcessor.schedule.enabled }}
+            - name: SCHEDULE_TIME
+              value: {{ .Values.provisioningProcessor.schedule.time | quote }}
+            {{- end }}
+            - name: PROCESSORS_TSL_SMB_ENABLED
+              value: "true"
+            - name: PROCESSORS_TSL_OCSP_ENABLED
+              value: {{ .Values.provisioningProcessor.tslOcspEnabled | quote }}
+            - name: TSL_FILENAME
+              value: "ECC-RSA_TSL-test.xml"
+            - name: PROCESSORS_TPM_ENABLED
+              value: "true"
+            - name: PROVISIONING_CONTAINER_NAME
+              value: {{ .Values.provisioningProcessor.provisioningContainer | quote }}
+            {{- include "zeta-guard.provisioningProcessor.caEnv" . | nindent 12 }}
+            - name: TRUST_CERTCHAIN_FILE
+              value: "/var/image-trustchain/certchain.pem"
+            {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           {{- with .Values.provisioningProcessor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
-          - name: trust-data
-            mountPath: "/var/trust-data"
-            readOnly: false
-          - name: image-trustchain
-            mountPath: "/var/image-trustchain"
-            readOnly: true
-          - name: tmp
-            mountPath: "/tmp"
-            readOnly: false
-          {{- include "zeta-guard.provisioningProcessor.caVolumeMounts" . | nindent 10 }}
+            - name: trust-data
+              mountPath: "/var/trust-data"
+              readOnly: false
+            - name: image-trustchain
+              mountPath: "/var/image-trustchain"
+              readOnly: true
+            - name: tmp
+              mountPath: "/tmp"
+              readOnly: false
+            {{- include "zeta-guard.provisioningProcessor.caVolumeMounts" . | nindent 12 }}
       containers:
         - name: keycloak
           image: "{{ include "authserver.image" . | trim }}"
@@ -185,6 +239,9 @@ spec:
           {{- end }}
           args:
             - start
+            {{- if .Values.authserver.verbose }}
+            - --verbose
+            {{- end }}
             - --optimized
             - --db-pool-min-size={{ .Values.authserver.dbPool.minSize }}
             - --db-pool-max-size={{ .Values.authserver.dbPool.maxSize }}
@@ -193,10 +250,13 @@ spec:
             - --proxy-headers=xforwarded
             {{- if .Values.authserver.adminHostname }}
             {{- /* KC26: --hostname must be a full URL when --hostname-admin is set.
-                 The path (/auth) must be explicit to preserve the context path;
-                 omitting it would cause KC to drop the /auth prefix from all endpoints. */}}
+                 The path (/auth) must be explicit on *both* to preserve the context path;
+                 omitting it would cause KC to drop the /auth prefix from all endpoints.
+                 On --hostname-admin that means KC serves the console at /auth/admin/ (from
+                 KC_HTTP_RELATIVE_PATH) but advertises and redirects to /admin/ — a path
+                 neither KC nor ingress-admin.yaml (path: /auth) answers. */}}
             - --hostname=https://{{ .Values.authserver.hostname }}/auth
-            - --hostname-admin=https://{{ .Values.authserver.adminHostname }}
+            - --hostname-admin=https://{{ .Values.authserver.adminHostname }}/auth
             {{- else }}
             - --hostname={{ .Values.authserver.hostname }}
             {{- end }}
@@ -232,6 +292,10 @@ spec:
             periodSeconds: {{ .Values.authserver.probes.startup.periodSeconds }}
             failureThreshold: {{ .Values.authserver.probes.startup.failureThreshold }}
           env:
+            {{- if .Values.authserver.testmode }}
+            - name: KC_SPI_CONNECTIONS_HTTP_CLIENT_DEFAULT_DISABLE_TRUST_MANAGER
+              value: "true"
+            {{- end }}
             # Environment variable 'KEYCLOAK_ADMIN' is deprecated, use 'KC_BOOTSTRAP_ADMIN_USERNAME' instead
             - name: KEYCLOAK_ADMIN
               valueFrom:
@@ -244,15 +308,23 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.authserver.admin.secretRef | default "authserver-admin" | quote }}
                   key: password
+            {{- if .Values.provisioningProcessor.tslOcspEnabled }}
+            # Unset when OCSP is off: the app treats a missing OCSP_KEYSTORE_LOCATION as
+            # "OCSP disabled"; leaving it set fails on the absent ocsp-signers.p12 at startup.
             - name: OCSP_KEYSTORE_LOCATION
               value: "/var/trust-data/ocsp-signers.p12"
+            - name: OCSP_KEYSTORE_META_LOCATION
+              value: "/var/trust-data/ocsp-signers-meta.json"
             - name: OCSP_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
                   key: password
+            {{- end }}
             - name: SMCB_KEYSTORE_LOCATION
               value: "/var/trust-data/smcb-trust-roots.p12"
+            - name: SMCB_KEYSTORE_META_LOCATION
+              value: "/var/trust-data/smcb-trust-roots-meta.json"
             - name: SMCB_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -265,6 +337,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
                   key: password
+            # Periodic reload of the truststores above, so a provisioning run takes effect without restarting the pod.
+            - name: TRUSTSTORE_RELOAD_ENABLED
+              value: {{ .Values.authserver.truststoreReload.enabled | quote }}
+            - name: TRUSTSTORE_RELOAD_INTERVAL
+              value: {{ .Values.authserver.truststoreReload.interval | quote }}
             {{- if .Values.devMode }}
             # Enable remote debugging in devMode
             - name: KC_DEBUG
@@ -301,9 +378,9 @@ spec:
             - name: KC_TELEMETRY_ENDPOINT
               value: "http://{{ include "telemetryGateway.hostname" . }}:4317"
             - name: KC_TELEMETRY_RESOURCE_ATTRIBUTES
-              value: "service.version={{ .Values.authserver.image.tag }}"
+              value: "service.version={{ .Chart.Version }}"
             - name: KC_TELEMETRY_SERVICE_NAME
-              value: "ZETA Guard PDP authorization server"
+              value: "{{ include "authserver.otel-service-name" $ }}"
             # OPA endpoints and behavior
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OPA_BASE_URL
               value: "{{ .Values.authserver.provider.smcB.opaBaseUrl }}"
@@ -315,15 +392,37 @@ spec:
               value: "{{ .Values.authserver.provider.smcB.connectionTimeoutMs }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_READ_TIMEOUT_MS
               value: "{{ .Values.authserver.provider.smcB.readTimeoutMs }}"
+            # SMC-B OCSP revocation check timeouts
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OCSP_CONNECT_TIMEOUT_MS
+              value: "{{ .Values.authserver.provider.smcB.ocspConnectTimeoutMs }}"
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OCSP_READ_TIMEOUT_MS
+              value: "{{ .Values.authserver.provider.smcB.ocspReadTimeoutMs }}"
+            {{- if $sekidpMtlsOn }}
+            - name: KC_SPI_IDENTITY_PROVIDER__ZETA_SEKIDP_OIDC__MTLS_ENABLED
+              value: "true"
+            - name: KC_SPI_IDENTITY_PROVIDER__ZETA_SEKIDP_OIDC__MTLS_KEYSTORE_LOCATION
+              value: /opt/keycloak/conf/sekidp-client/keystore.p12
+            - name: KC_SPI_IDENTITY_PROVIDER__ZETA_SEKIDP_OIDC__MTLS_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "authserver.sekidp.mtls.keystorePassword.secretName is required when sekidp mTLS is enabled" $sekidpMtls.keystorePassword.secretName }}
+                  key: {{ required "authserver.sekidp.mtls.keystorePassword.secretKey is required when sekidp mTLS is enabled" $sekidpMtls.keystorePassword.secretKey }}
+            {{- end }}
             # https://www.keycloak.org/docs/latest/upgrading/#maximum-length-of-the-parameters-in-the-oidc-token-endpoint
             - name: KC_SPI_LOGIN_PROTOCOL_OPENID_CONNECT_REQ_PARAMS_DEFAULT_MAX_SIZE
               value: "10000"
             - name: SMCB_USER_MAX_CLIENTS
               value: "{{ .Values.authserver.config.maxClients }}"
+            - name: SMCB_IDLE_USER_TTL
+              value: "{{ .Values.authserver.config.userIdleTTL }}"
+            - name: SMCB_IDLE_CLIENT_TTL
+              value: "{{ .Values.authserver.config.clientIdleTTL }}"
             - name: CLIENT_REGISTRATION_TTL
               value: "{{ .Values.authserver.config.clientRegistrationTTL }}"
             - name: CLIENT_REGISTRATION_SCHEDULER_INTERVAL
               value: "{{ .Values.authserver.config.clientRegistrationSchedulerInterval }}"
+            - name: ZETA_OIDC_FLOW_ENABLED
+              value: {{ .Values.authserver.config.oidcFlowEnabled | toString | quote }}
             {{- if .Values.authserver.hsm.enabled }}
             - name: HSM_PROXY_ENDPOINT
               value: {{ .Values.authserver.hsm.endpoint | quote }}
@@ -338,8 +437,16 @@ spec:
             - name: SPREE_KEYCHAIN_FILE
               value: {{ . | quote }}
             {{- end }}
-            - name: SPREE_INTEGRITY_ENABLED
+            - name: SPREE_INTEGRITY_PROVIDER_ENABLED
               value: {{ .Values.authserver.dbEnc.enabled | toString | quote }}
+            - name: SPREE_ENABLE_COLUMN_ENCRYPTION
+              value: {{ .Values.authserver.dbEnc.columnEncryptionEnabled | toString | quote }}
+            - name: SPREE_ENABLE_INTEGRITY_CHECK
+              value: {{ .Values.authserver.dbEnc.integrityChecksEnabled | toString | quote }}
+            - name: SPREE_ENABLE_INTEGRITY_ROW_CHECK
+              value: {{ .Values.authserver.dbEnc.integrityRowChecksEnabled | toString | quote }}
+            - name: SPREE_ENABLE_INTEGRITY_TABLE_CHECK
+              value: {{ .Values.authserver.dbEnc.integrityTableChecksEnabled | toString | quote }}
             - name: SPREE_ENCRYPTED_REALM
               value: "zeta-guard"
             - name: SPREE_BOOTSTRAP_INTERVAL
@@ -347,7 +454,11 @@ spec:
             - name: SPREE_BOOTSTRAP_ATTEMPTS
               value: {{ .Values.authserver.dbEnc.bootstrapAttempts | toString | quote }}
             - name: SPREE_SHUTDOWN_ON_ERROR
-              value: "true"
+              value: {{ .Values.authserver.dbEnc.shutdownOnError | toString | quote }}
+            - name: SPREE_PERIODIC_ROW_CHECK
+              value: {{ .Values.authserver.dbEnc.periodicRowChecksEnabled | toString | quote }}
+            - name: SPREE_LOCKDOWN_ON_ERROR
+              value: {{ .Values.authserver.dbEnc.lockdownOnError | toString | quote }}
             {{- end }}
             {{- if .Values.authserver.hsm.tokenSigning.enabled }}
             - name: HSM_PROXY_TOKEN_KEY_ID
@@ -495,6 +606,17 @@ spec:
               mountPath: /opt/keycloak/conf/truststores/infinispan
               readOnly: true
             {{- end }}
+            {{- if .Values.authserver.additionalTrustedCAs }}
+            # Keycloak auto-imports every certificate under conf/truststores.
+            - name: additional-trusted-cas
+              mountPath: /opt/keycloak/conf/truststores/additional-cas
+              readOnly: true
+            {{- end }}
+            {{- if $sekidpMtlsOn }}
+            - name: sekidp-client-mtls
+              mountPath: /opt/keycloak/conf/sekidp-client
+              readOnly: true
+            {{- end }}
             {{- with .Values.authserver.container.extraVolumeMounts }}
             {{- tpl (toYaml .) $ | nindent 12 }}
             {{- end }}
@@ -523,6 +645,38 @@ spec:
           configMap:
             name: infinispan-ca-cert
             defaultMode: 0444
+        {{- end }}
+        {{- if .Values.authserver.additionalTrustedCAs }}
+        - name: additional-trusted-cas
+          projected:
+            sources:
+              {{- range $i, $ca := .Values.authserver.additionalTrustedCAs }}
+              {{- if and $ca.secretName $ca.cert }}
+              {{- fail (printf "authserver.additionalTrustedCAs[%d]: set either secretName+secretKey or cert, not both" $i) }}
+              {{- else if $ca.secretName }}
+              - secret:
+                  name: {{ $ca.secretName }}
+                  items:
+                    - key: {{ required (printf "authserver.additionalTrustedCAs[%d]: secretKey is required when secretName is set" $i) $ca.secretKey }}
+                      path: {{ printf "ca-%d.pem" $i }}
+              {{- else if $ca.cert }}
+              - secret:
+                  name: authserver-additional-cas
+                  items:
+                    - key: {{ printf "ca-%d.pem" $i }}
+                      path: {{ printf "ca-%d.pem" $i }}
+              {{- else }}
+              {{- fail (printf "authserver.additionalTrustedCAs[%d]: must set either secretName+secretKey or cert" $i) }}
+              {{- end }}
+              {{- end }}
+        {{- end }}
+        {{- if $sekidpMtlsOn }}
+        - name: sekidp-client-mtls
+          secret:
+            secretName: {{ $sekidpMtls.keystore.secretName }}
+            items:
+              - key: {{ required "authserver.sekidp.mtls.keystore.secretKey is required when sekidp mTLS is enabled" $sekidpMtls.keystore.secretKey }}
+                path: keystore.p12
         {{- end }}
         {{- with .Values.authserver.extraVolumes }}
         {{- tpl (toYaml .) $ | nindent 8 }}

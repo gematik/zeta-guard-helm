@@ -41,8 +41,8 @@ authenticate() {
   response=$(curl "${CURL_OPTS[@]}" -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
     -d "grant_type=password" \
     -d "client_id=admin-cli" \
-    -d "username=${KC_USERNAME}" \
-    -d "password=${KC_PASSWORD}" 2>&1) || {
+    --data-urlencode "username=${KC_USERNAME}" \
+    --data-urlencode "password=${KC_PASSWORD}" 2>&1) || {
       echo "ERROR: Failed to authenticate against Keycloak at ${KC_URL}" >&2
       echo "${response}" >&2
       exit 1
@@ -61,7 +61,7 @@ ensure_es256_key() {
   local realm="$1"
 
   local components
-  components=$(curl "${CURL_OPTS[@]}" -H "Authorization: Bearer ${TOKEN}" \
+  components=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     "${KC_URL}/admin/realms/${realm}/components?type=org.keycloak.keys.KeyProvider")
 
   if echo "$components" | jq -e '.[] | select(.providerId == "ecdsa-generated")' >/dev/null; then
@@ -71,15 +71,15 @@ ensure_es256_key() {
 
   # parentId of a realm-level component is the realm's internal id
   local realm_id
-  realm_id=$(curl "${CURL_OPTS[@]}" -H "Authorization: Bearer ${TOKEN}" \
+  realm_id=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     "${KC_URL}/admin/realms/${realm}" | jq -r '.id')
 
   echo "Creating ES256 key provider in realm ${realm}"
   local code
   code=$(curl "${CURL_OPTS[@]}" -o /dev/null -w "%{http_code}" \
-    -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+    --oauth2-bearer "${TOKEN}" \
     -X POST "${KC_URL}/admin/realms/${realm}/components" \
-    -d "{
+    --json "{
       \"name\": \"ES256-generated-key\",
       \"providerId\": \"ecdsa-generated\",
       \"providerType\": \"org.keycloak.keys.KeyProvider\",
@@ -102,7 +102,7 @@ ensure_default_sig_es256() {
   local realm="$1"
 
   local current
-  current=$(curl "${CURL_OPTS[@]}" -H "Authorization: Bearer ${TOKEN}" \
+  current=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     "${KC_URL}/admin/realms/${realm}" | jq -r '.defaultSignatureAlgorithm')
 
   if [[ "$current" == "ES256" ]]; then
@@ -113,13 +113,13 @@ ensure_default_sig_es256() {
   echo "Setting defaultSignatureAlgorithm=ES256 in realm ${realm} (was ${current})"
   local tmp
   tmp=$(mktemp)
-  curl "${CURL_OPTS[@]}" -H "Authorization: Bearer ${TOKEN}" "${KC_URL}/admin/realms/${realm}" \
+  curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" "${KC_URL}/admin/realms/${realm}" \
     | jq '.defaultSignatureAlgorithm = "ES256"' > "$tmp"
 
   local code
   code=$(curl "${CURL_OPTS[@]}" -o /dev/null -w "%{http_code}" \
-    -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
-    -X PUT "${KC_URL}/admin/realms/${realm}" -d @"$tmp")
+    --oauth2-bearer "${TOKEN}" \
+    -X PUT "${KC_URL}/admin/realms/${realm}" --json @"$tmp")
   rm -f "$tmp"
 
   if [[ "$code" != "204" ]]; then
@@ -133,7 +133,7 @@ remove_rsa_keys() {
   local realm="$1"
 
   local components
-  components=$(curl "${CURL_OPTS[@]}" -H "Authorization: Bearer ${TOKEN}" \
+  components=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     "${KC_URL}/admin/realms/${realm}/components?type=org.keycloak.keys.KeyProvider")
 
   local ids
@@ -147,7 +147,7 @@ remove_rsa_keys() {
 
     local code
     code=$(curl "${CURL_OPTS[@]}" -o /dev/null -w "%{http_code}" \
-      -H "Authorization: Bearer ${TOKEN}" -X DELETE \
+      --oauth2-bearer "${TOKEN}" -X DELETE \
       "${KC_URL}/admin/realms/${realm}/components/${id}")
 
     # A 401 means the token was invalidated by deleting an active signing key —
@@ -155,7 +155,7 @@ remove_rsa_keys() {
     if [[ "$code" == "401" ]]; then
       authenticate
       code=$(curl "${CURL_OPTS[@]}" -o /dev/null -w "%{http_code}" \
-        -H "Authorization: Bearer ${TOKEN}" -X DELETE \
+        --oauth2-bearer "${TOKEN}" -X DELETE \
         "${KC_URL}/admin/realms/${realm}/components/${id}")
     fi
 

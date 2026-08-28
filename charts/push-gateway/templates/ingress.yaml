@@ -1,0 +1,42 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* NIC mergeable minion for push-gateway — mirrors charts/sekidp's ingress pattern */ -}}
+---
+{{- if .Values.ingressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: push-gateway
+  labels:
+    app: push-gateway
+    app.kubernetes.io/name: push-gateway
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /push-gateway
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}push-gateway{{ end }}
+                port:
+                  {{- if .Values.routeViaTigerProxy }}
+                  number: 80
+                  {{- else }}
+                  name: api
+                  {{- end }}
+{{- end }}

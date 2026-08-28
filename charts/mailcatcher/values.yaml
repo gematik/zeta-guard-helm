@@ -1,0 +1,51 @@
+global:
+  imagePullSecrets: []
+
+# Third-party image pulled directly — does NOT consult global.registry_host/name.
+# Verify it resolves (or mirror/build your own) and point image.* at what you trust.
+image:
+  repository: dockage/mailcatcher
+  tag: "0.9.0"
+  # When set, fully overrides the repository above (full prefix, trailing slash).
+  registry: ""
+  # Optional digest (e.g. "sha256:...") appended as @<digest>, in addition to tag.
+  digest: ""
+imagePullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Service ports only — the container listens on fixed ports 1025 (SMTP)
+# and 1080 (web UI).
+service:
+  smtpPort: 1025
+  httpPort: 1080
+
+# Web UI prefix, passed to mailcatcher's `--http-path`. Its HTML emits assets
+# relative to this, so it must match the reverse-proxy route's `from`
+# (e.g. tiger-proxy's /mailcatcher) or assets 404. Leave empty ("") for direct access.
+httpPath: ""
+
+# When enabled, injects a changing annotation to force pod rollouts
+# on each helm upgrade/apply even if image tag is unchanged.
+devMode: false
+
+serviceAccount:
+  create: true
+  name: mailcatcher
+
+resources: {}
+
+podDisruptionBudget:
+  enabled: false
+  # minAvailable: 1
+  # maxUnavailable: 1
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext: {}
+#  allowPrivilegeEscalation: false
+#  readOnlyRootFilesystem: true
+#  runAsNonRoot: true
+#  capabilities:
+#    drop: [ "ALL" ]

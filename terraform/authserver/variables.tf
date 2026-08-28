@@ -35,7 +35,7 @@ variable "keycloak_namespace" {
 variable "keycloak_username" {
   description = "Keycloak admin username (required when use_kubernetes = false)"
   type        = string
-  default     = "admin"
+  default     = ""
   sensitive   = true
 }
 
@@ -104,6 +104,75 @@ variable "pdp_scopes" {
 
 variable "use_vau_db_enc" {
   description = "Whether to apply client side encryption to this realm. Use recommended only if you have to run in a trusted execution environment (German VAU)."
+  type        = bool
+  default     = false
+}
+
+variable "use_fake_sekidp_testrealm" {
+  description = "NEVER USE IN PRODUCTION. Whether to create a very basic fake sekIdP realm. This var will probably only have use intermittently."
+  type        = bool
+  default     = false
+}
+
+variable "dummy_client_for_fake_sekidp_clientsecret" {
+  description = "NEVER USE IN PRODUCTION. Client Secret for the dummy client for testing with the fake sekIdp"
+  type        = string
+  default     = ""
+}
+
+variable "dummy_user_for_fake_sekidp_password" {
+  description = "NEVER USE IN PRODUCTION. Password for the dummy user for testing with the fake sekIdp"
+  type        = string
+  default     = ""
+}
+
+variable "enable_sekidp" {
+  description = "Register the zeta-sekidp-oidc IdP, mobile browser/first-login flows, entity-statement keys, and email-binding scopes"
+  type        = bool
+  default     = false
+}
+
+variable "sekidp_fedmaster_url" {
+  description = "Fedmaster URL the zeta-sekidp-oidc IdP uses to resolve federation trust. Must be the externally-reachable Ingress URL (e.g. https://<host>/sekidp-fedmaster) matching sekidp.fedmaster.env.serverUrl, not the in-cluster Service URL — authserver fetches Fedmaster's entity statement from this URL, and it must equal Fedmaster's own published issuer for self-consistency."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_host" {
+  description = "SMTP server host for the realm's smtpServer config (email-binding OTP delivery, e.g. mailcatcher). Empty omits the smtp_server block entirely."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  description = "SMTP server port"
+  type        = string
+  default     = "25"
+}
+
+variable "smtp_from" {
+  description = "Sender address for realm emails — required by Keycloak whenever smtp_host is set (DefaultEmailSenderProvider.checkFromAddress rejects a missing/invalid from)"
+  type        = string
+  default     = ""
+}
+
+# Keep in sync with notificationService.wellKnownResourceSuffix in the Helm chart (not
+# wired together). Forms the NS token aud; a mismatch breaks NS token validation.
+variable "notification_service_resource_suffix" {
+  description = "Path suffix appended to the Guard's public base URL to form the Notification Service's resource identifier (aud). Must match notificationService.wellKnownResourceSuffix in the Helm chart values."
+  type        = string
+  default     = "/notification-service"
+
+  validation {
+    condition     = can(regex("^/", var.notification_service_resource_suffix))
+    error_message = "notification_service_resource_suffix must start with '/'."
+  }
+}
+
+# Keep in sync with notificationService.historyEnabled in the Helm chart (not wired
+# together). Gates the notification.history.read Keycloak scope (A_29974).
+variable "notification_history_enabled" {
+  description = "Whether the Notification Service history feature (A_29974) is enabled. When true, the notification.history.read scope is created in Keycloak. Must match notificationService.historyEnabled in the Helm chart values."
   type        = bool
   default     = false
 }

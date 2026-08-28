@@ -1,0 +1,81 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Minion of ingress-master.yaml: /auth on the public hostname. Realm endpoints
+     (token, well-known, login) must stay reachable here whether or not a dedicated admin
+     hostname exists; what must not be reachable is denied in the location snippet below.
+
+     Its own ingress rather than a path on the PEP minion, because NIC applies lb-method,
+     ssl-services and location-snippets per *minion*: sharing one minion with the PEP
+     forced those annotations onto both upstreams. */ -}}
+{{- if .Values.ingressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeta-guard-auth
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    {{- if .Values.nginxIngressLbMethod }}
+    {{- /* Required, not an optimisation: zeta-guard-nonce keeps nonces per node, so a
+         nonce must be redeemed on the replica that issued it. The $zeta_route map is an
+         http-snippet (see values.yaml) and falls back to $request_id when the cookie is
+         absent, so first requests still spread across replicas. */}}
+    nginx.org/lb-method: "hash $zeta_route consistent"
+    {{- end }}
+    {{- if and (or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled) (not .Values.routeViaTigerProxy) }}
+    nginx.org/ssl-services: "authserver"
+    {{- end }}
+    {{- /* Nested in the prefix location NIC generates for /auth below (legal: nginx only
+         refuses locations nested in a regex or exact-match parent). Regex, so they hold
+         for any realm name and win over the enclosing prefix. 404, not 403: no need to
+         confirm that these endpoints exist. */}}
+    nginx.org/location-snippets: |
+      # Session revocation is intra-cluster only — the PEPs reach it directly at
+      # http://authserver/auth/... . The SSE stream could not traverse this ingress
+      # anyway: proxy_buffering plus postpone_output withhold the response head until
+      # 1460 bytes accumulate, which a trickle of events never reaches.
+      location ~ ^/auth/realms/[^/]+/zeta-guard-revocation {
+          return 404;
+      }
+      {{- if .Values.authserver.adminHostname }}
+      # Admin REST API and console are reachable on authserver.adminHostname instead.
+      # Without an admin hostname they stay available here, since otherwise there would
+      # be no way to reach them at all.
+      location ~ ^/auth/admin {
+          return 404;
+      }
+      {{- end }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.authserver.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    - {{- if .Values.authserver.hostname }}
+      host: {{ .Values.authserver.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.routeViaTigerProxy }}
+                name: tiger-proxy
+                port:
+                  number: 80
+                {{- else }}
+                name: authserver
+                port:
+                  {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
+                  name: https
+                  {{- else }}
+                  name: http
+                  {{- end }}
+                {{- end }}
+{{- end }}

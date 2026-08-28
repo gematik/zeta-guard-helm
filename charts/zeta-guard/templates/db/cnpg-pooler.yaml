@@ -1,0 +1,23 @@
+{{- if and (eq .Values.databaseMode "cloudnative") .Values.cloudnativePg.pooler.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: keycloak-db-pooler
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  cluster:
+    name: keycloak-db
+  instances: {{ .Values.cloudnativePg.pooler.instances | default 1 }}
+  type: {{ .Values.cloudnativePg.pooler.type | default "rw" | quote }}
+  pgbouncer:
+    poolMode: {{ .Values.cloudnativePg.pooler.poolMode | default "session" | quote }}
+    {{- with .Values.cloudnativePg.pooler.parameters }}
+    parameters:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with .Values.cloudnativePg.pooler.template }}
+  template:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

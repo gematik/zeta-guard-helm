@@ -4,7 +4,8 @@ This chart uses F5 NGINX Ingress Controller (NIC) mergeable Ingresses by
 default:
 
 - Master (`zeta-guard`) holds TLS and annotations (no paths)
-- Minions (`zeta-guard-minion`, `testdriver`, `test-monitoring-ingress`) hold
+- Minions (`zeta-guard-pep`, `zeta-guard-auth`, `testdriver`,
+  `test-monitoring-ingress`) hold
   routing rules for the same host/class
 
 ## Prerequisites
@@ -35,8 +36,19 @@ default:
       paths.
     - For WebSocket upgrade support on routed services, ensure minion ingresses
       include NIC websocket annotations that match the actually routed backends:
-        - `zeta-guard-minion`: `"tiger-proxy"` when `routeViaTigerProxy=true`,
-          otherwise `"pep-proxy-svc"`
+        - `zeta-guard-pep`: `"tiger-proxy"` when `routeViaTigerProxy=true`.
+          Without Tiger routing, the annotation placement depends on how the
+          resource-server paths are configured:
+            - with `pepproxy.nginxConf.proxyLocations` entries marked
+              `websocket: true` (preferred), a dedicated `zeta-guard-ws-minion`
+              carries the annotation for exactly those paths — the main
+              minion's locations then keep NIC→PEP connection keepalive
+              (a blanket annotation forces `Connection: close` on every
+              non-WebSocket request, which exhausts the NIC's ephemeral
+              ports under load)
+            - with only the legacy raw `locations` config, the main minion
+              carries a blanket `"pep-proxy-svc"` annotation (all pep paths
+              get WebSocket handling, no upstream keepalive)
         - `testdriver`: `"tiger-proxy,testdriver"` when
           `routeViaTigerProxy=true`, otherwise `"testdriver"`
 
@@ -47,15 +59,17 @@ default:
 ## Verify
 
 - Master and minions exist and share host/class:
-    - `kubectl -n <ns> get ingress zeta-guard zeta-guard-minion testdriver 
-    test-monitoring-ingress -o wide`
+    - `kubectl -n <ns> get ingress zeta-guard zeta-guard-pep zeta-guard-auth
+    testdriver test-monitoring-ingress -o wide`
 
 - Paths:
     - WebSocket annotations present on minions (required for WS upgrade
       passthrough):
-        - `kubectl -n <ns> get ingress zeta-guard-minion testdriver -o yaml 
+        - `kubectl -n <ns> get ingress zeta-guard-pep testdriver -o yaml 
         | rg websocket-services`
     - `/auth` → `authserver` (or `tiger-proxy` when routing via Tiger)
+    - `/auth/admin` → `pep-proxy-svc`, answering `403` (only with
+      `adminHostname` set and `routeViaTigerProxy: false`)
     - `/` → `pep-proxy-svc` (or `tiger-proxy` when routing via Tiger)
     - `/proxy` and `/testdriver-api` → owned by `testdriver` minion
 - TLS policy:
@@ -66,28 +80,42 @@ default:
 ## Protecting the Admin API via a separate hostname
 
 When `zeta-guard.authserver.adminHostname` is set, the chart creates two
-additional Ingress resources and activates admin API blocking inside the PEP
-proxy:
+additional Ingress resources and activates admin API blocking on the main
+hostname:
 
 | Resource                    | Purpose                                                            |
 |-----------------------------|--------------------------------------------------------------------|
 | `zeta-guard-admin` (master) | TLS-terminating ingress for `adminHostname`                        |
-| `zeta-guard-admin-minion`   | Routes `/auth` on `adminHostname` → `authserver` directly (no PEP) |
+| `zeta-guard-admin-auth`     | Routes `/auth` on `adminHostname` → `authserver` directly (no PEP) |
 
-On the **main hostname**, the `/auth` Ingress path is removed — all traffic
-falls through to the `/` catch-all which routes to `pep-proxy-svc`. Inside the
-PEP proxy, a `location ~ ^/auth/admin` block returns `403`, and a
-`location /auth` block proxies all other auth requests directly to `authserver`
-without token enforcement.
+On the **main hostname**, `/auth` keeps routing to `authserver` via the
+`zeta-guard-auth` minion — the realm endpoints (token, nonce, registration,
+well-known) must stay reachable there. Only `/auth/admin` is peeled off: the
+`zeta-guard-pep` minion gains a `/auth/admin` path pointing at `pep-proxy-svc`,
+where a `location ~ ^/auth/admin` block returns `403`.
+
+That works because both nginx and the Ingress specification resolve overlapping
+prefixes **longest-match-first**, independent of declaration order — so
+`/auth/admin` wins over `/auth`. Since it relies on nothing but plain Ingress
+path routing, the block holds for F5 NIC, standard nginx-ingress, OpenShift
+Routes, GKE Ingress and any other controller.
+
+With F5 NIC a second, redundant layer exists: `zeta-guard-auth` carries a
+`nginx.org/location-snippets` annotation that returns `404` for `/auth/admin`
+nested inside its `/auth` location. It is shadowed by the longer `/auth/admin`
+prefix above, and only takes effect when that path is absent — i.e. with
+`routeViaTigerProxy: true`.
 
 **Relationship with `routeViaTigerProxy`**
 
-When `routeViaTigerProxy: true`, both `/auth` and `/` already route to
-tiger-proxy via the main ingress. Tiger-proxy internally routes
-`/auth → http://authserver/auth`, bypassing the PEP proxy location blocks.
-Admin API blocking therefore **does not take effect** in tiger-proxy
-environments. Tiger-proxy is a test tool only — production deployments use
-`routeViaTigerProxy: false`.
+When `routeViaTigerProxy: true`, both `/auth` and `/` route to tiger-proxy,
+which internally forwards `/auth → http://authserver/auth` and bypasses the PEP
+entirely. The `/auth/admin` path is therefore **not** rendered in that mode, and
+the controller-agnostic block does not apply. With F5 NIC the
+`location-snippets`
+layer still returns `404`; with any other controller `/auth/admin` stays
+reachable on the main hostname. Tiger-proxy is a test tool only — production
+deployments use `routeViaTigerProxy: false`.
 
 **DNS for the admin hostname**
 
@@ -113,7 +141,9 @@ rolling restart. Convention: `YYYY-MM-DD-<short-tag>`.
   on the NIC Service for healthy probes.
 - External controller: disable bundled NIC via
   `zeta-guard.nginxIngressEnabled: false` and set only
-  `zeta-guard.ingressClassName` to the cluster’s class.
+  `zeta-guard.ingressClassName` to the cluster’s class. If that NIC lacks the
+  `$zeta_route` http-snippets, also set `zeta-guard.nginxIngressLbMethod: false`
+  so the sticky-session lb-method is not rendered.
 - Minions must not duplicate the same path+host across Ingresses; define each
   path in exactly one minion.
 

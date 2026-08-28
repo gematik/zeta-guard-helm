@@ -1,0 +1,64 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- if .Values.ingressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeta-guard-pep
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    {{- if or .Values.routeViaTigerProxy (eq (include "zeta-guard.ingress-ws-paths" .) "[]") }}
+    {{- /* service-scoped: forces Connection:$connection_upgrade (-> "close" for
+         non-WS requests) on EVERY location of this service, defeating upstream
+         keepalive — declare websocket proxyLocations to confine it to the
+         dedicated ws minion */}}
+    nginx.org/websocket-services: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "pep-proxy-svc" }}
+    {{- end }}
+    {{- if .Values.nginxIngressLbMethod }}
+    nginx.org/lb-method: "hash $zeta_route consistent"
+    {{- end }}
+    {{- end }}
+    {{- with .Values.ingressMinionAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.authserver.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    - {{- if .Values.authserver.hostname }}
+      host: {{ .Values.authserver.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- if and .Values.authserver.adminHostname (not .Values.routeViaTigerProxy) }}
+          {{- /* Admin REST API and console are denied here and reachable on
+               authserver.adminHostname instead. Routed to the PEP — which answers 403 (see
+               _pep-nginx-conf.tpl) — rather than denied via a NIC location-snippet, so the
+               block also holds for standard nginx-ingress, OpenShift Routes, GKE Ingress
+               and any other controller: plain Ingress path routing is all it relies on.
+               Wins over the /auth path of the zeta-guard-auth minion because both nginx
+               and the Ingress spec resolve overlapping prefixes longest-match-first,
+               independent of declaration order. */}}
+          - path: /auth/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "pep-proxy-svc" }}
+                port:
+                  number: 80
+{{- end }}

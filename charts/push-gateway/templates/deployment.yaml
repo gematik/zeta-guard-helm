@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-gateway
+  labels:
+    {{- include "push-gateway.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "push-gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "push-gateway.labels" . | nindent 8 }}
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Postgres..."
+              while ! nc -z push-gateway-postgres 5432; do sleep 2; done
+              echo "Postgres ready"
+              echo "Waiting for Artemis broker..."
+              while ! nc -z push-gateway-artemis 61616; do sleep 2; done
+              echo "Artemis ready"
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      containers:
+        - name: push-gateway
+          image: "{{ include "push-gateway.image" . }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          ports:
+            # Fixed container ports; service.apiPort/managementPort only set Service ports.
+            - name: api
+              containerPort: 8080
+            - name: management
+              containerPort: 8081
+          env:
+            - name: APP_MODE
+              value: {{ .Values.appMode | quote }}
+            - name: LOGGING_LEVEL_ROOT
+              value: {{ .Values.logLevel | quote }}
+            - name: GATLING_ENABLED
+              value: "false"
+            - name: PUSH_CONFIG_FILE
+              value: "file:/config/push-config.yaml"
+            - name: JMS_BROKER_URL
+              value: "tcp://push-gateway-artemis:61616"
+            - name: JMS_BROKER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: push-gateway-artemis
+                  key: username
+            - name: JMS_BROKER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: push-gateway-artemis
+                  key: password
+            - name: POSTGRES_URL
+              value: "jdbc:postgresql://push-gateway-postgres:5432/{{ .Values.postgres.credentials.database }}"
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: push-gateway-postgres
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: push-gateway-postgres
+                  key: password
+            - name: OTEL_SDK_DISABLED
+              value: {{ .Values.opentelemetry.enabled | ternary "false" "true" | quote }}
+          {{- if .Values.opentelemetry.enabled }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.opentelemetry.serviceName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.opentelemetry.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.opentelemetry.protocol | quote }}
+            {{- with .Values.opentelemetry.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ include "push-gateway.otelResourceAttributes" . | quote }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: push-config
+              mountPath: /config/push-config.yaml
+              subPath: push-config.yaml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: push-config
+          configMap:
+            name: push-gateway-config
+        - name: tmp
+          emptyDir: { }

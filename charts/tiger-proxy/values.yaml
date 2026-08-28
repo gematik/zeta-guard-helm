@@ -3,6 +3,9 @@ global:
   registry: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
   enableDNSRedirect: false
+  # Istio PeerAuthentication resources
+  istio:
+    enabled: false
   dns:
     tigerStaticClusterIP: "10.96.3.11"
     redirects:
@@ -24,7 +27,7 @@ replicaCount: 1
 devMode: false
 
 image:
-  tag: 1.2.0
+  tag: fork-1.3.0
   repository: testproxy
 imagePullPolicy: Always
 
@@ -86,6 +89,7 @@ proxyConfig:
   proxyRoutes:
     - from: /testfachdienst
       to: https://testfachdienst:443
+      preserveHostHeader: true
     - from: /auth
       to: http://authserver/auth
     - from: /proxy

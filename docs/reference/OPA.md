@@ -91,8 +91,8 @@ PEP).
 - Update the payload for different instances (opa-active vs. opa-simulation):
   ```bash
   PAYLOAD='{"input":{"authorization_request":{"scopes":["test_scope_read"],"audience":["https://example.com/testresource"],"grant_type":"urn:ietf:params:oauth:grant-type:token-exchange","ip_address":"172.18.0.4"},"user_info":{"professionOID":"1.2.276.0.76.4.50"},"client_assertion":{"posture":{"product_id":"ZETA-Test-Client","product_version":"1.0.0"}}}}'
-  curl -sS -H 'Content-Type: application/json' -d "$PAYLOAD" http://localhost:8181/v1/data/policies/zeta/authz/decision
-  curl -sS -H 'Content-Type: application/json' -d "$PAYLOAD" http://localhost:8182/v1/data/policies/zeta/authz/decision
+  curl -sS --json "$PAYLOAD" http://localhost:8181/v1/data/policies/zeta/authz/decision
+  curl -sS --json "$PAYLOAD" http://localhost:8182/v1/data/policies/zeta/authz/decision
   ```
 
 ## Endpoints
@@ -157,6 +157,108 @@ Notes
 - If the Secret is missing or empty, OPA will try anonymous pulls and likely fail with 401/403. There is no automatic fallback; set `zeta-guard.opa.bundle.enabled=false` to use inline policy.
 - The status plugin may log 404/502 when pointed at a registry; this is benign. To silence, set `opaStatusPrometheus: false`.
 
+### CA certificate for a private registry
+
+If the registry's TLS certificate is issued by a CA that is not publicly
+trusted, OPA fails the pull with
+`x509: certificate signed by unknown authority`. Provide the CA via
+`zeta-guard.provisioningProcessor.provisioningContainerCaSecretRef` (or
+`...CaConfigMapRef`) — the same reference already used for the provisioning data
+image. The chart mounts it into the `opa` and `opa-simulation` containers at
+`/var/registry-ca/ca.crt` and renders:
+
+```yaml
+services:
+  <serviceName>:
+    tls:
+      ca_cert: "/var/registry-ca/ca.crt"
+      system_ca_required: true
+```
+
+`system_ca_required: true` appends the CA to the image's system trust store, so
+enabling it cannot break a publicly trusted registry. Details and the
+Secret/ConfigMap
+variants: [How to Use a Custom OCI Registry](../how-to_guides/How_to_use_a_custom_OCI_registry.md).
+
+### Bundle download failures
+
+By default, OPA stays `Running` and reports Ready even when no bundle could be
+downloaded or activated. Nothing in the pod status reflects it — the only
+signals
+are the `Bundle load failed` console log line, OPA's status updates (which carry
+the bundle status but go only to the telemetry gateway unless
+`opa.logStatusUpdates: true`), and the status metrics when `opaStatusPrometheus`
+is enabled.
+Set `zeta-guard.opa.bundleHealthCheck: true` to switch the readiness probe to
+`/health?bundles=true`, so the pod becomes `NotReady` until a bundle is active.
+The liveness probe stays on `/health` (a registry outage must not CrashLoop the
+pod).
+
+Off by default, because the protection is not free. During a rolling update the
+previous pod keeps serving and the rollout simply stalls — a broken bundle
+configuration cannot replace a working OPA. A *freshly scheduled* pod, however
+(node drain, restart, scale-up), stays `NotReady` for as long as the registry is
+unreachable, and at `replicaCount: 1` that takes OPA out of service. Since the
+gate is fail-closed either way (next section), the choice is between a visible
+outage and a silent one.
+
+Note that OPA answers `/health?bundles=true` with **500** `one or more bundles 
+are not activated`.
+
+### Missing policy is fail-closed
+
+A missing bundle never results in tokens being issued, with or without
+`bundleHealthCheck`. A query against a package that was never loaded returns
+HTTP 200 with no `result` field; the authserver maps that — and an unreachable
+OPA - to `temporarily_unavailable` / HTTP 503, so the token exchange is refused.
+See `OpaDecisionClient.parseDecision` and `OpaGateEnforcer.mapDecisionToOutcome`
+in the `smc-b-token-exchange` plugin. `bundleHealthCheck` therefore does not
+change security behavior; it only makes an already-failing state visible in
+`kubectl get pods` instead of only in the OPA log.
+
+---
+
+## Rollout Restart
+
+Goal: periodically restart the `opa` (and, if enabled, `opa-simulation`)
+Deployment via `kubectl rollout restart`, without requiring a helm upgrade.
+Disabled by default.
+
+Values (example):
+```yaml
+zeta-guard:
+  opa:
+    rolloutRestart:
+      enabled: true
+      schedule: "0 3 * * *"   # default: daily at 3am, Europe/Berlin
+```
+
+How it works
+- A CronJob (`opa-rollout-restart-cronjob`) runs `kubectl rollout restart
+  deployment/opa`, and additionally `deployment/opa-simulation` when
+  `opa.simulation.enabled` is `true` (the default) — both are treated 1:1,
+  since `opa-simulation` is what gematik uses to test policies before they go
+  into `opa`.
+- The schedule's timezone is fixed to `Europe/Berlin` (`spec.timeZone` on the
+  CronJob), independent of the cluster's default timezone.
+- The container reuses `provisioningProcessor.image` (which includes
+  `kubectl`) and `provisioningProcessor.containerSecurityContext`, instead of
+  a separate, generic CI tooling image.
+
+Notes
+- By default the chart creates its own ServiceAccount and minimal RBAC
+  (`get`/`patch`, scoped to the `opa`/`opa-simulation` Deployments only —
+  see `opa-rollout-restart-serviceaccount.yaml` and
+  `opa-rollout-restart-rbac.yaml`). Set
+  `opa.rolloutRestart.serviceAccountName` to use an externally
+  pre-provisioned ServiceAccount instead; the chart then creates no RBAC of
+  its own and expects that ServiceAccount to already have equivalent
+  `get`/`patch` rights.
+- Trigger a run manually instead of waiting for the schedule:
+  ```bash
+  kubectl -n <ns> create job --from=cronjob/opa-rollout-restart-cronjob opa-rollout-restart-test
+  ```
+
 ---
 
 ## WIF Mode (AKS → GCP STS → GAR)
@@ -166,21 +268,27 @@ Goal: pull OPA bundles from Google Artifact Registry without static tokens, usin
 Values (example):
 ```yaml
 zeta-guard:
+  gematik:
+    workloadIdentityFederation:
+      projectNumber: "<PROJECT_NUM>"
+      poolId: "aks-pool"
+      workloadIdentityProvider: "aks-provider"
   opa:
     serviceAccountName: opa
     bundle:
       enabled: true
       serviceName: gar
       url: https://europe-west3-docker.pkg.dev
-      resource: "<PROJECT_ID>/opa-bundles/zeta-authz:latest"
+      resource: "europe-west3-docker.pkg.dev/<PROJECT_ID>/opa-bundles/zeta-authz:latest"
     workloadIdentityFederation:
       enabled: true
       sts:
-        audience: "//iam.googleapis.com/projects/<PROJECT_NUM>/locations/global/workloadIdentityPools/aks-pool/providers/aks-provider"
-        tokenUrl: https://sts.googleapis.com/v1/token
-      gar:
-        host: europe-west3-docker.pkg.dev
+        sa: "<gsa>@<project>.iam.gserviceaccount.com"
 ```
+
+The STS/IAM endpoints and the `cloud-platform` scope are fixed in the
+token-renewer CronJob; the STS audience is derived from
+`gematik.workloadIdentityFederation.*`.
 
 How it works
 - A CronJob uses the projected KSA token (audience from the WIF provider) and exchanges it at GCP STS for a short‑lived access token, then impersonates a GSA to obtain a GAR‑compatible access token.

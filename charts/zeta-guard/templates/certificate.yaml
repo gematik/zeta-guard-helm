@@ -1,0 +1,83 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Explicit cert-manager Certificates for the Ingress TLS secrets.
+
+     Declared explicitly (instead of ingress-shim annotations on the master
+     Ingresses) so we can set cert-manager.io/issue-temporary-certificate,
+     which ingress-shim does not propagate from Ingress annotations. The
+     temporary self-signed certificate lets NIC complete TLS handshakes on a
+     fresh namespace before the ACME certificate exists — without it, NIC
+     rejects the handshake (tls: unrecognized name) and the HTTP-01 self check
+     can never succeed, because NIC redirects the challenge path to HTTPS. */ -}}
+{{- /* Rendered only when `issuer` or `clusterIssuer` is set. Both empty =
+     TLS secrets are managed outside this chart (documented semantics) — e.g.
+     the local/openshift stages, where the umbrella's issuers.* mechanism
+     issues the same `zeta-guard-tls` Secret via a self-signed Issuer. A
+     second Certificate here would fight it over the Secret (endless
+     re-issuance), and one pointing at a nonexistent issuer never turns
+     Ready, which stalls `helm upgrade --wait` (release resource). */ -}}
+{{- define "zeta-guard.certificateIssuerRef" -}}
+issuerRef:
+  group: cert-manager.io
+  {{- if .Values.issuer }}
+  kind: Issuer
+  name: {{ .Values.issuer | quote }}
+  {{- else }}
+  kind: ClusterIssuer
+  name: {{ .Values.clusterIssuer | quote }}
+  {{- end }}
+{{- end }}
+{{- /* "true" when a Certificate of this name exists but is NOT owned by this
+     helm release (e.g. created by ingress-shim under previous chart versions).
+     Rendering ours over it would fail helm's ownership check — which runs
+     BEFORE hooks on install AND upgrade, so a hook cannot adopt in time.
+     Instead: skip rendering for this release operation (the existing object
+     keeps serving/renewing TLS), let the post-install/post-upgrade adoption
+     hook (certificate-adopt-hook.yaml) stamp helm ownership onto it, and the
+     NEXT helm operation renders + manages it. Call with (dict "root" $
+     "name" <cert name>). */ -}}
+{{- define "zeta-guard.certificateIsForeign" -}}
+{{- $existing := lookup "cert-manager.io/v1" "Certificate" .root.Release.Namespace .name -}}
+{{- if and $existing (ne (dig "metadata" "annotations" "meta.helm.sh/release-name" "" $existing) .root.Release.Name) }}true{{- end -}}
+{{- end }}
+{{- $issuerConfigured := or .Values.issuer .Values.clusterIssuer }}
+{{- if and .Values.ingressEnabled .Values.authserver.hostname $issuerConfigured (not (and .Values.nginxIngressEnabled .Values.nginxIngressHsm)) }}
+{{- if not (include "zeta-guard.certificateIsForeign" (dict "root" $ "name" "zeta-guard-tls")) }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: zeta-guard-tls
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/issue-temporary-certificate: "true"
+spec:
+  secretName: zeta-guard-tls
+  dnsNames:
+    - {{ .Values.authserver.hostname | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  {{- include "zeta-guard.certificateIssuerRef" . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- if and .Values.ingressEnabled .Values.authserver.adminHostname $issuerConfigured (not .Values.authserver.adminTlsSecretName) }}
+{{- if not (include "zeta-guard.certificateIsForeign" (dict "root" $ "name" "zeta-guard-admin-tls")) }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: zeta-guard-admin-tls
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/issue-temporary-certificate: "true"
+spec:
+  secretName: zeta-guard-admin-tls
+  dnsNames:
+    - {{ .Values.authserver.adminHostname | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  {{- include "zeta-guard.certificateIssuerRef" . | nindent 2 }}
+{{- end }}
+{{- end }}

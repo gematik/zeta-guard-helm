@@ -29,8 +29,8 @@ COMPONENT_NAME="hsm-token-signing"
 TOKEN_RESPONSE=$(curl "${CURL_OPTS[@]}" -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password" \
   -d "client_id=admin-cli" \
-  -d "username=${KC_USERNAME}" \
-  -d "password=${KC_PASSWORD}" 2>&1) || {
+  --data-urlencode "username=${KC_USERNAME}" \
+  --data-urlencode "password=${KC_PASSWORD}" 2>&1) || {
     echo "ERROR: Failed to authenticate against Keycloak at ${KC_URL}" >&2
     echo "${TOKEN_RESPONSE}" >&2
     exit 1
@@ -44,25 +44,22 @@ if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
   exit 1
 fi
 
-AUTH=(-H "Authorization: Bearer ${TOKEN}")
-
 # ── Check if component already exists ────────────────────────────────────────
-EXISTING=$(curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+EXISTING=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
   "${KC_URL}/admin/realms/${KC_REALM}/components?type=org.keycloak.keys.KeyProvider" \
   | jq --arg pid "$PROVIDER_ID" '[.[] | select(.providerId == $pid)] | length')
 
 if [[ "$EXISTING" -gt 0 ]]; then
   # Update existing component
-  COMPONENT_ID=$(curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+  COMPONENT_ID=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     "${KC_URL}/admin/realms/${KC_REALM}/components?type=org.keycloak.keys.KeyProvider" \
     | jq -r --arg pid "$PROVIDER_ID" '[.[] | select(.providerId == $pid)] | first | .id')
 
   echo "Updating existing HSM token signing component ${COMPONENT_ID} in realm ${KC_REALM}"
-  curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+  curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     -X PUT \
-    -H "Content-Type: application/json" \
     "${KC_URL}/admin/realms/${KC_REALM}/components/${COMPONENT_ID}" \
-    -d "{
+    --json "{
       \"id\": \"${COMPONENT_ID}\",
       \"name\": \"${COMPONENT_NAME}\",
       \"providerId\": \"${PROVIDER_ID}\",
@@ -78,15 +75,14 @@ else
   echo "Creating HSM token signing component in realm ${KC_REALM}"
 
   # Get realm ID (parentId for the component)
-  REALM_ID=$(curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+  REALM_ID=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     "${KC_URL}/admin/realms/${KC_REALM}" \
     | jq -r '.id')
 
-  curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+  curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     -X POST \
-    -H "Content-Type: application/json" \
     "${KC_URL}/admin/realms/${KC_REALM}/components" \
-    -d "{
+    --json "{
       \"name\": \"${COMPONENT_NAME}\",
       \"providerId\": \"${PROVIDER_ID}\",
       \"providerType\": \"org.keycloak.keys.KeyProvider\",

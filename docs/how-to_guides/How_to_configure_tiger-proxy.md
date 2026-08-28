@@ -24,6 +24,7 @@ tiger-proxy:
     proxyRoutes:
       - from: /testfachdienst
         to: https://testfachdienst:443
+        preserveHostHeader: true
       - from: /auth
         to: http://authserver/auth
       - from: /proxy
@@ -49,7 +50,6 @@ zeta-guard:
         opaBaseUrl: "http://tiger-proxy/opa"
   pepproxy:
     nginxConf:
-      fachdienstUrl: https://tiger-proxy:80/testfachdienst
       poppIssuer: "http://tiger-proxy/popp"
   telemetry-gateway:
     config:
@@ -115,20 +115,23 @@ For direct mock routing, the same applies to `zeta-cert-validation-mock.service.
 Enable `global.enableDNSRedirect` in each environment that should route certificate AIA domains through Tiger proxy.
 
 For direct OCSP mock routing without Tiger proxy, override the static IP and give the OCSP mock service that ClusterIP.
-This is used by the achelos performance environment, where the OCSP calls cannot pass through Tiger proxy:
+The IP must be valid for the target cluster's Service CIDR. Do not copy an IP from another cluster.
+For achelos deployments the Makefile preserves the live `zeta-cert-validation-mock` Service IP before reinstalling.
+If there is no live Service, it falls back to the reserved achelos IP `10.0.0.240` and fails before Helm deploy if
+another Service already owns that IP.
 
 ```yaml
 global:
   enableDNSRedirect: true
   dns:
-    tigerStaticClusterIP: "10.96.3.12"
+    tigerStaticClusterIP: "<cluster-service-ip>"
     redirects:
       - fqdn: ehca.gematik.de
       - fqdn: ocsp-testref.root-ca.ti-dienste.de
 
 zeta-cert-validation-mock:
   service:
-    clusterIP: "10.96.3.12"
+    clusterIP: "<cluster-service-ip>"
 ```
 
 **Note**: The full list of DNS redirections (`global.dns.redirects[]`) is written to the `hosts` file of the PEP, PDP and testdriver containers.
@@ -154,7 +157,6 @@ zeta-guard:
         opaBaseUrl: "http://opa:8181"
   pepproxy:
     nginxConf:
-      fachdienstUrl: https://testfachdienst:443
       poppIssuer: http://popp-statics
   telemetry-gateway:
     config:
@@ -270,6 +272,7 @@ tiger-proxy:
     proxyRoutes:
       - from: /testfachdienst
         to: https://testfachdienst:443
+        preserveHostHeader: true
       # … other routes …
     tls:
       domainName: tiger-proxy
@@ -279,3 +282,110 @@ The `domainName` must match the hostname that clients use when calling the proxy
 still exposed on port 80, so refer to it as `https://tiger-proxy:80/testfachdienst` from the PEP proxy configuration. The
 Tiger proxy will generate a self-signed CA and per-host certificates on the fly (see section 4.4 of the Tiger
 documentation), so clients either need to trust that CA or disable certificate verification for this upstream.
+
+## Enable mTLS for direct PEP to testfachdienst traffic
+
+The `testfachdienst` chart can enable the application's `mtls` Spring profile and mount the server keystore plus the
+truststore used to verify client certificates:
+
+```yaml
+testfachdienst:
+  mtls:
+    enabled: true
+    keyStore:
+      secretName: testfachdienst-server-tls
+      key: keystore.p12
+      passwordSecretName: testfachdienst-server-tls
+      passwordSecretKey: password
+    trustStore:
+      secretName: testfachdienst-client-ca
+      key: truststore.p12
+      passwordSecretName: testfachdienst-client-ca
+      passwordSecretKey: password
+```
+
+Create the referenced Kubernetes Secrets before installing or upgrading the chart. The keystore must contain the
+testfachdienst server private key and certificate chain. The truststore must contain the CA certificates that sign the
+client certificates accepted by testfachdienst.
+
+For direct `PEP -> testfachdienst` traffic, configure nginx to present a client certificate:
+
+```yaml
+tags:
+  tiger-proxy: false
+
+zeta-guard:
+  pepproxy:
+    nginxConf:
+      proxyLocations:
+        - path: /achelos_testfachdienst/ws
+          upstream: https://testfachdienst
+          upstreamPath: /achelos_testfachdienst/ws
+          websocket: true
+          # mTLS client certificate towards testfachdienst; the anchor is
+          # reused below via *fachdienst-mtls
+          extraConfig: &fachdienst-mtls |
+            proxy_ssl_certificate /etc/nginx/fachdienst-client/tls.crt;
+            proxy_ssl_certificate_key /etc/nginx/fachdienst-client/tls.key;
+            proxy_ssl_trusted_certificate /etc/nginx/fachdienst-client/ca.crt;
+            proxy_ssl_verify on;
+            proxy_ssl_server_name on;
+        - path: /pep
+          upstream: https://testfachdienst
+          extraConfig: |
+            proxy_ssl_certificate /etc/nginx/fachdienst-client/tls.crt;
+            proxy_ssl_certificate_key /etc/nginx/fachdienst-client/tls.key;
+            proxy_ssl_trusted_certificate /etc/nginx/fachdienst-client/ca.crt;
+            proxy_ssl_verify on;
+            proxy_ssl_server_name on;
+            {{- if .Values.openshiftIngress.enabled }}
+            proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
+            {{- end }}
+        - path: /pep/achelos_testfachdienst/ws
+          upstream: https://testfachdienst
+          upstreamPath: /achelos_testfachdienst/ws
+          websocket: true
+          # SECURITY WARNING: bypassAsl makes this path public — it can be
+          # called without the ASL protocol. This is ok and desired for this
+          # test setup. If you want to copy this behaviour, make sure it is
+          # permitted by the spec of your resource server.
+          bypassAsl: true
+          extraConfig: *fachdienst-mtls
+    extraVolumes:
+      - name: fachdienst-client-cert
+        secret:
+          secretName: nginx-mtls
+          items:
+            - key: tls.crt
+              path: tls.crt
+      - name: fachdienst-client-key
+        secret:
+          secretName: nginx-mtls
+          items:
+            - key: tls.key
+              path: tls.key
+      - name: fachdienst-server-ca
+        secret:
+          secretName: nginx-mtls
+          items:
+            - key: ca.crt
+              path: ca.crt
+    extraVolumeMounts:
+      - name: fachdienst-client-cert
+        mountPath: /etc/nginx/fachdienst-client/tls.crt
+        subPath: tls.crt
+        readOnly: true
+      - name: fachdienst-client-key
+        mountPath: /etc/nginx/fachdienst-client/tls.key
+        subPath: tls.key
+        readOnly: true
+      - name: fachdienst-server-ca
+        mountPath: /etc/nginx/fachdienst-client/ca.crt
+        subPath: ca.crt
+        readOnly: true
+```
+
+The PEP client certificate must be signed by a CA in the testfachdienst truststore. If `routeViaTigerProxy` stays enabled,
+the Tiger proxy must also be able to present a trusted client certificate to `testfachdienst`; the current Tiger proxy
+chart only configures TLS for traffic into Tiger and route targets, so use direct PEP routing for mTLS unless Tiger
+outbound client-certificate support is added.

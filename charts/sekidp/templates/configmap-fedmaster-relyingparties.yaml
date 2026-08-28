@@ -1,0 +1,21 @@
+{{- if .Values.fedmaster.relyingPartyConfigs }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sekidp-fedmaster-relyingparties
+  labels:
+    {{- include "sekidp-fedmaster.labels" . | nindent 4 }}
+data:
+  application-relyingparties.yaml: |
+    fedmaster:
+      relying-party-configs:
+        {{- range .Values.fedmaster.relyingPartyConfigs }}
+        - issuer: {{ .issuer | quote }}
+          organization-name: {{ .organizationName | quote }}
+          key-config:
+            file-name: {{ .keyConfig.fileName | quote }}
+            key-id: {{ .keyConfig.keyId | quote }}
+            use: {{ .keyConfig.use | quote }}
+            x5c-in-jwks: {{ .keyConfig.x5cInJwks }}
+        {{- end }}
+{{- end }}

@@ -1,4 +1,8 @@
-# See https://github.com/open-telemetry/opentelemetry-helm-charts/blob/opentelemetry-demo-0.38.6/charts/opentelemetry-demo/values.yaml
+global:
+  istio:
+    enabled: false
+
+# See https://github.com/open-telemetry/opentelemetry-helm-charts/blob/opentelemetry-demo-0.41.0/charts/opentelemetry-demo/values.yaml
 opentelemetry-demo:
 
   components:
@@ -44,9 +48,6 @@ opentelemetry-demo:
     product-catalog:
       enabled: false
 
-    product-reviews:
-      enabled: false
-
     quote:
       enabled: false
 
@@ -62,16 +63,39 @@ opentelemetry-demo:
     kafka:
       enabled: false
 
-    llm:
-      enabled: false
-
-    postgresql:
-      enabled: false
-
     valkey-cart:
       enabled: false
 
+    agent:
+      enabled: false
+
+    astronomy-db:
+      enabled: false
+
+    chatbot:
+      enabled: false
+
+    firepit:
+      enabled: false
+
+    # flagd-ui has no default entry of its own in this chart's values.yaml
+    # (unlike the other components here) — touching it at all with just
+    # `enabled: false` fails values.schema.json's `required: [enabled,
+    # useDefault]` for the Component type, since there's no chart default to
+    # merge the missing useDefault in from. Leaving it unset entirely is
+    # the chart's own default state, which already doesn't deploy it.
+
+    mcp:
+      enabled: false
+
+    opamp-server:
+      enabled: false
+
+    telemetry-docs:
+      enabled: false
+
   opentelemetry-collector:
+    mode: deployment
     config:
       connectors:
         spanmetrics:
@@ -90,7 +114,7 @@ opentelemetry-demo:
           actions:
             - key: gematik.zeta.kind
               action: insert
-              value: monitoring
+              value: sim
         attributes/ti_siem:
           actions:
             - key: gematik.zeta.kind
@@ -102,6 +126,8 @@ opentelemetry-demo:
               action: insert
               value: spanmetrics
         # this is a workaround for https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45428
+        deltatocumulative:
+          max_stale: 48h
         resource/delete_k8s_labels:
           attributes:
             - key: app
@@ -144,8 +170,8 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - resource/delete_k8s_labels
-              - batch
               - attributes/dienst_hersteller
+              - batch
             exporters:
               - opensearch
 
@@ -155,8 +181,8 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - resource/delete_k8s_labels
-              - batch
               - attributes/gematik
+              - batch
             exporters:
               - opensearch
 
@@ -166,8 +192,8 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - resource/delete_k8s_labels
-              - batch
               - attributes/ti_siem
+              - batch
             exporters:
               - opensearch
 
@@ -176,8 +202,8 @@ opentelemetry-demo:
               - otlp/dienst_hersteller
             processors:
               - memory_limiter
-              - batch
               - attributes/dienst_hersteller
+              - batch
             exporters:
               - otlphttp/prometheus
 
@@ -186,8 +212,8 @@ opentelemetry-demo:
               - otlp/gematik
             processors:
               - memory_limiter
-              - batch
               - attributes/gematik
+              - batch
             exporters:
               - otlphttp/prometheus
 
@@ -197,6 +223,7 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - attributes/ti_siem
+              - deltatocumulative
               - batch
             exporters:
               - otlphttp/prometheus
@@ -207,10 +234,10 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - transform/set_error_status
-              - batch
               - attributes/dienst_hersteller
+              - batch
             exporters:
-              - otlp
+              - otlp_grpc/jaeger
 
           traces/ti_sim:
             receivers:
@@ -218,10 +245,10 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - transform/set_error_status
-              - batch
               - attributes/gematik
+              - batch
             exporters:
-              - otlp
+              - otlp_grpc/jaeger
 
           traces/ti_spanmetrics:
             receivers:
@@ -229,8 +256,8 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - transform/set_error_status
-              - batch
               - attributes/ti_spanmetrics
+              - batch
             exporters:
               - spanmetrics
 
@@ -239,8 +266,8 @@ opentelemetry-demo:
               - spanmetrics
             processors:
               - memory_limiter
-              - batch
               - attributes/ti_spanmetrics
+              - batch
             exporters:
               - otlphttp/prometheus
 
@@ -250,10 +277,10 @@ opentelemetry-demo:
             processors:
               - memory_limiter
               - transform/set_error_status
-              - batch
               - attributes/ti_siem
+              - batch
             exporters:
-              - otlp
+              - otlp_grpc/jaeger
 
     ports:
       otlp-dihe:

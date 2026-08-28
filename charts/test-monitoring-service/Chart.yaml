@@ -11,6 +11,18 @@ version: 0.1.0
 appVersion: "1.16.0"
 
 dependencies:
+  # opentelemetry-demo vendors its own opentelemetry-collector dependency
+  # (currently pinned at 0.165.0 by this version). Helm's `{{ define }}`
+  # template names are global across the whole release, not scoped per
+  # chart, so this MUST stay in lockstep with the opentelemetry-collector
+  # version zeta-guard's telemetry-gateway pins (charts/zeta-guard/
+  # Chart.yaml) — deploying two different versions of the same vendored
+  # chart side by side means whichever copy's templates load last silently
+  # wins the name collision for BOTH instances, and the loser's values
+  # (built from its own, different version's values.yaml/schema) get fed
+  # into template code that doesn't match, causing nil-pointer template
+  # errors. See private/docs/How_to_fix_opentelemetry-collector_version_
+  # collision.md.
   - name: opentelemetry-demo
-    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
-    version: 0.40.1
+    repository: oci://ghcr.io/open-telemetry/opentelemetry-helm-charts
+    version: 0.41.0

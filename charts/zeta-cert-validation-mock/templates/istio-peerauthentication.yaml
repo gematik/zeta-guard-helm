@@ -1,0 +1,14 @@
+{{- if .Values.global.istio.enabled }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: zeta-cert-validation-mock-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zeta-cert-validation-mock
+  mtls:
+    mode: PERMISSIVE
+{{- end }}

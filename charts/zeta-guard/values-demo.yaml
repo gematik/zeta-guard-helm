@@ -97,6 +97,13 @@ authserver:
       decisionPath: "/v1/data/policies/zeta/authz/decision"
       connectionTimeoutMs: 1000
       readTimeoutMs: 2000
+      # HTTP timeouts for the SMC-B OCSP revocation check
+      ocspConnectTimeoutMs: 1000
+      ocspReadTimeoutMs: 3000
+      # Default false (fail-open): only a REVOKED response denies; undetermined status
+      # (unreachable/timeout/unknown) is allowed so the service stays operational during
+      # an OCSP outage. Set true to also deny when the status cannot be determined.
+      ocspFailClosed: false
 
   # --- Client registration ---
   config:
@@ -161,9 +168,11 @@ authserver:
         memory: "4Gi"
 
   # --- Database connection pool ---
+  # replicaCount × maxSize (+ ~25 reserve) must stay ≤ cloudnativePg.parameters.maxConnections (100 here).
+  # Enforced at render time by templates/db/cnpg-cluster.yaml.
   dbPool:
-    minSize: 25
-    maxSize: 150
+    minSize: 10
+    maxSize: 75
 
   # --- HTTP thread pool ---
   httpPool:
@@ -174,6 +183,10 @@ authserver:
   # For production use "WARN" or higher to reduce log volume.
   log:
     level: "WARN"
+
+  # --- Startup verbosity ---
+  # true adds --verbose to the start command (full stacktraces on startup errors).
+  verbose: false
 
   # --- Probe thresholds ---
   probes:
@@ -211,6 +224,10 @@ authServerMetricsEnabled: true
 
 # Enable OpenTelemetry tracing for authserver
 authServerTracingEnabled: true
+
+# Istio PeerAuthentication resources
+istio:
+  enabled: false
 
 # ---------------------------------------------------------------------------
 # PEP-Proxy (nginx-based Policy Enforcement Point)
@@ -281,7 +298,9 @@ pepproxy:
     # Enable (true) or disable (false) no-travel enforcement
     noTravel: false
 
-    # Fachdienst URL forwarded to by the PEP
+    # Fachdienst URL forwarded to by the PEP as optional convenience variable
+    # for use in the `locations` template string.
+    # Irrelevant when using `proxyLocations`.
     fachdienstUrl: "https://fachdienst"
 
     # JWKS issuer for PoPP key validation.
@@ -319,6 +338,10 @@ pepproxy:
   affinity: {}
   tolerations: [ ]
 
+  # --- Extra volumes injected into the Deployment ---
+  extraVolumes: []
+  extraVolumeMounts: []
+
 # --- PEP-Proxy feature toggles (top-level) ---
 
 # Enable metrics endpoint (requires pepproxyMetricsExporterImage)
@@ -352,25 +375,45 @@ cloudnativeDbSchema: "public"
 # For production use instances >= 3.
 cloudnativePg:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.10-standard-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
+  imagePullPolicy: ""
   resources:
     requests:
       cpu: 500m
       memory: 512Mi
     limits:
-      cpu: "1"
+      # No cpu limit: avoids CFS throttling; cpu.request is the floor, DB can burst.
       memory: 1Gi
+  affinity: {}
+  monitoring: {}
+  # enablePDB: leave unset for the CNPG default; set false on single-instance stages
   storage:
     size: 10Gi
+    # Per-env PVC template (e.g. a specific storageClassName); empty → CNPG default
+    pvcTemplate: {}
   parameters:
     sharedBuffers: 24MB
     maxConnections: 100
+  pooler:
+    enabled: false
+  backup:
+    enabled: false
 
 # ---------------------------------------------------------------------------
 # Ingress & TLS
 # ---------------------------------------------------------------------------
 
-# cert-manager ClusterIssuer for TLS on the Ingress
+# Name of a namespace-scoped cert-manager Issuer used to obtain the Ingress TLS
+# certificate. When set, the Ingress is annotated with cert-manager.io/issuer
+# and the named Issuer must exist in the release namespace. Takes precedence over
+# clusterIssuer. Use this when governance/security policy forbids ClusterIssuers.
+# Leave empty ("") to use clusterIssuer instead.
+issuer: ""
+
+# Name of a cluster-scoped cert-manager ClusterIssuer used to obtain the Ingress
+# TLS certificate. Annotates the Ingress with cert-manager.io/cluster-issuer.
+# Used only when issuer is empty. The named ClusterIssuer must exist in the
+# cluster.
 clusterIssuer: "letsencrypt-cd"
 
 # Name of the Kubernetes Secret containing the gematik certificate chain for
@@ -383,7 +426,7 @@ imageTrustCertchainSecretRef: gematik-image-signer-test
 
 # IngressClass used by generated Ingress resources.
 # With the bundled NIC: keep equal to nginx-ingress.controller.ingressClass.name.
-# With an external controller: set to your class (e.g., gce, openshift-default).
+# With an external controller: set to your class (e.g. gce, openshift-default).
 ingressClassName: "nginx"
 
 # Deploy Ingress resources
@@ -393,6 +436,10 @@ ingressMinionAnnotations: {}
 
 # Deploy the bundled nginx-ingress controller
 nginxIngressEnabled: true
+# When true, add the cookie-based sticky-session lb-method on the minion ingress.
+# Needs the NIC to provide the $zeta_route http-snippets (the bundled subchart ships
+# them; external NICs must add them). Disable where the NIC lacks them.
+nginxIngressLbMethod: true
 
 nginx-ingress:
   controller:
@@ -409,7 +456,7 @@ nginx-ingress:
       name: nginx
     service:
       type: LoadBalancer
-      externalTrafficPolicy: Cluster
+      externalTrafficPolicy: Local
     config:
       entries:
         ssl-protocols: "TLSv1.2 TLSv1.3"
@@ -457,6 +504,15 @@ opa:
 
   # Kubernetes ServiceAccount name for OPA pods (blank = default)
   serviceAccountName: ""
+
+  # Require an activated bundle for readiness (/health?bundles=true) when bundle mode is
+  # on, so a failed bundle download surfaces as NotReady instead of staying silent.
+  bundleHealthCheck: false
+
+  # Enabled here so `make template-demo` also renders and lints the rollout-restart CronJob;
+  # the chart default is off (opt-in per stage).
+  rolloutRestart:
+    enabled: true
 
   # --- Container security context ---
   containerSecurityContext:
@@ -581,6 +637,13 @@ opaPolicy:
 # Used by authserver, OPA, OPA-simulation, and PEP-Proxy as init container.
 provisioningProcessor:
   provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
+  # Daily re-run of the provisioning processor as a resident sidecar. On here so `make template-demo` also renders and
+  # lints the sidecar branch; the chart default is off until a processor release ships SCHEDULE_TIME support.
+  # Needs Kubernetes >= 1.32 (OpenShift 4.19).
+  schedule:
+    enabled: true
+    time: "03:00"
+    timezone: "Europe/Berlin"
   # --- CA for the provisioning container registry (Option A and B are mutually exclusive) ---
   # Option A (existing default): mount the CA from a Secret. Auto-wires env var
   #           PROVISIONING_CONTAINER_REGISTRY_CA_FILE + mount /var/registry-ca/ca.crt.
@@ -638,17 +701,21 @@ provisioningProcessor:
 # Gematik connection (OIDC token renewer CronJob)
 # ---------------------------------------------------------------------------
 
-# If true, the CronJob gematik-oidc-token-renewer-cronjob maintains a valid
-# access token in the Secret gematik-oidc-token.
+# If true, the CronJob ti-sim-token-renewer-cronjob maintains a valid
+# access token in the Secret ti-sim-token.
 gematikConnectionEnabled: false
 
 gematik:
+  tiSiem:
+    serviceAccountEmailAddress: ""
+    idTokenAudience: ""
+  tiSim:
+    serviceAccountEmailAddress: ""
+    idTokenAudience: ""
   workloadIdentityFederation:
     projectNumber: ""
     poolId: ""
     workloadIdentityProvider: ""
-  serviceAccountEmailAddress: ""
-  idTokenAudience: ""
 
 # ---------------------------------------------------------------------------
 # Telemetry Gateway (OpenTelemetry Collector)
@@ -656,6 +723,13 @@ gematik:
 
 # Deploy the telemetry gateway
 telemetryGatewayEnabled: true
+
+# Fully-qualified hostname the telemetry-gateway is reached at. Empty uses the bundled
+# telemetry-gateway's bare service name; set to an FQDN (e.g.
+# <svc>.<namespace>.svc.cluster.local) when the bare name does not resolve. Changes only
+# the address — telemetry must always go to the telemetry-gateway (its redaction and
+# ti_sim/ti_siem filters are not bypassable).
+telemetryGatewayHost: ""
 
 telemetry-gateway:
   mode: deployment
@@ -682,14 +756,18 @@ telemetry-gateway:
     zipkin:
       enabled: false
   additionalLabels:
-    app.kubernetes.io/part-of: zeta-guards
+    app.kubernetes.io/part-of: zeta-guard
   config:
     exporters:
       # Override with environment-specific exporter, e.g.:
+      # otlp_grpc/ti_siem:
+      #   endpoint: https://otlp.v1.bd.prod.ccs.gematik.solutions:443
+      #   auth:
+      #     authenticator: bearertokenauth/ti-siem
       # otlp_grpc/ti_sim:
       #   endpoint: https://otlp.v1.bd.prod.ccs.gematik.solutions:443
       #   auth:
-      #     authenticator: bearertokenauth/gematik
+      #     authenticator: bearertokenauth/ti-sim
       debug: {}
     processors:
       redaction/zeta_guard:
@@ -742,13 +820,36 @@ telemetry-gateway:
 networkPolicy:
   enabled: false
 
+  # DNS egress peer for the egress NetworkPolicies. Defaults to the upstream
+  # Kubernetes / KIND kube-dns service. To target a different DNS service (e.g.
+  # OpenShift: openshift-dns / dns.operator.openshift.io/daemonset-dns=default /
+  # port 5353, since OVN-Kubernetes evaluates egress post-DNAT), set `to` to a
+  # raw peer list — it is rendered as-is and overrides namespaceSelector/
+  # podSelector. Do not override the selectors directly: Helm deep-merges maps,
+  # so a new label would be added to `k8s-app: kube-dns` (AND semantics) and
+  # match no pod. Lists like `to` are replaced wholesale, so they override
+  # cleanly.
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+    ports:
+      - port: 53
+        protocol: UDP
+      - port: 53
+        protocol: TCP
+    to: []
+
   egress:
     telemetry: # gematik telemetry data receiver (OTLP)
-      ipBlocks: [ ]               # e.g. ["<gematik-otlp-ip>/32"]
+      ipBlocks: []           # e.g. ["<gematik-otlp-ip>/32"]
     siem: # gematik SIEM
       ipBlocks: [ ]
     artifactRegistry: # ZETA Artifact Registry at gematik (OPA bundles, images)
-      ipBlocks: [ ]               # e.g. Google Artifact Registry europe-west3-docker.pkg.dev
+      ipBlocks: []            # e.g. Google Artifact Registry europe-west3-docker.pkg.dev
     providerArtifactRegistry: # provider-internal artifact registry
       ipBlocks: [ ]
     ocspCabForum: # OCSP/CRL for TLS TSPs per CAB Forum
@@ -761,11 +862,11 @@ networkPolicy:
       ipBlocks: [ ]
     popp: # PoPP service
       ipBlocks: [ ]
-      mock: false                # set true when popp-mocks subchart is deployed (allows egress to app=popp-mock pod, targetPort 8080)
+      mock: false             # set true when popp-mocks subchart is deployed (allows egress to app=popp-mock pod, targetPort 8080)
     providerInternal: # provider-internal traffic
-      allowAll: false            # true = all egress allowed (no IP filter)
+      allowAll: false         # true = all egress allowed (no IP filter)
       resourceServers:
         ipBlocks: [ ]
       telemetrySystems:
         ipBlocks: [ ]
-      podSelectors: [ ]           # cluster-local pods via podSelector+targetPort (kindnet post-DNAT); e.g. [{matchLabels: {app: testfachdienst}, port: 8080}]
+      podSelectors: []       # cluster-local pods via podSelector+targetPort (kindnet post-DNAT); e.g. [{matchLabels: {app: testfachdienst}, port: 8080}]

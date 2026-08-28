@@ -1,0 +1,79 @@
+{{- if .Values.global.istio.enabled }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: test-monitoring-grafana-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: test-monitoring-jaeger-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: test-monitoring-opensearch-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opensearch
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: test-monitoring-otelco-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: test-monitoring-prometheus-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: test-monitoring-frontend-proxy-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend-proxy
+  mtls:
+    mode: PERMISSIVE
+{{- end }}

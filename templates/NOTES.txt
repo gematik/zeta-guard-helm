@@ -1,3 +1,7 @@
+{{- $zgv := (index .Subcharts "zeta-guard").Values -}}
+{{- $host := $zgv.authserver.hostname -}}
+{{- $adminHost := $zgv.authserver.adminHostname -}}
+=============================== ZETA ENV OVERVIEW ===============================
 Thank you for installing {{ .Chart.Name }}.
 
 Your Fachdienst is at
@@ -9,8 +13,14 @@ Your Fachdienst is at
 
 and your administration frontend is at
 
-    {{- $host := (index .Subcharts "zeta-guard").Values.authserver.hostname -}}
-    {{- if $host }}
+    {{- if $adminHost }}
+
+    https://{{ $adminHost }}/auth
+
+    The admin console and admin REST API are reachable on that hostname only:
+    authserver.adminHostname is set, so /auth/admin is denied on
+    {{ $host | default "the public hostname" }} (NIC only).
+    {{- else if $host }}
 
     https://{{ $host }}/auth
     {{- else }}
@@ -19,42 +29,120 @@ and your administration frontend is at
     {{- end }}
 
 
-Deployed component versions:
 {{- $zg := (index .Subcharts "zeta-guard") }}
-  authserver:                {{ $zg.Values.authserver.image.tag | default "default" }}
+Deployed component versions
+  (release {{ .Release.Name }} · namespace {{ .Release.Namespace }})
+  chart: {{ $zg.Chart.Name }}-{{ $zg.Chart.Version }}{{ if $zg.Chart.AppVersion }} (app {{ $zg.Chart.AppVersion }}){{ end }}  ·  umbrella: {{ .Chart.Name }}-{{ .Chart.Version }}
+  images pulled from: {{ .Values.global.registry_host | default "(chart default registry)" }}
+  authserver:                {{ $zg.Values.authserver.image.tag | default "default" }}  (replicas: {{ $zg.Values.authserver.replicaCount | default 1 }})
     hsm:            {{ $zg.Values.authserver.hsm.enabled | ternary "enabled" "disabled" }}
     hsm-tls:        {{ $zg.Values.authserver.hsm.tls.enabled | ternary "enabled" "disabled" }}
     hsm-token-sign: {{ $zg.Values.authserver.hsm.tokenSigning.enabled | ternary "enabled" "disabled" }}
+    db-enc:         {{ $zg.Values.authserver.dbEnc.enabled | ternary "enabled" "disabled" }}
+    oidc-flow:      {{ $zg.Values.authserver.config.oidcFlowEnabled | ternary "enabled" "disabled" }}
+    ocsp:           {{ $zg.Values.authserver.provider.smcB.ocspFailClosed | ternary "fail-closed" "fail-open (only REVOKED denies)" }}
+    tsl-ocsp:       {{ $zg.Values.provisioningProcessor.tslOcspEnabled | ternary "on (live OCSP)" "off" }}
+{{- if $zg.Values.authserver.testmode }}
+    ⚠ testmode: ENABLED — relaxed verification, dev/test only
+{{- end }}
 {{- if $zg.Values.authserver.provisioningProcessor }}
   provisioning-processor:    {{ $zg.Values.authserver.provisioningProcessor.image.tag | default "default" }}
 {{- end }}
-  pepproxy:                  {{ $zg.Values.pepproxy.image.tag | default "default" }}
-  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}
-    opa-wif: {{ (and $zg.Values.opa.workloadIdentityFederation $zg.Values.opa.workloadIdentityFederation.enabled) | ternary "enabled" "disabled" }}
+  pepproxy:                  {{ $zg.Values.pepproxy.image.tag | default "default" }}  (replicas: {{ $zg.Values.pepproxy.replicaCount | default 1 }})
+    asl:            {{ $zg.Values.pepproxy.asl_enabled | ternary "enabled" "disabled" }}
+{{- if $zg.Values.pepproxy.nginxConf.aslTestmode }}
+    ⚠ asl-testmode: ENABLED — encryption practically disabled, never use in production
+{{- end }}
+    asl-ocsp:       {{ $zg.Values.pepproxy.aslOcsp | default "(cert default)" }}
+{{- $bypass := 0 }}{{- range $zg.Values.pepproxy.nginxConf.proxyLocations }}{{ if .bypassAsl }}{{ $bypass = add1 $bypass }}{{ end }}{{ end }}
+{{- if gt $bypass 0 }}
+    bypass-asl:     {{ $bypass }} location(s) public without ASL
+{{- end }}
+    nic-hsm-tls:    {{ $zg.Values.nginxIngressHsm | ternary "enabled" "disabled" }}
+{{- with $zg.Values.pepproxy.nginxConf }}
+    pep issuer:     {{ .pepIssuer | default "(unset)" }}
+    required aud:   {{ .requiredAudience | default "(unset)" }}
+{{- end }}
+{{- with $zg.Values.pepproxy.wellKnownBase }}
+    protected-resource: {{ . }}/.well-known/oauth-protected-resource
+{{- end }}
+{{- $nic := (index $zg.Values "nginx-ingress") }}
+  nginx-ingress (NIC):       {{ if $nic.enabled }}bundled by chart — {{ $nic.controller.image.tag | default "(chart default)" }} ({{ $nic.controller.kind | default "deployment" }}){{ else }}external — installed out-of-band, not managed by this chart{{ end }}
+    f5-annotations: {{ $zg.Values.nginxIngressEnabled | ternary "on" "off (non-F5 controller)" }}
+    sticky-lb:      {{ $zg.Values.nginxIngressLbMethod | ternary "on (IP-hash)" "off" }}
+  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}  (replicas: {{ $zg.Values.opa.replicaCount | default 1 }})
+    opa-wif:        {{ (and $zg.Values.opa.workloadIdentityFederation $zg.Values.opa.workloadIdentityFederation.enabled) | ternary "enabled" "disabled" }}
+    decision-logs:  {{ $zg.Values.opa.logDecisions | ternary "stdout" "off" }}
+    rollout-restart: {{ if (and $zg.Values.opa.rolloutRestart $zg.Values.opa.rolloutRestart.enabled) }}on ({{ $zg.Values.opa.rolloutRestart.schedule | default "?" }}){{ else }}off{{ end }}
+{{- if and $zg.Values.opa.bundle $zg.Values.opa.bundle.enabled }}
+    policy-bundle:  {{ $zg.Values.opa.bundle.resource | default "(unset)" }}
+{{- end }}
+{{- if and $zg.Values.opa.simulation $zg.Values.opa.simulation.enabled }}
+    opa-simulation: enabled (replicas: {{ $zg.Values.opa.simulation.replicaCount | default 1 }})
+    sim-bundle:     {{ $zg.Values.opa.simulation.bundle.resource | default "(derived from active bundle → :latest-sim)" }}
+{{- end }}
   telemetry-gateway:         {{ (index $zg.Values "telemetry-gateway").image.tag | default "default" }}{{ if not $zg.Values.telemetryGatewayEnabled }} (disabled){{ end }}
     gematik-connection: {{ $zg.Values.gematikConnectionEnabled | ternary "enabled" "disabled" }}
-{{- if .Subcharts.testdriver }}
-  testdriver:                {{ .Subcharts.testdriver.Values.image.tag | default "default" }}
+    tracing:        authserver={{ $zg.Values.authServerTracingEnabled | ternary "on" "off" }} · pep={{ $zg.Values.pepproxyTracingEnabled | ternary "on" "off" }}
+  notification-service:      {{ if $zg.Values.notificationService.enabled }}{{ $zg.Values.notificationService.image.tag }}-rs/-fdv  (replicas: {{ $zg.Values.notificationService.replicaCount | default 1 }}){{ else }}disabled{{ end }}
+{{- if $zg.Values.notificationService.enabled }}
+    history:        {{ $zg.Values.notificationService.historyEnabled | ternary "enabled" "disabled" }}
+    channels:       {{ $zg.Values.notificationService.env.channelsAllowed | default "(unset)" }}
+    sealing:        {{ $zg.Values.notificationService.env.persistenceSealingEnabled | ternary "enabled (HSM)" "disabled" }}
+    db:             {{ $zg.Values.notificationService.db.mode }}{{ if eq ($zg.Values.notificationService.db.mode | default "cloudnative") "cloudnative" }} ({{ $zg.Values.notificationService.db.clusterName }}){{ end }}
+    push-gateway:   {{ (index .Values "push-gateway").enabled | ternary "bundled mock" "external/none" }}
 {{- end }}
-{{- if .Subcharts.nativedriver }}
-  nativedriver:                {{ .Subcharts.nativedriver.Values.image.tag | default "default" }}
+  sekidp (Stufe 2):          {{ (index .Values "sekidp").enabled | ternary "enabled" "disabled" }}
+{{- with (index .Subcharts "sekidp") }}
+{{- if (index $.Values "sekidp").enabled }}
+    gsi-server:     {{ .Values.gsiServer.image.tag }}  ·  fedmaster: {{ .Values.fedmaster.image.tag }}
+    issuer-url:     {{ .Values.gsiServer.env.serverUrl | default "(unset)" }}
+    ingress:        {{ .Values.ingressEnabled | ternary "exposed (/sekidp, /sekidp-fedmaster)" "cluster-internal only" }}
 {{- end }}
-{{- if .Subcharts.testfachdienst }}
-  testfachdienst:            {{ .Subcharts.testfachdienst.Values.image.tag | default "default" }}
+{{- end }}
+{{- if (index .Values "mailcatcher").enabled }}
+  mailcatcher:               enabled (dev mail sink)
+{{- end }}
+{{- with .Subcharts.testdriver }}
+  testdriver:                {{ .Values.image.tag | default "default" }}  (auth: {{ .Values.authMode | default "SMB" }})
+{{- if eq (.Values.authMode | default "SMB") "OIDC" }}
+    oidc-idp:       {{ .Values.oidcIdpIss | default "(unset)" }}  (alias: {{ .Values.oidcIdpAlias | default "(unset)" }})
+{{- end }}
+    popp-token:     {{ empty .Values.PoppToken | ternary "NOT set" "set (static JWT — expires!)" }}
+{{- end }}
+{{- with .Subcharts.nativedriver }}
+  nativedriver:              {{ .Values.image.tag | default "default" }}
+    popp-token:     {{ empty .Values.PoppToken | ternary "NOT set" "set (static JWT — expires!)" }}
+{{- end }}
+{{- with .Subcharts.testfachdienst }}
+  testfachdienst:            {{ .Values.image.tag | default "default" }}
+    mtls:           {{ if .Values.mtls.enabled }}enabled (clientAuth: {{ .Values.mtls.clientAuth }}){{ else }}disabled{{ end }}
 {{- end }}
 {{- if (index .Subcharts "tiger-proxy") }}
   tiger-proxy:               {{ (index .Subcharts "tiger-proxy").Values.image.tag | default "default" }}
 {{- end }}
-{{- if .Subcharts.exauthsim }}
-  exauthsim:                 {{ .Subcharts.exauthsim.Values.image.tag | default "default" }}
-{{- end }}
 {{- if .Subcharts.hsmsim }}
 {{- if .Subcharts.hsmsim.Values.enabled }}
-  hsm-sim:                   {{ .Subcharts.hsmsim.Values.image.tag | default "default" }}
+  hsm-sim:                   {{ .Subcharts.hsmsim.Values.image.tag | default "default" }}{{ if .Subcharts.hsmsim.Values.devMode }}  ⚠ devMode — rolls on every upgrade (NIC reload storm risk){{ end }}
+{{- end }}
+{{- end }}
+{{- with .Values.global.infinispanExternal }}
+{{- if .enabled }}
+  infinispan (external):     {{ .image.tag | default "default" }}  (replicas: {{ .replicaCount | default 1 }}, hsm: {{ if (and .hsm .hsm.enabled) }}enabled{{ else }}disabled{{ end }})
 {{- end }}
 {{- end }}
 {{- if eq $zg.Values.databaseMode "cloudnative" }}
-  database (cloudnative-pg): {{ $zg.Values.cloudnativePg.imageName | default "default" }}
+  database (cloudnative-pg): {{ $zg.Values.cloudnativePg.imageName | default "default" }}  (instances: {{ $zg.Values.cloudnativePg.instances | default 1 }}{{ if eq (int ($zg.Values.cloudnativePg.instances | default 1)) 1 }} — ⚠ single instance, SPOF{{ end }}, backup: {{ if (and $zg.Values.cloudnativePg.backup $zg.Values.cloudnativePg.backup.enabled) }}on{{ else }}off{{ end }})
+{{- else }}
+  database mode:             {{ $zg.Values.databaseMode | default "external" }}
+{{- end }}
+  ingress class:             {{ $zg.Values.ingressClassName | default "(chart default)" }}
+  tls issuer:                {{ if $zg.Values.issuer }}{{ $zg.Values.issuer }} (Issuer){{ else if $zg.Values.clusterIssuer }}{{ $zg.Values.clusterIssuer }} (ClusterIssuer){{ else if .Values.issuers.local.enabled }}self-signed ({{ .Values.issuers.local.issuerName }}){{ else }}(manual TLS){{ end }}
+  network-policies:          {{ $zg.Values.networkPolicy.enabled | ternary "enabled" "disabled" }}
+  route-via-tiger-proxy:     {{ $zg.Values.routeViaTigerProxy | ternary "yes" "no" }}
+{{- if $zg.Values.devMode }}
+
+  ⚠ devMode ENABLED — forces pod rollouts on every upgrade; intended for dev/test only.
 {{- end }}
 
 {{ if .Values.testMonitoringServiceEnabled -}}
@@ -65,4 +153,4 @@ Deployed component versions:
   Jaeger UI    http://localhost:8080/jaeger/ui/
   Grafana      http://localhost:8080/grafana/
 {{- end }}
-
+============================= END ZETA ENV OVERVIEW =============================

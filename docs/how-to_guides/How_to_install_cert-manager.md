@@ -31,6 +31,15 @@ helm upgrade cert-manager oci://quay.io/jetstack/charts/cert-manager \
   `Certificate` (and optionally the `zeta-guard-tls` secret) to force re‑issue
   with the new issuer.
 
+## Namespace-scoped Issuer (no ClusterIssuer)
+
+- Operators barred from deploying cluster-scoped `ClusterIssuer` resources can
+  set `zeta-guard.issuer` to a namespace-scoped cert-manager `Issuer` instead.
+  When set, it takes precedence over `clusterIssuer` and the chart emits the
+  `cert-manager.io/issuer` annotation. The `Issuer` must exist in the release
+  namespace.
+- Verify with `kubectl -n <ns> get issuer`.
+
 ## Related sources
 
 * [cert-manager – Installing with Helm](https://cert-manager.io/docs/installation/helm/)

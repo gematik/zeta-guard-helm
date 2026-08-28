@@ -12,11 +12,8 @@ metadata:
     nginx.org/mergeable-ingress-type: "master"
     {{- end }}
     {{- if and .Values.authserver.hostname }}
-    {{- if not (and .Values.nginxIngressEnabled .Values.nginxIngressHsm) }}
-    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer | default "letsencrypt" | quote }}
-    cert-manager.io/private-key-algorithm: ECDSA
-    cert-manager.io/private-key-size: "256"
-    {{- end }}
+    {{- /* TLS secret is issued by the explicit Certificate in certificate.yaml,
+         not via ingress-shim annotations */ -}}
     {{- if not .Values.nginxIngressEnabled }}
     nginx.org/ssl-redirect: "true"
     {{- end }}

@@ -5,7 +5,7 @@ VEX_DIR="$2"
 REPORT_DIR="$3"
 SEVERITY="HIGH,CRITICAL"
 
-PODSELECTOR="component!=zeta-test-infra,component!=exauthsim,component!=testdriver,component!=testfachdienst,component!=popp-mock,component!=nativedriver,app.kubernetes.io/name!=tiger-proxy,app.kubernetes.io/name!=authserver,app.kubernetes.io/name!=pep-proxy,app.kubernetes.io/name!=telemetry-gateway,app.kubernetes.io/name!=zeta-tls-test-tool-service"
+PODSELECTOR="component!=zeta-test-infra,component!=exauthsim,component!=testdriver,component!=testfachdienst,component!=popp-mock,component!=nativedriver,app.kubernetes.io/name!=tiger-proxy,app.kubernetes.io/name!=authserver,app.kubernetes.io/name!=pep-proxy,app.kubernetes.io/name!=telemetry-gateway,app.kubernetes.io/name!=zeta-tls-test-tool-service,app.kubernetes.io/name!=hsm-sim,app.kubernetes.io/name!=nginx-ingress,app.kubernetes.io/name!=notification-service,app.kubernetes.io/name!=push-gateway"
 
 
 STATUS=0

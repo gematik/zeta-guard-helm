@@ -1,0 +1,142 @@
+global:
+  imagePullSecrets: []
+  # Registry prefix (full prefix, trailing slash). Overridden by umbrella chart
+  # globals when used as a subchart.
+  registry_host: ""
+
+registry_name: ""
+
+# APP_MODE: BOTH runs producer + consumer in one process (no split in this chart).
+appMode: BOTH
+
+# Root log level -> LOGGING_LEVEL_ROOT. TRACE/DEBUG/INFO/WARN/ERROR.
+logLevel: INFO
+
+# gematik ships no image; build/publish your own from github.com/gematik/push-gateway
+# and point registry/repository/tag at it.
+image:
+  repository: push-gateway
+  tag: "1.0.1"
+  # When set, fully overrides global.registry_host/registry_name (full prefix,
+  # including trailing slash).
+  registry: ""
+  # Optional digest (e.g. "sha256:...") appended as @<digest>, in addition to tag.
+  digest: ""
+imagePullPolicy: Always
+imagePullSecrets: []
+
+# Service ports only — the container listens on fixed ports 8080 (API)
+# and 8081 (management/actuator).
+service:
+  apiPort: 8080
+  managementPort: 8081
+
+# Image bundles the OTel Java agent, so standard OTEL_* env vars suffice —
+# no per-signal application config needed.
+opentelemetry:
+  enabled: false
+  serviceName: push-gateway
+  endpoint: http://telemetry-gateway-local:4318
+  protocol: http/protobuf
+  resourceAttributes: {}
+
+# When enabled, injects a changing annotation to force pod rollouts
+# on each helm upgrade/apply even if image tag is unchanged.
+devMode: false
+
+# Expose the Push Gateway at /push-gateway via this chart's own Ingress. NIC
+# "mergeable minion" sharing zeta-guard's ingress-master host/TLS, so hostname /
+# ingressClassName below must match zeta-guard.authserver.hostname /
+# zeta-guard.ingressClassName for the stage.
+ingressEnabled: false
+
+# Must match zeta-guard.authserver.hostname for this minion to merge onto the
+# shared NIC master. Leave empty for host-less local-cluster setups.
+hostname: ""
+
+ingressClassName: "nginx"
+
+# Use NIC ("nginx.org/...") mergeable-ingress annotations. Set false (with
+# openshiftIngress.enabled: true) for OpenShift Routes instead.
+nginxIngressEnabled: true
+
+# Route /push-gateway via tiger-proxy (port 80), which strips the prefix — needed
+# because the API is served at root (e.g. /push/v1/notify). Requires the matching
+# tiger-proxy proxyRoutes entry (/push-gateway -> http://push-gateway:8080).
+routeViaTigerProxy: false
+
+# Use OpenShift's Route-backed ingress controller with TLS instead of NIC.
+openshiftIngress:
+  enabled: false
+  certName: ""
+
+serviceAccount:
+  create: true
+  name: push-gateway
+
+resources: {}
+# resources:
+#   limits:
+#     cpu: "1"
+#     memory: "1Gi"
+#   requests:
+#     cpu: "200m"
+#     memory: "512Mi"
+
+podDisruptionBudget:
+  enabled: false
+  # minAvailable: 1
+  # maxUnavailable: 1
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext: {}
+#  allowPrivilegeEscalation: false
+#  readOnlyRootFilesystem: true
+#  runAsNonRoot: true
+#  capabilities:
+#    drop: [ "ALL" ]
+
+# Empty push-provider config: /push/v1/notify* calls are accepted and queued,
+# but never actually delivered to a device (no APNs/Firebase credentials).
+pushConfig: |
+  push:
+    apns: []
+    firebase: []
+
+postgres:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    # Optional digest (e.g. "sha256:...") appended as @<digest>, in addition to tag.
+    digest: "sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+  credentials:
+    username: push-gateway
+    password: push-gateway-local-dev-password
+    database: push-gateway-db
+  resources: {}
+  containerSecurityContext: {}
+  #  allowPrivilegeEscalation: false
+  #  readOnlyRootFilesystem: false
+  #  runAsNonRoot: true
+  #  capabilities:
+  #    drop: [ "ALL" ]
+
+artemis:
+  image:
+    repository: apache/activemq-artemis
+    tag: "2.44.0"
+    # Optional digest (e.g. "sha256:...") appended as @<digest>, in addition to tag.
+    digest: "sha256:0305c26f19eda00c0506d0953cfe265600a72ac1b17f7934412120c01a595cff"
+  credentials:
+    username: artemis
+    password: secret
+  resources: {}
+  containerSecurityContext: {}
+  #  allowPrivilegeEscalation: false
+  #  readOnlyRootFilesystem: false
+  #  runAsNonRoot: true
+  #  capabilities:
+  #    drop: [ "ALL" ]

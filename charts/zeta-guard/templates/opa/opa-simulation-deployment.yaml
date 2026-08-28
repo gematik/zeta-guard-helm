@@ -3,7 +3,7 @@
 {{- $bundleCfg := "" }}
 {{- if .Values.opa.bundle.enabled }}
 {{- /* $bundleCfg is used only to compute CHECKSUM_OPA; the actual config is rendered by opa-policy-configmap.yaml */ -}}
-{{- $bundleCfg = include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .)) }}
+{{- $bundleCfg = include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .) "verification" (include "opa.simVerification" . | fromJson)) }}
 {{- end }}
 {{- $inlinePolicy := "" }}
 {{- if not .Values.opa.bundle.enabled }}
@@ -100,6 +100,8 @@ spec:
                   name: {{ .Values.opa.bundle.credentials.secretRef.name }}
                   key: token
           {{- end }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.version={{ .Chart.Version }}"
             {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           args:
             - "run"
@@ -107,7 +109,7 @@ spec:
             - "--addr=0.0.0.0:8181"
             - "--log-level={{ .Values.opa.logLevel }}"
             - --set-file
-            - keys.{{ default "signer" .Values.opa.bundle.verification.keyId }}.key=/var/trust-data/policy-signer.pub
+            - keys.{{ default "signer" (include "opa.simVerification" . | fromJson).keyId }}.key=/var/trust-data/policy-signer.pub
             {{- if or .Values.opaPolicy.logDecisions .Values.opa.bundle.enabled }}
             - "--config-file=/config/opa.yaml"
             {{- end }}
@@ -126,7 +128,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health{{ if and .Values.opa.bundle.enabled .Values.opa.bundleHealthCheck }}?bundles=true{{ end }}
               port: http
             initialDelaySeconds: 3
             periodSeconds: 10
@@ -158,6 +160,7 @@ spec:
             - name: trust-data
               mountPath: "/var/trust-data"
               readOnly: true
+            {{- include "zeta-guard.provisioningProcessor.registryCaVolumeMount" . | nindent 12 }}
       volumes:
         {{- if not .Values.opa.bundle.enabled }}
         - name: opa-policy

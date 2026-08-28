@@ -1,0 +1,5 @@
+apiVersion: v2
+name: mailcatcher
+description: Thin local/demo deployment of MailCatcher — an SMTP catch-all with a web UI, for inspecting test emails
+type: application
+version: 0.0.1

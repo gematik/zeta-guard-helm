@@ -25,3 +25,5 @@ Makefile
 .smb_keystore_pw
 /testsuite/
 /tmp/
+
+/.local

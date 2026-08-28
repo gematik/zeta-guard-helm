@@ -19,7 +19,7 @@ authserver without the need to deploy it from scratch.
 > - TLS configuration (self-signed certificates are supported)
 > - Additional PDP scopes
 > - Audience scope name (default: `zero:audience`) — the scope that carries the
-    > access-token claims the PEP requires (see the note under "Terraform
+>   access-token claims the PEP requires (see the note under "Terraform
     Variables")
 >
 > Predefined settings:
@@ -74,7 +74,7 @@ variable:
 - Terraform state is stored locally in `terraform.tfstate` (not in the cluster)
 
 > When using self-signed certificates (e.g. local KIND cluster), set
-`insecure_tls = true`
+> `insecure_tls = true`
 > in the tfvars file. The management script will automatically extract the
 > server certificate
 > and configure a temporary Java truststore for `kcadm.sh`.
@@ -115,7 +115,7 @@ requires.**
 > The scope named by `audience_scope_name` (default `zero:audience`) carries the
 > protocol
 > mappers that inject the claims the PEP validates on every request: `aud`,
-`profession_oid`,
+> `profession_oid`,
 > `client_id`, `ip_address`, `product_id`, `product_version`, `common_name`,
 > `organization_name`. **The client must request this scope.** If a Fachdienst
 > mandates a
@@ -127,7 +127,7 @@ requires.**
 > claims and the PEP rejects the request (e.g. `missing field 'aud'`) before any
 > policy is
 > evaluated. Note that setting `audience_scope_name` replaces the default
-`zero:audience` scope.
+> `zero:audience` scope.
 
 ---
 
@@ -292,24 +292,28 @@ hostname.
 
 ### How it works
 
-When `authserver.adminHostname` is set, the chart activates two-layer
+When `authserver.adminHostname` is set, the chart activates two-part
 protection:
 
-1. **PEP Proxy blocks `/auth/admin`** — the NGINX PEP proxy (`pep-proxy-svc`)
-   intercepts all traffic destined for the main hostname. A
-   `location ~ ^/auth/admin` block returns
-   `403 Forbidden` before the request reaches Keycloak. All other `/auth/*`
-   paths (e.g. token exchange, well-known endpoints) are proxied to the
-   authserver without a PEP token.
+1. **`/auth/admin` is routed to the PEP proxy, which denies it** — the
+   `zeta-guard-pep` minion gains a `/auth/admin` path pointing at
+   `pep-proxy-svc`, where a `location ~ ^/auth/admin` block returns
+   `403 Forbidden` before the request reaches Keycloak. Every other `/auth/*`
+   path (token exchange, nonce, registration, well-known) keeps routing straight
+   to the authserver via the `zeta-guard-auth` minion and never touches the PEP.
 
-2. **Separate admin ingress** — dedicated ingress is created for the admin
-   hostname that routes `/auth` directly to the uthserver, bypassing the PEP
+2. **Separate admin ingress** — a dedicated ingress is created for the admin
+   hostname that routes `/auth` directly to the authserver, bypassing the PEP
    proxy block. Terraform and CI/CD runners use this hostname exclusively.
 
+The split relies on overlapping prefixes being resolved **longest-match-first**,
+which both nginx and the Ingress specification guarantee regardless of
+declaration order: `/auth/admin` wins over `/auth`.
+
 This approach is ingress-controller-agnostic: it works with F5 NIC, standard
-nginx-ingress,OpenShift Routes, GKE Ingress and any other ingress solution,
-because enforcement happens inside the PEP proxy nginx configuration — not in
-ingress-controller-specific annotations.
+nginx-ingress, OpenShift Routes, GKE Ingress and any other ingress solution,
+because enforcement needs nothing but plain Ingress path routing plus the PEP's
+own nginx configuration — no controller-specific annotations.
 
 > **IP-based access restriction** for the admin hostname must be configured at
 > the infrastructure layer: Cloud Armor (GKE), NetworkPolicy/Route annotation
@@ -335,16 +339,21 @@ keycloak_url = "https://admin.zeta.example.com/auth"
 ```
 
 To **disable** the feature again, remove `adminHostname` (or set it to `""`) in
-the values file and run `make deploy stage=<env>`. The admin ingress and PEP
-proxy location blocks are removed automatically on the next Helm upgrade.
+the values file and run `make deploy stage=<env>`. The admin ingress, the
+`/auth/admin` Ingress path and the PEP proxy location block are removed
+automatically on the next Helm upgrade — `/auth/admin` then stays reachable on
+the main hostname, since otherwise there would be no way to reach it at all.
 
 ### Limitation: tiger-proxy environments
 
-When `routeViaTigerProxy: true`, **admin API blocking does not take effect**.
-Tiger-proxy routes `/auth → http://authserver/auth` internally, bypassing the
-PEP proxy location blocks entirely. This is expected behavior — tiger-proxy is a
-test tool and is never used in production deployments. Set `routeViaTigerProxy: 
-false` (the default for production) to activate the admin API block.
+When `routeViaTigerProxy: true`, the `/auth/admin` Ingress path is **not**
+rendered: tiger-proxy forwards `/auth → http://authserver/auth` internally and
+bypasses the PEP entirely, so routing the path there would not block anything.
+With F5 NIC the `location-snippets` layer on `zeta-guard-auth` still returns
+`404`; with any other ingress controller `/auth/admin` stays reachable on the
+main hostname. This is expected — tiger-proxy is a test tool and is never used
+in production. Set `routeViaTigerProxy: false` (the default for production) to
+activate the controller-agnostic admin API block.
 
 ### Local development (KIND)
 
@@ -461,6 +470,13 @@ zeta-guard:
       minAvailable: 1
 ```
 
+> **Scaling `replicaCount` also scales database connections.** Each authserver
+> pod opens its own JDBC pool, so the total number of PostgreSQL connections
+> grows linearly with `replicaCount`. See
+> [Database connection pool and scaling](#database-connection-pool-and-scaling)
+> below before raising `replicaCount` — the chart refuses to render if the pool
+> budget exceeds the database's `max_connections`.
+
 ### Security context
 
 The pod-level and container-level security contexts are configurable:
@@ -531,6 +547,104 @@ zeta-guard:
   cloudnativeDbSecretName: "keycloak-db-app"
   cloudnativeDbSchema: "public"
 ```
+
+### Database connection pool and scaling
+
+Each authserver pod maintains **its own** JDBC connection pool, so the total
+number of PostgreSQL connections scales with `replicaCount`:
+
+```
+total worst-case connections = replicaCount × authserver.dbPool.maxSize
+total idle connections       = replicaCount × authserver.dbPool.minSize
+```
+
+These must fit within the database's connection limit. For the managed
+CloudNativePG cluster that limit is `cloudnativePg.parameters.maxConnections`.
+The chart **enforces this at render time** and fails the deploy with a clear
+message if the budget is exceeded (leaving ~25 connections in reserve for the
+CNPG instance-manager, replication and superuser slots):
+
+```
+replicaCount × dbPool.maxSize + 25 ≤ cloudnativePg.parameters.maxConnections
+```
+
+If this is violated at runtime instead, PostgreSQL rejects new connections
+(`SQLSTATE 53300 – remaining connection slots are reserved…`) and the database
+can crash under load — which is exactly the failure this guard prevents.
+
+> **⚠️ External databases (`databaseMode: external`).** The render-time guard runs
+> **only** for the managed CloudNativePG database — the chart has no way to know
+> the connection limit of a database it doesn't manage. If you bring your own
+> database and run `replicaCount > 1`, **you** are responsible for ensuring:
+>
+> ```
+> replicaCount × authserver.dbPool.maxSize + <your DB's reserved connections>
+>   ≤ your database's max_connections
+> ```
+>
+> A stock PostgreSQL defaults to `max_connections = 100`, so even two pods
+> (2 × 100 = 200) will exhaust it. Either raise your database's `max_connections`
+> (and size its memory for it), lower `authserver.dbPool.maxSize`, or put a
+> connection pooler in front of your database. Otherwise, you hit the same
+> `SQLSTATE 53300` exhaustion and crash — with no warning at deploy time.
+
+The chart **defaults are intentionally minimal** — sized for a single authserver
+pod (plus small multi-pod stages) so light environments don't over-allocate DB
+resources:
+
+```yaml
+zeta-guard:
+  authserver:
+    dbPool:
+      minSize: 10     # idle floor per pod
+      maxSize: 100    # cap per pod (≤ httpPool.maxThreads = 300; above that is wasteful)
+  cloudnativePg:
+    parameters:
+      maxConnections: 250
+      sharedBuffers: 128MB
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 2Gi   # no cpu limit (see "Scaling out" below)
+```
+
+> **Note:** `dbPool.maxSize` above `httpPool.maxThreads` (300) is wasteful — a
+> pod cannot use more DB connections than it has request-handling threads.
+
+**Scaling out.** When you raise `replicaCount`, raise the DB capacity in the
+**same environment overlay** — `dbPool.maxSize` (throughput per pod),
+`maxConnections`, `sharedBuffers`, and `cloudnativePg.resources` — as a set. Size
+memory for the connection count (~6MB per backend plus `shared_buffers`, e.g. ~6Gi
+for ~650 connections) and keep memory `requests ≤ limits`. The DB intentionally
+runs **without a CPU limit** (a CPU limit is a CFS quota that throttles the DB
+under load); set `cpu.request` as the guaranteed floor and let it burst into spare
+node CPU. Example for a 3-pod stage (3 × 200 + 25 reserve = 625 ≤ 650):
+
+```yaml
+zeta-guard:
+  authserver:
+    replicaCount: 3
+    dbPool:
+      maxSize: 200
+  cloudnativePg:
+    parameters:
+      maxConnections: 650
+      sharedBuffers: 512MB
+    resources:
+      requests: { cpu: "2", memory: 4Gi }   # cpu.request = guaranteed floor
+      limits:   { memory: 8Gi }              # no cpu limit; memory sized for backends
+```
+
+If you raise `replicaCount` without raising the DB budget, the chart **fails the
+render** with a clear message rather than shipping a config that exhausts
+connections (`SQLSTATE 53300`) and crashes the DB under load.
+
+A single PostgreSQL instance handling many hundreds of connections is itself a
+bottleneck; for a large number of pods, prefer a connection pooler (PgBouncer,
+via `cloudnativePg.pooler`) in front of the database so application connections
+are multiplexed onto a small number of backends.
 
 ---
 
@@ -655,6 +769,44 @@ Set `hsm_token_signing_enabled = false` in tfvars and run `make config` again.
 | `hsm_token_signing_key_id`               | Identifier of the signing key in the HSM            | `""`    |
 | `hsm_token_signing_priority`             | Provider priority (higher wins)                     | `"200"` |
 | `hsm_token_signing_remove_software_keys` | Remove software signing keys after HSM registration | `true`  |
+
+---
+
+## SMC-B OCSP revocation check
+
+During token exchange the authserver checks the revocation status of the SMC-B
+certificate via OCSP (the responder is taken from the certificate's AIA
+extension). The OCSP request timeouts and the fail-closed are configurable:
+
+```yaml
+zeta-guard:
+  authserver:
+    provider:
+      smcB:
+        ocspConnectTimeoutMs: 1000    # connect timeout of the OCSP request (ms)
+        ocspReadTimeoutMs: 3000       # read timeout of the OCSP request (ms)
+        ocspFailClosed: false         # deny only on REVOKED; allow undetermined status (fail-open)
+```
+
+This sets
+`KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OCSP_CONNECT_TIMEOUT_MS`,
+`..._OCSP_READ_TIMEOUT_MS` and `..._OCSP_FAIL_CLOSED` on the authserver pod.
+
+| Value                                           | Description                                         | Default |
+|-------------------------------------------------|-----------------------------------------------------|---------|
+| `authserver.provider.smcB.ocspConnectTimeoutMs` | Connect timeout of the SMC-B OCSP request (ms)      | `1000`  |
+| `authserver.provider.smcB.ocspReadTimeoutMs`    | Read timeout of the SMC-B OCSP request (ms)         | `3000`  |
+| `authserver.provider.smcB.ocspFailClosed`       | Also deny when the OCSP status cannot be determined | `false` |
+
+By default (`ocspFailClosed: false`) the check is **fail-open**: only a
+positively `REVOKED` certificate is rejected (`invalid_token`); any undetermined
+result — OCSP responder unreachable, timeout, or status `unknown` — 
+is **allowed** so token issuance keeps working during an OCSP responder outage 
+or maintenance window. Set `ocspFailClosed: true` to **fail-closed**, i.e. also 
+reject when the revocation status cannot be determined (stricter, in line with 
+TUC_PKI_006, gemSpec_PKI). A `REVOKED` certificate is always rejected regardless
+of this setting; and when no OCSP signer truststore is configured the check is
+disabled entirely (test environments only).
 
 ---
 

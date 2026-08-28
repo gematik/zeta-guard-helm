@@ -1,0 +1,84 @@
+{{- /* Dedicated Postgres for the bundled notification-service. Plain CNPG
+       cluster (no pg_cron / extensions); the service persists here via Flyway
+       (migrate-at-start) and both API variants share it. Separate from the
+       Keycloak keycloak-db cluster. */}}
+{{- if and .Values.notificationService.enabled (eq .Values.notificationService.db.mode "cloudnative") }}
+{{- $pg := .Values.notificationService.db.cloudnativePg }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.notificationService.db.clusterName | default "notification-db" }}
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+    app.kubernetes.io/component: notification-service
+  annotations:
+    # Keep the DB across failed upgrades so helm's --rollback-on-failure can't
+    # delete this Cluster + PVC. Teardown is via `make uninstall`.
+    # Caveat: disabling the NS or db.mode external orphans this Cluster + PVC;
+    # delete it before re-enabling, else a stale-schema DB gets adopted.
+    "helm.sh/resource-policy": keep
+spec:
+  instances: {{ $pg.instances }}
+  {{- if kindIs "bool" $pg.enablePDB }}
+  enablePDB: {{ $pg.enablePDB }}
+  {{- end }}
+  postgresql:
+    parameters:
+      shared_buffers: {{ $pg.parameters.sharedBuffers | quote }}
+      max_connections: {{ $pg.parameters.maxConnections | quote }}
+      {{- /* further postgresql.conf parameters passed through verbatim
+           (snake_case keys, string values) */}}
+      {{- range $k, $v := $pg.extraParameters }}
+      {{ $k }}: {{ $v | quote }}
+      {{- end }}
+  imageName: {{ $pg.imageName | quote }}
+  {{- with $pg.imagePullPolicy }}
+  imagePullPolicy: {{ . | quote }}
+  {{- end }}
+  storage:
+    size: {{ $pg.storage.size | quote }}
+    {{- with $pg.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    {{- with $pg.storage.pvcTemplate }}
+    pvcTemplate:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with $pg.walStorage }}
+  walStorage:
+    size: {{ .size | quote }}
+    {{- with .storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    {{- with .pvcTemplate }}
+    pvcTemplate:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- with $pg.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $pg.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $pg.monitoring }}
+  monitoring:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if $pg.backup.enabled }}
+  backup:
+    {{- with $pg.backup.retentionPolicy }}
+    retentionPolicy: {{ . | quote }}
+    {{- end }}
+    {{- with $pg.backup.barmanObjectStore }}
+    barmanObjectStore:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: notification
+      owner: notification
+{{- end }}

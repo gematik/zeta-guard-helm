@@ -1,0 +1,14 @@
+{{- if .Values.notificationService.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pep-well-known-resources
+  labels:
+    {{- include "pep-proxy.labels" . | nindent 4 }}
+data:
+{{- /* Key = RFC 9728 subpath (not the filename); assumes a single NS resource doc here. */}}
+{{- range $path, $file := .Files.Glob "files/well-known/resources/*" }}
+  {{ include "zeta-guard.ns-well-known-subpath" $ }}: |-
+{{ tpl ($file | toString) $ | indent 4 }}
+{{- end }}
+{{- end }}

@@ -12,19 +12,7 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # kube-dns
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    {{- include "zeta-guard.dnsEgressRule" . | nindent 4 }}
     # authserver (token validation, well-known, proxy_pass)
     - to:
         - podSelector:
@@ -43,6 +31,17 @@ spec:
           protocol: TCP
         - port: 54526
           protocol: UDP
+    {{- if .Values.notificationService.enabled }}
+    # notification-service fdv variant: PEP proxy_passes only the FdV /push/v1/*
+    # routes; the rs variant is reached in-cluster by resource servers, not the PEP.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "notificationService.selectorLabels" (dict "root" $ "variant" "fdv") | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
     {{- if .Values.networkPolicy.egress.popp.mock }}
     # popp-mock pod — podSelector + targetPort 8080 (kindnet evaluates NetworkPolicy post-DNAT;
     # the service maps port 80 → targetPort 8080, so the post-DNAT destination port is 8080)

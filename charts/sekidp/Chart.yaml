@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sekidp
+description: Thin local/demo deployment of gematik's SEK-IDP (gsi-server) and Fedmaster (gsi-fedmaster)
+type: application
+version: 0.0.1

@@ -1,0 +1,113 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* One-shot adoption of pre-existing ingress-shim Certificates into this
+     helm release (companion to certificate.yaml, which skips rendering while
+     a foreign object exists — helm's ownership check runs BEFORE hooks, so a
+     pre-hook cannot adopt in time; a post-hook can).
+
+     The Job stamps the meta.helm.sh ownership annotations + managed-by label
+     and strips the stale ownerReference to the Ingress — without the strip,
+     ingress-shim garbage-collects the object once the Ingress annotations
+     are gone, and TLS renewal silently stops. The NEXT helm operation then
+     renders the Certificate and manages it normally.
+
+     Rendered only while a foreign Certificate actually exists, so this whole
+     file disappears from converged releases. */ -}}
+{{- /* same gates as certificate.yaml: only adopt what this chart would manage */ -}}
+{{- $issuerConfigured := or .Values.issuer .Values.clusterIssuer }}
+{{- $mainForeign := and .Values.ingressEnabled .Values.authserver.hostname $issuerConfigured
+      (not (and .Values.nginxIngressEnabled .Values.nginxIngressHsm))
+      (include "zeta-guard.certificateIsForeign" (dict "root" $ "name" "zeta-guard-tls")) }}
+{{- $adminForeign := and .Values.ingressEnabled .Values.authserver.adminHostname $issuerConfigured
+      (not .Values.authserver.adminTlsSecretName)
+      (include "zeta-guard.certificateIsForeign" (dict "root" $ "name" "zeta-guard-admin-tls")) }}
+{{- if or $mainForeign $adminForeign }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: certificate-adopt
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: certificate-adopt
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: certificate-adopt
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: certificate-adopt
+subjects:
+  - kind: ServiceAccount
+    name: certificate-adopt
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: certificate-adopt
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: certificate-adopt
+    spec:
+      serviceAccountName: certificate-adopt
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: adopt
+          image: {{ .Values.certificateAdoption.image | quote }}
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              for cert in zeta-guard-tls zeta-guard-admin-tls; do
+                kubectl get certificate "$cert" >/dev/null 2>&1 || continue
+                owner=$(kubectl get certificate "$cert" \
+                  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}')
+                if [ -z "$owner" ]; then
+                  printf 'Adopting pre-existing Certificate %s into release %s\n' \
+                    "$cert" "{{ .Release.Name }}"
+                  # stale ownerReference (Ingress) would let ingress-shim GC
+                  # the object after adoption; may already be absent
+                  kubectl patch certificate "$cert" --type=json \
+                    -p='[{"op":"remove","path":"/metadata/ownerReferences"}]' 2>/dev/null || true
+                  kubectl annotate --overwrite certificate "$cert" \
+                    meta.helm.sh/release-name={{ .Release.Name }} \
+                    meta.helm.sh/release-namespace={{ .Release.Namespace }}
+                  kubectl label --overwrite certificate "$cert" \
+                    app.kubernetes.io/managed-by=Helm
+                elif [ "$owner" != "{{ .Release.Name }}" ]; then
+                  printf 'ERROR: Certificate %s belongs to helm release %s\n' \
+                    "$cert" "$owner" >&2
+                  exit 1
+                fi
+              done
+{{- end }}

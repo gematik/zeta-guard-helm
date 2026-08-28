@@ -151,6 +151,30 @@ about it via the `PROVISIONING_CONTAINER_REGISTRY_CA_FILE` environment variable.
 Mounting it as a file (rather than passing it as an environment variable) avoids
 the `ARG_MAX` kernel limit, which can be exceeded by large certificate chains.
 
+The same reference also supplies the CA to the `opa` and `opa-simulation`
+containers, which need it at runtime to pull the OPA policy bundle in bundle
+mode (`opa.bundle.enabled: true`). The certificate is mounted at the same path
+and rendered into the OPA configuration as
+`services.<opa.bundle.serviceName>.tls.ca_cert`, together with
+`system_ca_required: true` — the CA is *appended* to the container image's
+system
+trust store, so a publicly trusted registry keeps working. Without it, OPA logs
+`x509: certificate signed by unknown authority` and keeps running with no policy
+bundle; see `opa.bundleHealthCheck` in
+[the OPA reference](../reference/OPA.md) to make that failure visible.
+
+> **Provide a full CA bundle, not just your own CA.** One reference serves two
+> consumers, and they treat the file differently. OPA *appends* it to the system
+> trust store (`system_ca_required: true`), but the init container passes it to
+> `cosign` as the **only** trust anchor. So if the file contains just your
+> internal CA while the provisioning data image is pulled from a publicly
+> trusted registry, the init container fails with
+> `Error: signed entity: Get "https://…/v2/": tls: failed to verify certificate:
+> x509: certificate signed by unknown authority` and the pod never starts.
+> Concatenate your CA with the public root bundle (e.g. your distribution's
+> `ca-certificates.crt`) or mirror the provisioning data image into the same
+> private registry so that one CA covers both pulls.
+
 There are three ways to provide it. The Secret and ConfigMap references are
 mutually exclusive — if both are set, the Secret reference takes precedence.
 
@@ -194,8 +218,7 @@ zeta-guard:
 
 If the CA certificate (or other material) should come from a different source
 (projected volumes, CSI, ...), the wiring can be done fully manually with
-generic
-values on the init container. You provide the volume, the mount and the
+generic values on the init container. You provide the volume, the mount and the
 `PROVISIONING_CONTAINER_REGISTRY_CA_FILE` environment variable yourself:
 
 ```yaml
@@ -214,6 +237,10 @@ zeta-guard:
         readOnly: true
 ```
 
+This option covers the init container only — it does **not** give OPA the CA for
+policy bundle pulls. If the OPA bundle comes from a registry with a private CA,
+use Option A or Option B.
+
 ## Registry credentials (username / token)
 
 Many enterprise registries do not allow anonymous access. To pull the
@@ -225,8 +252,7 @@ credentials before fetching the image, via the environment variables
 
 The credentials come from an existing Kubernetes Secret, which is referenced by
 `provisioningProcessor.registryCredentialsSecretRef`. In production the Secret
-is
-typically created from a SealedSecret so the token is never stored in plain
+is typically created from a SealedSecret so the token is never stored in plain
 text.
 
 ```bash

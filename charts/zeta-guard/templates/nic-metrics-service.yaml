@@ -1,0 +1,26 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Stable-named Service over the NIC pods' Prometheus exporter (:9113,
+     nginx-ingress.prometheus.create is the subchart default). The NIC
+     subchart's own prometheus service embeds the release name, which the
+     telemetry-gateway's values-only scrape config cannot template — this
+     alias gives the gateway a fixed target so ingress metrics (the reliable
+     rps/latency source; spanmetrics shed under load) reach the
+     dienst_hersteller product stream like every other scrape job. */ -}}
+{{- if and .Values.ingressEnabled (index .Values "nginx-ingress").enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress-metrics
+  labels:
+    app.kubernetes.io/name: nginx-ingress-metrics
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    app.kubernetes.io/name: nginx-ingress
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: prometheus
+      port: 9113
+      # matches the nginx-ingress subchart's prometheus.port default
+      targetPort: 9113
+{{- end }}
