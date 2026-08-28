@@ -1,0 +1,54 @@
+{{- if .Values.opa.rolloutRestart.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opa-rollout-restart-cronjob
+  labels:
+    {{- include "opa.labels" . | nindent 4 }}
+spec:
+  timeZone: "Europe/Berlin"
+  schedule: {{ .Values.opa.rolloutRestart.schedule | quote }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.opa.rolloutRestart.backoffLimit | default 5 }}
+      template:
+        metadata:
+          labels:
+            {{- include "opa.labels" . | nindent 12 }}
+            {{- with .Values.opa.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $.Values.devMode }}
+          annotations:
+            zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+          {{- end }}
+        spec:
+          {{- with .Values.provisioningProcessor.imagePullSecrets | default .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          serviceAccountName: {{ .Values.opa.rolloutRestart.serviceAccountName | default "opa-rollout-restart" }}
+          restartPolicy: OnFailure
+          containers:
+            - name: opa-rollout-restart
+              image: "{{ include "provisioningProcessor.image" . | trim }}"
+              imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy | default "IfNotPresent" }}"
+              {{- with .Values.provisioningProcessor.containerSecurityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.opa.rolloutRestart.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - >-
+                  kubectl rollout restart deployment/opa -n {{ .Release.Namespace }}
+                  {{- if .Values.opa.simulation.enabled }}
+                  && kubectl rollout restart deployment/opa-simulation -n {{ .Release.Namespace }}
+                  {{- end }}
+{{- end }}

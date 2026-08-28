@@ -1,6 +1,6 @@
 dependencies:
 - name: opentelemetry-demo
-  repository: https://open-telemetry.github.io/opentelemetry-helm-charts
-  version: 0.40.1
-digest: sha256:315eb9300726c1645da07d3c9ca45e045a18b868263f5e413ce720d888d0aeb6
-generated: "2026-01-27T16:41:44.97269+01:00"
+  repository: oci://ghcr.io/open-telemetry/opentelemetry-helm-charts
+  version: 0.41.0
+digest: sha256:3673778e568bd27334b55b2e90cad4b3b1b65a27a75e5fba62b37fcd3810b7d2
+generated: "2026-08-12T15:47:26.527319+02:00"

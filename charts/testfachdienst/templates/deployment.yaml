@@ -36,6 +36,20 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.mtls.enabled }}
+        - name: testfachdienst-keystore
+          secret:
+            secretName: {{ required "testfachdienst.mtls.keyStore.secretName is required when mtls.enabled=true" .Values.mtls.keyStore.secretName | quote }}
+            items:
+              - key: {{ .Values.mtls.keyStore.key | quote }}
+                path: keystore.p12
+        - name: testfachdienst-truststore
+          secret:
+            secretName: {{ required "testfachdienst.mtls.trustStore.secretName is required when mtls.enabled=true" .Values.mtls.trustStore.secretName | quote }}
+            items:
+              - key: {{ .Values.mtls.trustStore.key | quote }}
+                path: truststore.p12
+        {{- end }}
       containers:
         - name: testfachdienst
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -43,6 +57,45 @@ spec:
           env:
             - name: MANAGEMENT_SERVER_PORT
               value: {{ .Values.managementPort | quote }}
+          {{- if .Values.mtls.enabled }}
+            - name: SPRING_PROFILES_INCLUDE
+              value: {{ .Values.mtls.springProfile | quote }}
+            - name: TLS_KEYSTORE
+              value: {{ .Values.mtls.keyStore.mountPath | quote }}
+            - name: TLS_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "testfachdienst.mtls.keyStore.passwordSecretName is required when mtls.enabled=true" .Values.mtls.keyStore.passwordSecretName | quote }}
+                  key: {{ .Values.mtls.keyStore.passwordSecretKey | quote }}
+            - name: TLS_KEYSTORE_TYPE
+              value: {{ .Values.mtls.keyStore.type | quote }}
+            - name: TLS_KEY_ALIAS
+              value: {{ .Values.mtls.keyStore.alias | quote }}
+            - name: TLS_TRUSTSTORE
+              value: {{ .Values.mtls.trustStore.mountPath | quote }}
+            - name: TLS_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "testfachdienst.mtls.trustStore.passwordSecretName is required when mtls.enabled=true" .Values.mtls.trustStore.passwordSecretName | quote }}
+                  key: {{ .Values.mtls.trustStore.passwordSecretKey | quote }}
+            - name: TLS_TRUSTSTORE_TYPE
+              value: {{ .Values.mtls.trustStore.type | quote }}
+            - name: TLS_CLIENT_AUTH
+              value: {{ .Values.mtls.clientAuth | quote }}
+            - name: MANAGEMENT_SERVER_SSL_CLIENT_AUTH
+              value: {{ .Values.mtls.managementClientAuth | quote }}
+            - name: MANAGEMENT_TLS_KEYSTORE
+              value: {{ .Values.mtls.keyStore.mountPath | quote }}
+            - name: MANAGEMENT_TLS_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "testfachdienst.mtls.keyStore.passwordSecretName is required when mtls.enabled=true" .Values.mtls.keyStore.passwordSecretName | quote }}
+                  key: {{ .Values.mtls.keyStore.passwordSecretKey | quote }}
+            - name: MANAGEMENT_TLS_KEYSTORE_TYPE
+              value: {{ .Values.mtls.keyStore.type | quote }}
+            - name: MANAGEMENT_TLS_KEY_ALIAS
+              value: {{ .Values.mtls.keyStore.alias | quote }}
+          {{- end }}
             - name: OTEL_SDK_DISABLED
               value: {{ .Values.opentelemetry.enabled | ternary "false" "true" | quote }}
           {{- if .Values.opentelemetry.enabled }}
@@ -78,7 +131,12 @@ spec:
           {{- with .Values.env }}
           {{- range . }}
             - name: {{ .name | quote }}
+            {{- if hasKey . "valueFrom" }}
+              valueFrom:
+                {{- toYaml .valueFrom | nindent 16 }}
+            {{- else }}
               value: {{ .value | quote }}
+            {{- end }}
           {{- end }}
           {{- end }}
           {{- with .Values.startupProbe }}
@@ -105,3 +163,13 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.mtls.enabled }}
+            - name: testfachdienst-keystore
+              mountPath: {{ .Values.mtls.keyStore.mountPath | quote }}
+              subPath: keystore.p12
+              readOnly: true
+            - name: testfachdienst-truststore
+              mountPath: {{ .Values.mtls.trustStore.mountPath | quote }}
+              subPath: truststore.p12
+              readOnly: true
+            {{- end }}

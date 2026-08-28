@@ -1,0 +1,24 @@
+global:
+  imagePullSecrets: []
+
+enabled: false
+
+# Full image reference. Configure this per environment; private registry references
+# must stay in private values files so the chart remains publishable.
+image: ""
+imagePullPolicy: Always
+
+# LOAD_DISPENSER_HOST — the target hostname the driver exercises.
+host: ""
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "3"
+    memory: 2Gi
+
+imagePullSecrets: []
+
+# Optional pod affinity/anti-affinity passthrough (raw). Empty = none.
+affinity: {}

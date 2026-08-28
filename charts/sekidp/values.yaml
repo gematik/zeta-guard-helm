@@ -1,0 +1,202 @@
+global:
+  imagePullSecrets: []
+  # Registry prefix for gsi-server/gsi-fedmaster images (full prefix, trailing
+  # slash). Overridden by umbrella chart's global values as a subchart.
+  registry_host: ""
+
+registry_name: ""
+
+# Injects a changing annotation to force pod rollouts on each helm upgrade
+# even when image tags are unchanged.
+devMode: false
+
+# Toggle this chart's Ingress (gsi-server at /sekidp, Fedmaster at
+# /sekidp-fedmaster). NIC mergeable-minion pattern (see charts/testdriver's
+# ingress.yaml); merges onto zeta-guard's ingress-master.yaml, so
+# hostname/ingressClassName below must match zeta-guard.authserver.hostname /
+# zeta-guard.ingressClassName. Default false: opt in per stage (publishing an
+# IdP with known reference signing keys on the shared host is a separate call).
+ingressEnabled: false
+
+# Must match zeta-guard.authserver.hostname (and testdriver.hostname) for the
+# minion to merge onto the shared NIC master. Empty for host-less local setups.
+hostname: ""
+
+ingressClassName: "nginx"
+
+# Use NIC ("nginx.org/...") mergeable-ingress annotations. Set false (with
+# openshiftIngress.enabled: true) for OpenShift Routes instead.
+nginxIngressEnabled: true
+
+# Route /sekidp and /sekidp-fedmaster through tiger-proxy instead of directly
+# (cf. zeta-guard/testdriver.routeViaTigerProxy). Requires a matching
+# tiger-proxy proxyConfig.proxyRoutes entry per path.
+routeViaTigerProxy: false
+
+# Use OpenShift's Route-backed ingress controller with TLS instead of NIC.
+openshiftIngress:
+  enabled: false
+  certName: ""
+
+# gsi-server: gematik's sectoral IDP (SEK-IDP). Publishes its OIDC-Federation
+# entity statement and handles the authorization/token flow. Images from the
+# gem-sekidp pipeline (github.com/gematik/app-gemSekIdp, gsi-server module).
+gsiServer:
+  image:
+    repository: gsi-server
+    tag: "8-4-2-zeta-1-3-1"
+    # Overrides global.registry_host/registry_name (full prefix, trailing slash).
+    registry: ""
+    # Optional digest (e.g. "sha256:...") appended as @<digest>, in addition to tag.
+    digest: ""
+  imagePullPolicy: Always
+  imagePullSecrets: []
+
+  # Service ports only — the container listens on fixed ports 8085 (API)
+  # and 8185 (management/actuator).
+  service:
+    apiPort: 8085
+    managementPort: 8185
+
+  env:
+    # GSI_SERVER_URL: externally-reachable base URL published as issuer (`iss`)
+    # in the entity statement, e.g. http://tiger-proxy/sekidp. Required.
+    serverUrl: ""
+    # GSI_SERVER_URL_MTLS: base URL for the token_endpoint and
+    # pushed_authorization_request_endpoint entries. Defaults to serverUrl.
+    serverUrlMtls: ""
+    # FEDMASTER_SERVER_URL: base URL to fetch Fedmaster's entity statement /
+    # federation_fetch_endpoint. Defaults to bundled fedmaster's Service URL.
+    fedmasterUrl: ""
+    logLevelGematik: debug
+    requestLoggingEnabled: true
+
+  # Optional ConfigMap of extra trusted certs, mounted at /app/certs_trusted
+  # (image VOLUME; tolerates empty dir). Feeds gsi-server's mTLS client allowlist.
+  trustedCerts:
+    configMapName: ""
+
+  # CA certs trusted for gsi-server's outbound HTTPS. An init container builds
+  # a PKCS12 truststore applied via -Djavax.net.ssl.trustStore. Empty = JVM
+  # default trust anchors. Per entry set exactly one form:
+  #   - secretName + secretKey: existing Secret holding one PEM CA cert.
+  #   - cert: inline PEM CA cert, materialized into a chart-managed Secret.
+  additionalTrustedCAs: []
+  # - secretName: zeta-guard-tls
+  #   secretKey: ca.crt
+  # - cert: |
+  #     -----BEGIN CERTIFICATE-----
+  #     ...
+  #     -----END CERTIFICATE-----
+
+  serviceAccount:
+    create: true
+    name: sekidp-gsi-server
+
+  podDisruptionBudget:
+    enabled: false
+    # minAvailable: 1
+    # maxUnavailable: 1
+
+  resources: {}
+
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext: {}
+  #  allowPrivilegeEscalation: false
+  #  readOnlyRootFilesystem: true
+  #  runAsNonRoot: true
+  #  capabilities:
+  #    drop: [ "ALL" ]
+
+# gsi-fedmaster: the federation registry. Publishes its entity statement and
+# serves federation_fetch_endpoint so member IDPs/RPs (incl. bundled
+# gsi-server) get their Fedmaster-signed entity statement. Images from the
+# gem-sekidp pipeline (github.com/gematik/app-gemSekIdp, gsi-fedmaster module).
+fedmaster:
+  image:
+    repository: gsi-fedmaster
+    tag: "8-4-2-zeta-1-3-1"
+    registry: ""
+    digest: ""
+  imagePullPolicy: Always
+  imagePullSecrets: []
+
+  # Service ports only — the container listens on fixed ports 8083 (API)
+  # and 8183 (management/actuator).
+  service:
+    apiPort: 8083
+    managementPort: 8183
+
+  env:
+    # FEDMASTER_SERVER_URL: base URL published as Fedmaster's issuer. Expected
+    # to be the in-cluster Service URL (e.g. http://sekidp-fedmaster:8083);
+    # only gsi-server reaches it (see gsiServer.env.fedmasterUrl). Required.
+    serverUrl: ""
+    # FEDMASTER_REDIRECT_URIS: comma-separated allow-listed redirect URIs.
+    # Empty uses the app's bundled reference defaults.
+    redirectUris: ""
+    # ISSUER_IDP_01: issuer URL of the registered member IDP. Must exactly
+    # match gsiServer.env.serverUrl for entity statement validation; defaults to it.
+    issuerIdp01: ""
+    logLevelGematik: debug
+    requestLoggingEnabled: true
+
+  # Relying parties, rendered into fedmaster.relying-party-configs (see
+  # gsi-fedmaster's application.yml). Each entry:
+  #   issuer: relying party's issuer URL
+  #   organizationName: display name
+  #   keyConfig.fileName: classpath-relative public key file (mounted from
+  #     relyingPartyKeySecretName below at /public-keys)
+  #   keyConfig.keyId: key id; may reference an env placeholder (e.g.
+  #     "${RP01_KEY_ID:}") from relyingPartyKeySecretName
+  #   keyConfig.use / keyConfig.x5cInJwks: passed through as-is
+  relyingPartyConfigs: []
+  # - issuer: https://authserver.example/auth/realms/zeta-guard
+  #   organizationName: authserver
+  #   keyConfig:
+  #     fileName: pubkey.pem
+  #     keyId: "${RP01_KEY_ID:}"
+  #     use: sig
+  #     x5cInJwks: false
+
+  # CA certs trusted for gsi-fedmaster's outbound HTTPS (e.g. resolving a
+  # member's entity statement). Same mechanism/entry forms as
+  # gsiServer.additionalTrustedCAs (see there). Empty = JVM default anchors.
+  additionalTrustedCAs: []
+  # - secretName: zeta-guard-tls
+  #   secretKey: ca.crt
+  # - cert: |
+  #     -----BEGIN CERTIFICATE-----
+  #     ...
+  #     -----END CERTIFICATE-----
+
+  # Secret with public key file(s) for relyingPartyConfigs, mounted at
+  # /public-keys (on the image's classpath, so keyConfig.fileName resolves).
+  # Holds pubkey.pem plus a keyid, populated by terraform/authserver's sekidp
+  # key-sync step, not this chart. Empty = mount nothing.
+  relyingPartyKeySecretName: ""
+
+  serviceAccount:
+    create: true
+    name: sekidp-fedmaster
+
+  podDisruptionBudget:
+    enabled: false
+    # minAvailable: 1
+    # maxUnavailable: 1
+
+  resources: {}
+
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext: {}
+  #  allowPrivilegeEscalation: false
+  #  readOnlyRootFilesystem: true
+  #  runAsNonRoot: true
+  #  capabilities:
+  #    drop: [ "ALL" ]

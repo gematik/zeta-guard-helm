@@ -2,6 +2,285 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.3.1
+
+### changed:
+
+- Raise tag versions
+
+## Release 1.3.0
+
+### known issues:
+
+- Database encryption and integrity for VAU: The readiness endpoint becomes
+  "ready" prematurely. Under load this leads to bad keycloak instances that
+  yield error 500 on most requests.
+    - This is **no Problem for VSDM** and other services that don't use the VAU
+      dbEnc feature.
+    - **Workaround**: Set the `authserver.probes.readiness.initialDelaySeconds`
+      in the kubernetes readiness Probe to a high value, so that spree integrity
+      provider is ready in that time. A value like `240` should be a safe
+      starting point for this.
+
+### added:
+
+- **ZETA Stufe 2 — OIDC mobile-client flow** (
+  `authserver.config.oidcFlowEnabled`,
+  default `false`): mobile clients authenticate via a federated sektoraler
+  Identity Provider (SekIdP) instead of an SMC-B token exchange.
+- **Notification Service** as a bundled, opt-in zeta-guard component
+  (`notificationService.enabled`, default `false`) — the ZETA Stufe 2 push
+  notification management and forwarding service, with its own PEP routes,
+  discovery document, and database.
+- Test-support subcharts for exercising the ZETA Stufe 2 flows locally
+  (`push-gateway`, `sekidp`, `mailcatcher`, `nativedriver`) — not part of ZETA
+  Guard, all disabled by default.
+- `authserver.truststoreReload` (`enabled`, `interval`) lets the authserver pick
+  up refreshed SMC-B, TPM and OCSP trust anchors while it runs, without a
+  restart and without dropping requests. Needs an authserver image > 1.2.3.
+- `provisioningProcessor.schedule` (`enabled`, `time`, `timezone`) keeps the
+  provisioning processor resident as a native sidecar of the authserver and
+  re-runs it daily. Enabled by default; needs Kubernetes >= 1.32 (OpenShift
+  4.19) and a
+  provisioning-processor image that supports `SCHEDULE_TIME`.
+- `spree.config.realm.enabled` is now set to true at the very end in the
+  bootstrap process of keycloak by terraform
+- `telemetryGatewayHost` — sets the fully-qualified hostname the
+  telemetry-gateway
+  is reached at, for clusters where its bare service name does not resolve.
+- `opa.simulation.bundle.verification` to override bundle signature
+  verification for the simulation OPA instance only.
+- `pepproxy.hsmTlsKeyId` / `hsmTlsCert` to configure the PEP TLS HSM key ID and
+  certificate file (defaults unchanged: `tls.p256` / `tls.p256.pem`).
+- `pepproxy.asl_hsm_key` — HSM-backed ASL signer key as `store:hsm:<key-id>`
+  URI; replaces the file-based signer key from the `asl-identity` secret and
+  drops its mount. Requires `pepproxy.hsmProxyAddr`.
+- Session revocation support: `zetaGuardRevocations` cache in the Infinispan
+  server config (dedicated-Infinispan deployments only — the authserver refuses
+  to start
+  without it), `zeta-guard-revocation-events` in the realm's `eventsListeners`
+  (`terraform/authserver/events.tf`, which declares the complete list — check
+  the plan
+  before applying to an existing realm), and `pep_revocation_url` pointing at
+  the
+  authserver's in-cluster Service. That endpoint is intra-cluster only and
+  cannot work
+  through an ingress; with NIC it is denied on every exposed hostname.
+- `authserver.provider.smcB.ocspConnectTimeoutMs` / `ocspReadTimeoutMs` /
+  `ocspFailClosed` (default `false`, fail-open) for the SMC-B OCSP revocation
+  check.
+- `nginxIngressLbMethod` toggle for the sticky-session lb-method on the minion
+  ingress.
+- `cloudnativePg.enablePDB` and `cloudnativePg.storage.pvcTemplate` to
+  parameterize the CNPG PDB and storage class.
+- `cloudnativePg` config surface for `imagePullPolicy`, `affinity`,
+  `monitoring`, `pooler`, and `backup` (pooler and backup disabled by default).
+- `networkPolicy.dns` — make the DNS egress peer of the egress NetworkPolicies
+  configurable (`namespaceSelector`, `podSelector`, `ports`, or a raw `to:`
+  override). Defaults to the upstream `kube-system` / `k8s-app: kube-dns` /
+  port 53 peer, so existing deployments are unchanged. For OpenShift, set the
+  `openshift-dns` selector (`dns.operator.openshift.io/daemonset-dns: default`)
+  and port 5353 — DNS runs in the `openshift-dns` namespace and OVN-Kubernetes
+  evaluates egress post-DNAT, so the destination pod port is 5353, not 53.
+- `pepproxy.nginxConf.proxyLocations` — structured, schema-validated
+  configuration of the resource-server proxy locations. Each entry generates an
+  http-level `upstream` block with connection keepalive, an exact + prefix
+  location pair, and always includes `proxy_headers.conf`; supports
+  `websocket`, `bypassAsl`, `keepalive`, and tpl-rendered `extraConfig`.
+  Replaces the raw `locations` string, which is now **deprecated** and
+  scheduled for removal; setting both at once fails the render (they are
+  mutually exclusive — migrate entirely, do not mix).
+- Dedicated `zeta-guard-ws-minion` Ingress, derived from `proxyLocations`
+  entries with `websocket: true`. The NIC `websocket-services` annotation moves
+  to this minion so only WebSocket paths get `Connection: upgrade` handling —
+  all other locations regain NIC→PEP upstream keepalive (a blanket annotation
+  forced `Connection: close` per request and exhausted NIC ephemeral ports
+  under load).
+- Stable `nginx-ingress-metrics` Service in front of the NIC's Prometheus
+  exporter; the telemetry-gateway now scrapes NIC metrics into the
+  Dienst-Hersteller stream.
+- Expose additional CloudNativePG options: `cloudnativePg.extraParameters` (
+  arbitrary
+  reloadable postgres settings), `sharedPreloadLibraries`,
+  `storage.storageClass`
+  shortcut, and optional dedicated `walStorage` volume
+- Specific information from the policy engine's decision logs will be extracted
+  into OpenTelemetry attributes for further processing.
+- Added counter metrics for ZETA client requests.
+- New config options to configure nginx worker processes in pep.
+  The defaults are the previous values.
+  |value|description|default|
+  |---|---|---|
+  |pepproxy.workerProcesses|Number of worker processes; "auto"=cpu count|auto|
+  |pepproxy.workerConnections|Max. number of connections per worker|16384|
+  |pepproxy.workerRlimitNofile|Max. number of open files, per worker. Should be
+  at least 2*workerConnections|40960|
+- Support for serving the OPA policy bundle from an operator-hosted private
+  registry whose TLS certificate is issued by an internal CA. Note the
+  full-CA-bundle
+  requirement in
+  [How to Use a Custom OCI Registry](docs/how-to_guides/How_to_use_a_custom_OCI_registry.md).
+- `opa.bundleHealthCheck` (default `false`) — surfaces a failed OPA bundle
+  download
+  as `NotReady` via the readiness probe. See
+  [the OPA reference](docs/reference/OPA.md).
+- Various client-ip and forward headers are now stripped by default at NIC, and
+  externalTrafficPolicy now defaults to `Local`, to preserve client IPs.
+    - NIC is now a DaemonSet, so all nodes continue to accept traffic, and don't
+      request cpu resources any more
+- `opa.rolloutRestart` — optional CronJob that periodically restarts the OPA
+  Deployment via `kubectl rollout restart` (default: disabled). Runs on a
+  configurable `schedule` (fixed `Europe/Berlin` timezone), reusing
+  `provisioningProcessor.image` rather than a separate tooling image. The
+  chart creates its own ServiceAccount + minimal RBAC (`get`/`patch` on the
+  `opa` Deployment only) unless `opa.rolloutRestart.serviceAccountName` is
+  set to an externally pre-provisioned ServiceAccount.
+
+### changed:
+
+- The chart now declares `kubeVersion: ">=1.32.0-0"`, the supported platform
+  baseline
+  sidecar init container used by `provisioningProcessor.schedule`.
+- The `filter/ti_siem` whitelist now forwards the new security event
+  `authn_client_deleted` to TI SIEM.
+- Ingresses are split per route, since NIC applies `lb-method`, `ssl-services`
+  and
+  `location-snippets` per minion: `zeta-guard-pep` (`/`, renamed from
+  `zeta-guard-minion`), `zeta-guard-auth` (`/auth`, new) and — with
+  `authserver.adminHostname` — `zeta-guard-admin-auth` (`/auth` on that
+  hostname, renamed
+  from `zeta-guard-admin-minion`). `lb-method` on `/auth` is **required**, not
+  tuning:
+  nonces are kept per node, so with it off and more than one authserver replica,
+  token
+  exchange fails with `Invalid nonce value` about half the time.
+- `zeta-guard-admin-auth` gained the `ssl-services` annotation it was missing (
+  it routes
+  to the authserver's `https` port when TLS is enabled).
+- with `authserver.adminHostname` set, `/auth/admin` is denied with `403` on the
+  public hostname. The `zeta-guard-pep` minion routes that one path to the PEP,
+  which denies it, so the block needs nothing but plain Ingress path routing and
+  holds for **any** ingress controller — overlapping prefixes resolve
+  longest-match-first.
+- NIC subchart install is now gated by `nginx-ingress.enabled` (was
+  `nginxIngressEnabled`); annotations still gated by `nginxIngressEnabled`.
+- Only logs and metrics from resource servers are exported to TI SIM.
+- Only spans from resource servers and HTTP server spans from the ZETA guard
+  HTTP proxy are exported to TI SIM.
+- All logs and spans with a service name starting with "rs." are recognized as
+  coming from a resource server.
+- Only logs, metrics and spans about specific security events from ZETA guard
+  are exported to TI SIEM:
+    - Metrics and spans about detected attacks
+    - HTTP server spans received by authorization server and HTTP proxy
+    - HTTP client spans that trigger policy decisions
+- Every log, metric, and span now has the resource attribute `service.version`
+  with the chart version as value.
+- Configured sending queue, retry behavior and timeout of telemetry exporter
+  `otlp_grpc/ti_sim`.
+- PEP nginx: `reuseport` on all listeners (per-worker accept queues),
+  widened `net.ipv4.ip_local_port_range` via pod sysctl and raised
+  `worker_rlimit_nofile`
+  to optimize connection handling
+- NIC ConfigMap defaults: upstream `keepalive`, `keepalive-requests: "10000"`,
+  `worker-connections`, and `worker-rlimit-nofile` — prevents ephemeral-port
+  exhaustion (TIME_WAIT churn) on NIC→backend connections under load.
+- Resource baselines sized for the 300 rps performance target: authserver
+  memory limit 6Gi, PEP 3 CPU / 2Gi requests, CNPG 2 CPU / 2Gi requests
+  (3Gi limit), `sharedBuffers: 512MB`, `maxConnections: 250`, and
+  `wal_compression: on` (≈3× WAL volume reduction, fewer forced checkpoints).
+- The following security events are reported to TI-SIEM:
+    - client registrations
+    - token exchanges
+- Renamed TI-SIM-related values, Secret and CronJob.
+    - Replaced value `gematik.idTokenAudience` with
+      `gematik.tiSim.idTokenAudience`.
+    - Replaced value `gematik.serviceAccountEmailAddress` with
+      `gematik.tiSim.serviceAccountEmailAddress`.
+- Added separate values, Secret, CronJob, OTLP exporter, etc. for TI-SIEM.
+- Any OPA status update log containing error codes will have severity 'error'
+  set.
+- Any log from ZETA guard with severity 'error' or 'fatal' is exported to
+  TI-SIM.
+- Repaired counter metric of detected attacks.
+- Every log, metric and span passing through the telemetry-gateway receives the
+  attribute `server.address` if missing.
+- Updated OpenTelemetry collector to version 0.155.0
+- Configured telemetry exporters with persistent storage for sending queues.
+- updates OPA-Image to 1.19.0-static
+- updates PostgreSQL-Image to postgresql:17.11-standard-trixie
+
+### fixed:
+
+- with `telemetryGatewayEnabled: false`, OPA logged `status update failed, server
+  replied with HTTP 403 Forbidden` once per bundle poll: an empty
+  `status.service` is silently defaulted by OPA to the first configured
+  service — in bundle mode the policy registry, which rejects the status POST.
+  `status` and
+  `decision_logs` are now rendered only with a sink, never with an empty
+  `service`. Policy decisions were never affected.
+- with `authserver.adminHostname` set, the Keycloak admin console was
+  unreachable: `--hostname-admin` was passed without the `/auth` context path,
+  so Keycloak served the console at `/auth/admin/` but redirected to `/admin/` —
+  a path neither Keycloak nor the admin Ingress answers. Both hostname flags now
+  carry `/auth`. Discovery and the token `iss` are unchanged.
+- secure Keycloak admin passwords (containing spaces, `&`, `$`, `+`, `"` or
+  backticks) now work in the authserver config
+- telemetry-gateway crash-looped on fresh namespaces until the first
+  token-renewer CronJob run: the `ti-siem-token` and `ti-sim-token` Secrets now
+  always render `data.token` — a placeholder on first install, the live value
+  carried forward via `lookup` afterwards — so the pod starts immediately and
+  upgrades never drop the renewed tokens. On the first upgrade from the
+  pre-split chart, the legacy `gematik-oidc-token` Secret seeds both new
+  Secrets so exports keep working until the renewers run.
+- cert-manager first-issuance deadlock on fresh namespaces: the chart now
+  creates an explicit `Certificate` with
+  `cert-manager.io/issue-temporary-certificate`, so the NIC can serve a
+  temporary certificate while the real one is being issued (ingress-shim does
+  not propagate that annotation, and the ACME HTTP-01 solver could never be
+  reached through a TLS-less ingress).
+
+  **Upgrade note for existing namespaces:** previous releases let ingress-shim
+  create the `zeta-guard-tls` (and `zeta-guard-admin-tls`) Certificates from
+  Ingress annotations, and helm refuses to manage such pre-existing objects
+  (`invalid ownership metadata`). The chart handles this automatically: while
+  a foreign Certificate exists it is skipped from the release (the existing
+  object keeps serving and renewing TLS), and a one-shot
+  `post-install`/`post-upgrade` hook Job adopts it into the release —
+  including removing the stale `ownerReference`, without which ingress-shim
+  would garbage-collect the object once the Ingress annotations are gone. The
+  **next** helm operation then renders and manages the Certificate normally
+  (adoption is metadata-only: the TLS Secret is untouched and no certificate
+  is reissued). Should that operation report a server-side-apply field
+  conflict (only possible if the old Certificate's spec drifted from the
+  chart values), run it once with `helm upgrade --force-conflicts`.
+
+  When installing with `--no-hooks`, perform the adoption manually before
+  upgrading (repeat for `zeta-guard-admin-tls` if present):
+
+  ```sh
+  kubectl -n <ns> patch certificate zeta-guard-tls --type=json \
+    -p='[{"op":"remove","path":"/metadata/ownerReferences"}]'
+  kubectl -n <ns> annotate certificate zeta-guard-tls \
+    meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<ns>
+  kubectl -n <ns> label certificate zeta-guard-tls app.kubernetes.io/managed-by=Helm
+  ```
+- non-constrained tls 1.3 ciphers (accept only
+  `TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256`
+  instead of all defaults) and GS-A_5322 compliance (disable
+  `ssl_session_tickets`
+  because we can't guarantee compliant STEK, and enable shared session cache)
+
+### removed
+
+- all cpu limits in the chart defaults. They lead to issues with dropped
+  connections
+  during the time processes get “frozen” on quota exhaustion, and other knock-on
+  effects.
+- dead values `opa.workloadIdentityFederation.sts.{audience,tokenUrl,iamUrl,scope}` and
+  `…gar.host` from schema/examples — never read by any template; the schema now rejects
+  unknown `sts` keys.
+
 ## Release 1.2.3
 
 ### added:
@@ -53,6 +332,18 @@
   (Note: The authserver version is not a typo. In the 3rd digit release versions
   of the individual components of the helm chart may differ from the helm chart
   version.)
+- OTEL config for pep (+spanmetrics). It now emits OTLP logs, traces, and
+  metrics (in addition to nginx-otel defaults)
+- New value `issuer` — emits the namespace-scoped `cert-manager.io/issuer`
+  annotation on the master Ingress resources instead of
+  `cert-manager.io/cluster-issuer`. Takes precedence over `clusterIssuer` when
+  set. Lets operators who are not permitted to deploy cluster-scoped
+  `ClusterIssuer` resources (governance/security policy) use a namespace-scoped
+  cert-manager `Issuer`. Default `""` keeps the existing ClusterIssuer behavior.
+- Updated OpenTelemetry collector to version 0.154.0 and added spanmetrics
+  connector
+- Updated metric `attack.detection.count` to count attack spans from all
+  sources, instead of attack logs from only the authorization server
 
 ## Release 1.2.0
 
@@ -118,9 +409,10 @@
   Keycloak creates automatically on realm initialization (e.g.
   `rsa-enc-generated`) are deleted unconditionally as part of every Terraform
   run.
-- Copy OpenTelemetry attribute `http.status_code` to
-  `http.response.status_code`. This is a workaround to fulfill A_27725 required
-  until PEP adheres to OpenTelemetry semantic conventions 1.41.
+- Copy existing OpenTelemetry attributes to `client.address`,
+  `http.request.method`, `http.response.status_code`, `user_agent.original` und
+  `server.address`. This is a workaround to fulfill A_27725 required until PEP
+  adheres to OpenTelemetry semantic conventions 1.41.
 - some APIs of the authserver now conform with gemSpec_ZETA 1.3.0 better but
   break compatibility with the client SDK 1.0.x . This affects OCSP for SMC-Bs
   audiences and some expected token content among other things (See

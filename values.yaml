@@ -7,6 +7,9 @@ global:
   registry: ""
   registry_host: ""
   enableDNSRedirect: false
+  # Istio PeerAuthentication resources
+  istio:
+    enabled: false
   dns:
     tigerStaticClusterIP: "10.96.3.11"
     redirects:
@@ -133,6 +136,17 @@ global:
             <distributed-cache name="loginFailures" statistics="true">
                 <encoding media-type="application/x-protostream" />
             </distributed-cache>
+            <!--
+              Session revocation block list (REVOCATION_CACHE in the zeta-guard-revocation
+              provider). Replicated so a block reaches every node, including those holding
+              PEP subscriptions. Entries carry their own lifespan, so no expiration or
+              eviction here: dropping a block would silently un-revoke a session.
+              Unlike embedded mode, the provider cannot create this itself — it probes the
+              cache at startup and refuses to boot without it.
+            -->
+            <replicated-cache name="zetaGuardRevocations" statistics="true">
+                <encoding media-type="application/x-protostream" />
+            </replicated-cache>
             {{- if .Values.global.infinispanExternal.hsm.enabled }}
             <transport server:security-realm="cluster-transport"/>
             {{- end }}
@@ -141,14 +155,6 @@ global:
 
 # Keep tags empty by default; env files can enable as needed
 tags: { }
-
-exauthsim:
-  serviceAccount:
-    create: true
-    name: exauthsim
-  podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
 
 zetaTlsTestToolServiceEnabled: false
 
@@ -175,6 +181,15 @@ issuers:
 popp-mocks:
   enabled: false
   # Needed when poppIssuer points to popp-statics (JWKS), or adjust /popp target + poppIssuer to your JWKS endpoint.
+
+push-gateway:
+  enabled: false
+
+sekidp:
+  enabled: false
+
+mailcatcher:
+  enabled: false
 
 testdriver:
   serviceAccount:
@@ -212,7 +227,6 @@ testMonitoringService:
             cpu: 250m
             memory: 1Gi
           limits:
-            cpu: "1"
             memory: 2Gi
         livenessProbe:
           failureThreshold: 6
@@ -233,22 +247,38 @@ testMonitoringService:
         requests:
           memory: 512Mi
         limits:
-          cpu: 500m
           memory: 2Gi
       config:
         exporters:
-          otlp:
-            sending_queue:
-              queue_size: 100
           otlphttp/prometheus:
             endpoint: http://prometheus:9090/api/v1/otlp
         service:
           pipelines:
+            # These three (logs/metrics/traces, bare) are the upstream
+            # opentelemetry-demo chart's own default pipelines, wired for
+            # the demo app's built-in receivers — nothing we run actually
+            # feeds them (every demo component that would is disabled;
+            # frontend-proxy, the one we keep, doesn't send telemetry here).
+            # Tried nulling them out entirely, but the chart's own
+            # applyAnnotationDiscoveryConfig template unconditionally reads
+            # `.service.pipelines.metrics`/`.logs` as maps regardless of
+            # whether we use them, so removing the keys crashes template
+            # rendering itself, earlier than the collector's own config
+            # validation. So they stay, patched instead:
             traces:
               exporters:
-                - otlp
+                - otlp_grpc/jaeger
                 - spanmetrics
             metrics:
+              receivers:
+                - otlp
+                - kafkametrics
+                - spanmetrics
+                - prometheus/ad
+                - receiver_creator/metrics
+                - hostmetrics
+                - kubeletstats
+                - k8s_cluster
               exporters:
                 - otlphttp/prometheus
             logs:
@@ -268,6 +298,10 @@ testMonitoringService:
 
 zeta-guard:
   authserver:
+    config:
+      # optimised TTLs for nightly load tests, so we start with a clean DB each time
+      userIdleTTL: "PT22H"
+      clientIdleTTL: "PT22H"
     dbEnc:
       keychainGenerator:
         image:
@@ -278,16 +312,30 @@ zeta-guard:
     container:
       resources:
         limits:
-          cpu: "4"
           memory: "4Gi"
         requests:
-          cpu: "2"
-          memory: "4Gi"
+          cpu: "1"
+          memory: "3Gi"
   authServerLogConsoleOutput: default
   authServerMetricsEnabled: true
   authServerTracingEnabled: true
   cloudnativePg:
-    imageName: ghcr.io/cloudnative-pg/postgresql:17.10-standard-trixie
+    imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        # No cpu limit: avoids CFS throttling; cpu.request is the floor, DB can burst.
+        memory: 2Gi
+    # with single instance DBs, PDB would block any node drain/upgrade as it is minAvailable=1
+    enablePDB: false
+  notificationService:
+    db:
+      cloudnativePg:
+        # Same image as keycloak-db above; the subchart default points at the gematik mirror
+        imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
+        enablePDB: false
   gematikConnectionEnabled: false
   # Name of the Kubernetes Secret containing the gematik certificate chain for
   # verifying the cosign signature of the provisioning data image. The Secret
@@ -374,7 +422,7 @@ zeta-guard:
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
             proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
-        
+
             # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
             # This is ok and desired for this test setup.
             # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
@@ -388,16 +436,22 @@ zeta-guard:
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
             proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
-        
+
             # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
             # This is ok and desired for this test setup.
             # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
             satisfy all;
             allow all;
         }
-  pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter@sha256:0bf30a7c0ec24554a87063905f505a4ae4ea49043eab68f03660474512ba5fc8
+    resources:
+      limits:
+        memory: "1Gi"
+      requests:
+        cpu: "1"
+        memory: "500Mi"
   pepproxyMetricsEnabled: true
   pepproxyTracingEnabled: true
+
   telemetryGatewayEnabled: true
   telemetry-gateway:
     config:
@@ -427,11 +481,13 @@ zeta-guard:
           traces/dienst_hersteller:
             exporters:
               - debug
+              - spanmetrics
           traces/ti_sim:
             exporters:
               - debug
           traces/ti_siem:
             exporters:
+              - count/siem
               - debug
     extraVolumeMounts: [ ]
     extraVolumes: [ ]
@@ -439,3 +495,6 @@ zeta-guard:
 smcb_keystore:
   keystore: "please set me"
   password: "please set me"
+
+lgtm:
+  storageClassName: managed-csi-premium

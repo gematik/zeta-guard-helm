@@ -1,0 +1,5 @@
+apiVersion: v2
+name: push-gateway
+description: Thin local/demo deployment of gematik's Push Gateway (single BOTH-mode instance + minimal Postgres/Artemis)
+type: application
+version: 0.0.1

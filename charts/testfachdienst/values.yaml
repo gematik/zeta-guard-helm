@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: testfachdienst
-  tag: 1.2.0
+  tag: 1.3.0
 imagePullPolicy: Always
 
 containerPort: 8080
@@ -54,6 +54,29 @@ opentelemetry:
     service.namespace: zeta-local
     service.version: latest
     deployment.environment.name: local
+
+mtls:
+  enabled: false
+  springProfile: mtls
+  clientAuth: need
+  # Keep disabled for Kubernetes HTTP probes unless probes are changed to use a
+  # client certificate.
+  managementClientAuth: none
+  keyStore:
+    secretName: ""
+    key: keystore.p12
+    mountPath: /etc/testfachdienst/tls/keystore.p12
+    passwordSecretName: ""
+    passwordSecretKey: password
+    type: PKCS12
+    alias: app
+  trustStore:
+    secretName: ""
+    key: truststore.p12
+    mountPath: /etc/testfachdienst/tls/truststore.p12
+    passwordSecretName: ""
+    passwordSecretKey: password
+    type: PKCS12
 
 hostname: ""
 

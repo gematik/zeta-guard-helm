@@ -1,0 +1,26 @@
+# lgtm
+
+UI should be available at: https://{{ .Values.hostname }}/grafana
+
+# admin
+
+To retrieve the grafana admin password, run:
+
+  kubectl get secret -n '{{ .Release.Namespace }}' lgtm-grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; printf "\n"
+
+Secret updates will *not* update the password of an existing instance, to reset it:
+
+  kubectl exec -n '{{ .Release.Namespace }}' deploy/lgtm -- grafana cli admin reset-admin-password '<your pw>'
+
+plus also update the value in the secret by hand, for the next person:
+
+  kubectl edit secret -n '{{ .Release.Namespace }}' lgtm-grafana-admin
+
+# pvc
+
+pvc.lgtm-data has:
+  helm.sh/resource-policy: keep
+
+So it survives normal uninstalls, unless explicitly deleted.
+
+

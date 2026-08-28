@@ -1,0 +1,520 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Single-pod grafana/otel-lgtm stack: the Diensthersteller-side telemetry
+     consumer for load-test/debug stages. Fed exclusively by the
+     telemetry-gateway's dienst_hersteller pipelines (override their exporters
+     to otlp -> lgtm:4317 in the stage values) — that stream carries everything
+     exactly once, so no duplicate spans arrive here. The embedded collector is
+     deliberately a dumb sink: enrichment, redaction, OPA/syslog ingestion,
+     spanmetrics and the product scrape jobs (incl. nginx-ingress via the
+     stable nginx-ingress-metrics Service) all live in the telemetry-gateway.
+     Only scrapes the gateway cannot reach stay here (kubelet/cadvisor, lgtm
+     self-scrape). */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lgtm-otelcol-config
+data:
+
+  tempo-config.yaml: |
+    server:
+      http_listen_port: 3200
+      grpc_listen_port: 9096
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "127.0.0.1:4417"
+            http:
+              endpoint: "127.0.0.1:4418"
+
+    ingester:
+      trace_idle_period: 1s
+      max_block_duration: 1s
+      flush_check_period: 1s
+      lifecycler:
+        address: 127.0.0.1
+        ring:
+          kvstore:
+            store: inmemory
+          replication_factor: 1
+        min_ready_duration: 1s
+
+    memberlist:
+      bind_addr: [127.0.0.1]
+      bind_port: 7947
+
+    query_frontend:
+      mcp_server:
+        enabled: true
+
+    querier:
+      frontend_worker:
+        frontend_address: 127.0.0.1:9096
+
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /data/tempo/wal
+        local:
+          path: /data/tempo/blocks
+
+    metrics_generator:
+      processor:
+        local_blocks:
+          filter_server_spans: false
+        span_metrics:
+          dimensions:
+            - service_name
+            - operation
+            - status_code
+      traces_storage:
+        path: /data/tempo/generator/traces
+      storage:
+        path: /data/tempo/generator/wal
+        remote_write:
+          - url: http://127.0.0.1:9090/api/v1/write
+            send_exemplars: true
+
+    compactor:
+      compaction:
+        # bounded trace storage: without this, Tempo keeps blocks 14 days and
+        # a 100%-sampled load test fills the PVC overnight (~12GB/h at 800rps).
+        # 12h covers peeking at spans of an overnight run; metrics carry the
+        # long-term record
+        block_retention: 12h
+
+    overrides:
+      # metrics_generator_processors: [service-graphs, local-blocks, span-metrics]
+      metrics_generator_processors: [local-blocks]
+
+  otelcol-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            # default 4MiB rejects large span batches as PERMANENT errors
+            # (silent span loss upstream); the gateway also caps its batch
+            # size, this is the second line of defense
+            max_recv_msg_size_mib: 32
+          http:
+            endpoint: 0.0.0.0:4318
+            cors:
+              allowed_origins:
+                - http://*
+      prometheus/collector:
+        config:
+          scrape_configs:
+            - job_name: lgtm-otelcol
+              scrape_interval: 1s
+              static_configs:
+                - targets: ["127.0.0.1:8888"]
+
+            # kubelet-embedded cAdvisor: cgroup truth per container. Above all
+            # for CFS throttling (container_cpu_cfs_throttled_*) — CPU limits
+            # freeze pods in 100ms windows, invisible to app-level metrics.
+            # Cluster-operator monitoring, deliberately NOT in the
+            # telemetry-gateway stream. Requires the lgtm ServiceAccount
+            # (nodes + nodes/metrics RBAC).
+            - job_name: cadvisor
+              scrape_interval: 15s
+              scheme: https
+              metrics_path: /metrics/cadvisor
+              tls_config:
+                insecure_skip_verify: true  # kubelet serving certs are self-signed
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_node_name]
+                  target_label: node
+              metric_relabel_configs:
+                # keep only what the dashboards use — full cadvisor is a
+                # cardinality bomb for a single-pod prometheus
+                - source_labels: [__name__]
+                  regex: container_cpu_usage_seconds_total|container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_cpu_cfs_throttled_seconds_total|container_memory_working_set_bytes
+                  action: keep
+                # this lgtm observes exactly its own release namespace — the
+                # dashboards rely on that and carry no namespace filters
+                - source_labels: [namespace]
+                  regex: {{ .Release.Namespace }}
+                  action: keep
+                # drop pause containers and cgroup-parent aggregate rows
+                - source_labels: [container]
+                  regex: POD|
+                  action: drop
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: "/ready"
+
+    processors:
+      batch:
+      probabilistic_sampler:
+        sampling_percentage: {{ .Values.samplingPercentage }}
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 4096
+        spike_limit_mib: 1024
+
+    exporters:
+      otlp_http/metrics:
+        endpoint: http://127.0.0.1:9090/api/v1/otlp
+        tls:
+          insecure: true
+      otlp_http/traces:
+        endpoint: http://127.0.0.1:4418
+        tls:
+          insecure: true
+      otlp_http/logs:
+        endpoint: http://127.0.0.1:3100/otlp
+        tls:
+          insecure: true
+      otlp/profiles:
+        endpoint: http://127.0.0.1:4040
+        tls:
+          insecure: true
+      debug/metrics:
+        verbosity: detailed
+      debug/traces:
+        verbosity: detailed
+      debug/logs:
+        verbosity: detailed
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          # sampling only affects what Tempo stores; RED metrics are derived
+          # upstream in the gateway from the unsampled stream
+          receivers: [otlp]
+          processors: [memory_limiter, probabilistic_sampler, batch]
+          exporters: [otlp_http/traces]
+        metrics:
+          receivers: [otlp, prometheus/collector]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/metrics]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/logs]
+        profiles:
+          receivers: [otlp]
+          exporters: [otlp/profiles]
+---
+{{- /* Dashboards are DRIVEN from the repo (charts/lgtm/dashboards/):
+     applied on every pod start, clobbering live state — the JSON is the
+     source of truth. Dashboards stay ordinary db dashboards (editable in the
+     UI, exportable via the API); live edits survive until the next rollout,
+     so persist them FIRST via .local/dump-dashboards.sh (+ make deps).
+     A checksum annotation on the Deployment rolls the pod when the JSON
+     changes, so `make deploy` publishes dashboard edits. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lgtm-dashboards
+  labels: { app: lgtm }
+data:
+  apply-dashboards.sh: |
+    #!/usr/bin/env bash
+    # Clobber-apply repo dashboards — runs alongside run-all.sh, exits after work.
+    set -u
+    until curl -sf -o /dev/null http://127.0.0.1:3000/api/health; do sleep 2; done
+    # seatbelt: snapshot live dashboards to the PVC before clobbering, so a
+    # forgotten dump-before-deploy is recoverable (kubectl cp them back out)
+    backup="/data/dashboard-backups/$(date +%Y%m%dT%H%M%S)"
+    mkdir -p "$backup"
+    ls -dt /data/dashboard-backups/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf
+    for f in /otel-lgtm/zeta-dashboards/*.json; do
+      # resource apiVersion (e.g. dashboard.grafana.app/v2) doubles as API path.
+      # NOTE: the ConfigMap JSON is ONE LINE (helm toJson) — extraction must
+      # take the FIRST occurrence in document order (metadata.name precedes
+      # spec), so grep -o (one match per output line), NOT a greedy sed .*
+      av=$(grep -o '"apiVersion" *: *"[^"]*"' "$f" | head -1 | cut -d'"' -f4)
+      name=$(grep -o '"name" *: *"[^"]*"' "$f" | head -1 | cut -d'"' -f4)
+      base="http://127.0.0.1:3000/apis/${av}/namespaces/default/dashboards"
+      curl -sf -u "admin:${GF_SECURITY_ADMIN_PASSWORD}" \
+        "${base}/${name}" -o "${backup}/${name}.json" || rm -f "${backup}/${name}.json"
+      # upsert: PUT without metadata.resourceVersion = unconditional overwrite
+      # (the seed files carry none); 404 = doesn't exist yet -> POST create.
+      # NOT delete+create: the delete is acknowledged before the row is gone,
+      # so an immediate create races into 409 AlreadyExists.
+      code=$(curl -s -o /tmp/dashboard-apply-out -w '%{http_code}' \
+        -u "admin:${GF_SECURITY_ADMIN_PASSWORD}" \
+        -H 'Content-Type: application/json' \
+        -X PUT "${base}/${name}" \
+        --data-binary @"$f")
+      if [ "$code" = "404" ]; then
+        code=$(curl -s -o /tmp/dashboard-apply-out -w '%{http_code}' \
+          -u "admin:${GF_SECURITY_ADMIN_PASSWORD}" \
+          -H 'Content-Type: application/json' \
+          -X POST "${base}" \
+          --data-binary @"$f")
+      fi
+      case $code in
+        200|201|202) echo "dashboard applied ($code): $f" ;;
+        *) echo "dashboard apply FAILED ($code): $f: $(cat /tmp/dashboard-apply-out)" ;;
+      esac
+    done
+  {{- range $path, $file := .Files.Glob "dashboards/*.json" }}
+  {{- $d := $file | toString | fromJson }}
+  {{ base $path }}: |-
+{{ dict "apiVersion" $d.apiVersion "kind" $d.kind "metadata" (dict "name" $d.metadata.name) "spec" $d.spec | toJson | indent 4 }}
+  {{- end }}
+---
+{{- /* Scraping kubelet/cadvisor (container_cpu_cfs_* throttling metrics etc.)
+     requires authenticating to the kubelet and listing nodes */}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lgtm
+  labels: { app: lgtm }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: lgtm-cadvisor-{{ .Release.Namespace }}
+  labels: { app: lgtm }
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lgtm-cadvisor-{{ .Release.Namespace }}
+  labels: { app: lgtm }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: lgtm-cadvisor-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: lgtm
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lgtm
+  labels: { app: lgtm }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # single in-container DB; no rolling overlap
+  selector:
+    matchLabels: { app: lgtm }
+  template:
+    metadata:
+      labels: { app: lgtm }
+      annotations:
+        # roll the pod when the repo dashboards change, so `make deploy`
+        # (re-)applies them — see the lgtm-dashboards ConfigMap
+        checksum/dashboards: {{ (.Files.Glob "dashboards/*.json").AsConfig | sha256sum }}
+    spec:
+      serviceAccountName: lgtm
+      containers:
+        - name: lgtm
+          # pinned: :latest jumped to Grafana v13 mid-week and broke startup
+          # (renderer token handling changed); bump deliberately
+          image: grafana/otel-lgtm:0.28.0
+          command: ["/usr/bin/bash", "-c"]
+          args:
+            - |
+              bash /otel-lgtm/zeta-dashboards/apply-dashboards.sh &
+              exec /otel-lgtm/run-all.sh
+          env:
+            # - { name: ENABLE_LOGS_OTELCOL, value: "true" }
+            # - { name: ENABLE_LOGS_ALL, value: "true" }
+            # - { name: ENABLE_LOGS_PROMETHEUS, value: "true" }
+            {{- with .Values.prometheusArgs }}
+            - { name: PROMETHEUS_EXTRA_ARGS, value: "{{ . }}" }
+            {{- end }}
+            {{- if .Values.hostname }}
+            # the ingress does NOT strip /grafana (no rewrites entry for the
+            # grafana service) — Grafana serves itself under the subpath
+            - name: GF_SERVER_ROOT_URL
+              value: "https://{{ .Values.hostname }}/grafana/"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+            {{- end }}
+            # the otel-lgtm image defaults to anonymous admin access — unsafe
+            # behind a public ingress; login is always required. The secret is
+            # only honored on Grafana's first boot with a fresh db — see the
+            # NOTE on the lgtm-grafana-admin Secret.
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lgtm-grafana-admin
+                  key: admin-password
+            # PNG export via the renderer sidecar (the otel-lgtm image has no
+            # Chromium, so the in-process plugin cannot work)
+            - name: GF_RENDERING_SERVER_URL
+              value: "http://127.0.0.1:8081/render"
+            - name: GF_RENDERING_CALLBACK_URL
+              # must match how grafana serves itself (subpath, see root_url)
+              value: "http://127.0.0.1:3000/grafana/"
+            # Grafana v13+ refuses to START with the default renderer token;
+            # must match the renderer container's AUTH_TOKEN
+            - name: GF_RENDERING_RENDERER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lgtm-grafana-admin
+                  key: admin-password
+          ports:
+            - { name: grafana,      containerPort: 3000 }
+            - { name: pyroscope,    containerPort: 4040 }
+            - { name: otlp-grpc,    containerPort: 4317 }
+            - { name: otlp-http,    containerPort: 4318 }
+            - { name: prometheus,   containerPort: 9090 }
+          volumeMounts:
+            - name: otelcol-config
+              mountPath: /otel-lgtm/otelcol-config.yaml
+              subPath: otelcol-config.yaml
+              readOnly: true
+            - name: otelcol-config
+              mountPath: /otel-lgtm/tempo-config.yaml
+              subPath: tempo-config.yaml
+              readOnly: true
+            - name: lgtm-data
+              mountPath: /data
+            - name: dashboards
+              mountPath: /otel-lgtm/zeta-dashboards
+              readOnly: true
+
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            exec: { command: [test, -f, /tmp/ready] } # built-in "looks ready to me" signal
+            periodSeconds: 10
+            failureThreshold: 90 # could take a while e.g. prom WAL replay
+          livenessProbe: # prom likes to die
+            httpGet: { path: /api/v1/status/runtimeinfo, port: 9090 }
+            periodSeconds: 15
+            failureThreshold: 4
+          readinessProbe: # when the collector is ready we can accept traffic
+            httpGet: { path: /ready, port: 13133 }
+            periodSeconds: 5
+        - name: renderer
+          image: grafana/grafana-image-renderer:v5.10.2
+          env:
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lgtm-grafana-admin
+                  key: admin-password
+          ports:
+            - { name: renderer, containerPort: 8081 }
+          resources:
+            requests: { memory: 512Mi, cpu: 500m }
+            limits:   { memory: 1Gi }
+          readinessProbe:
+            httpGet: { path: /, port: 8081 }
+            periodSeconds: 10
+      volumes:
+        - name: otelcol-config
+          configMap:
+            name: lgtm-otelcol-config
+        - name: lgtm-data
+          persistentVolumeClaim:
+            claimName: lgtm-data
+        - name: dashboards
+          configMap:
+            name: lgtm-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lgtm
+  labels: { app: lgtm }
+spec:
+  selector: { app: lgtm }
+  ports:
+    - { name: grafana,      port: 3000,  targetPort: 3000 }
+    - { name: pyroscope,    port: 4040,  targetPort: 4040 }
+    - { name: otlp-grpc,    port: 4317,  targetPort: 4317 }
+    - { name: otlp-http,    port: 4318,  targetPort: 4318 }
+    - { name: prometheus,   port: 9090,  targetPort: 9090 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels: { app: lgtm }
+spec:
+  selector: { app: lgtm }
+  ports:
+    - { name: grafana, port: 3000, targetPort: 3000 }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lgtm-grafana-admin
+  labels: { app: lgtm }
+  annotations:
+    # Grafana only honors the password on FIRST boot with a fresh db — it gets
+    # hashed into the grafana db on pvc lgtm-data, which is also "keep". Keep
+    # the Secret in lockstep with the pvc across uninstalls, so a reinstall
+    # (same release name -> helm re-adopts) keeps Secret and db consistent.
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  # Precedence: explicit lgtm.adminPassword > existing Secret (reused even on
+  # install, thanks to resource-policy keep) > freshly generated (crypto/rand).
+  # NOTE: setting a NEW value later does not change the effective password —
+  # grafana ignores it on a non-fresh db. To reset:
+  # kubectl exec -n <ns> deploy/lgtm -- grafana cli admin reset-admin-password '<pw>'
+  # and update the Secret by hand to match, for the next person.
+  {{- $existingSecret := lookup "v1" "Secret" .Release.Namespace "lgtm-grafana-admin" }}
+  {{- $existingPw := index ($existingSecret.data | default dict) "admin-password" | default "" | b64dec }}
+  admin-password: {{ .Values.adminPassword | default $existingPw | default (randAlphaNum 24) | quote }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lgtm-data
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storageRequest }}
+  storageClassName: {{ .Values.storageClassName }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lgtm
+  annotations:
+    nginx.org/mergeable-ingress-type: "minion"
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  rules:
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- /* Prometheus is intentionally NOT exposed here: its UI/API has
+               no authentication. Use kubectl port-forward deploy/lgtm 9090
+               for occasional direct PromQL access. */}}
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  name: grafana

@@ -98,6 +98,8 @@ spec:
                   name: {{ .Values.opa.bundle.credentials.secretRef.name }}
                   key: token
           {{- end }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.version={{ .Chart.Version }}"
             {{- include "zeta-guard.proxyEnvVars" .Values.global | nindent 12 }}
           args:
             - "run"
@@ -124,7 +126,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health{{ if and .Values.opa.bundle.enabled .Values.opa.bundleHealthCheck }}?bundles=true{{ end }}
               port: http
             initialDelaySeconds: 3
             periodSeconds: 10
@@ -156,6 +158,7 @@ spec:
             - name: trust-data
               mountPath: "/var/trust-data"
               readOnly: true
+            {{- include "zeta-guard.provisioningProcessor.registryCaVolumeMount" . | nindent 12 }}
       volumes:
         {{- if not .Values.opa.bundle.enabled }}
         - name: opa-policy

@@ -156,11 +156,10 @@ zeta-guard:
 **PEP (`pepproxy.replicaCount > 1`):** Sticky sessions are required and 
 handled automatically: the bundled NIC sets a `zeta_route` cookie on the first
 response and routes by `hash $zeta_route consistent`. The client must support cookies
-(zeta-sdk does); no further config needed.
-
-NGINX-Ingress-Controller routes requests using
-`hash $http_x_forwarded_for consistent` — the real client IP from the
-`X-Forwarded-For` header ensures each client always reaches the same PEP pod.
+(zeta-sdk does); no further config needed. This lb-method is controlled by
+`nginxIngressLbMethod` (default `true`) and relies on the NIC's `$zeta_route`
+http-snippets — set `nginxIngressLbMethod: false` when using an external NIC that
+does not provide those snippets.
 
 **Authserver (`authserver.replicaCount > 1`):** Multi-replica works out of the
 box with the default `databaseMode: cloudnative` (shared PostgreSQL) and

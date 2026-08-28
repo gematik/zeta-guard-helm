@@ -1,0 +1,291 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
+  "author": "Unknown Author",
+  "version": 7,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33186"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Affects gRPC servers with auth interceptors on :path. OPA is accessed via HTTP REST API (/v1/data) only; gRPC management API is not enabled.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-03-23T11:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46680"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/github.com/containerd/containerd/v2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft containerd's Container-Laufzeitcode (User-ID-Auflösung beim Container-Start). OPA nutzt die Bibliothek ausschließlich für OCI-Image-Distribution (Bundle-Mode); der verwundbare Code-Pfad wird nie ausgeführt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-09T09:13:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42504"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Executable /opa importiert die betroffene Funktion mime.WordDecoder.DecodeHeader nicht.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-09T09:13:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50163"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/oras.land/oras-go/v2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Path-Traversal beim Tar-Entpacken: die Funktion ensureLinkPath im Paket oras.land/oras-go/v2/content/file (File-Store) gibt bei Hardlinks den ungeprüften relativen Zielpfad zurück, sodass os.Link() ihn gegen das CWD statt gegen das Extraktionsverzeichnis auflöst. OPA nutzt oras-go jedoch ausschließlich für OCI-Bundle-Downloads über den OCI-Layout-Store (Paket oras.land/oras-go/v2/content/oci) und nie den File-Store. Das Binary /opa enthält kein einziges Symbol aus content/file oder ensureLinkPath (verifiziert via pclntab-/String-Scan), während content/oci als Positivkontrolle vorhanden ist. Der verwundbare Code ist somit nicht im Binary enthalten.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-06T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42505"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle in crypto/tls betrifft ausschließlich TLS-Handshakes, die Encrypted Client Hello (ECH) zusammen mit Pre-Shared Keys (PSK) verwenden: Dabei werden die PSK-Identitäten im unverschlüsselten ClientHello offengelegt, wodurch ein passiver Netzwerkbeobachter den Client de-anonymisieren kann. In der Anwendung werden keine Pre-Shared Keys verwendet, sodass keine PSK-Identität geleakt werden kann. Zudem ist ECH in Go standardmäßig deaktiviert und wird nicht aktiviert. Damit ist die Schwachstelle nicht ausnutzbar.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T17:19:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39822"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle in os.Root folgt auf Unix-Systemen Symlinks aus dem Wurzelverzeichnis heraus, wenn die letzte Pfadkomponente ein Symlink ist und der Pfad auf '/' endet, wodurch ein Symlink-Escape (Path Traversal) möglich wird. Keines der betroffenen Symbole ist in dem Go-Binary '/opa' enthalten. Verifiziert mit dem Tool govulncheck.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T17:19:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Das betroffene Paket golang.org/x/crypto/openpgp wird in der Go-Binary '/opa' nicht verwendet.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T17:19:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-hrxh-6v49-42gf"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die relevante der drei in GHSA-hrxh-6v49-42gf gebündelten Schwachstellen ist die HTTP/2 Rapid Reset / Control Buffer Flooding (DoS) in internal/transport. Die beiden xDS-RBAC-Schwachstellen sind mangels Nutzung von internal/xds/rbac irrelevant. Der Rapid-Reset-DoS ist nur gegen einen gRPC-Server ausnutzbar. OPA lauscht ausschließlich auf der REST/HTTP-API :8181. Das gRPC-Server-Plugin envoy (:9191) ist nicht aktiv, ein gRPC-Server existiert nicht. grpc-go wird ausschließlich als ausgehender OTLP-Trace-Client zu einem vertrauenswürdigen Collector verwendet. Der verwundbare Code-Pfad liegt damit nicht im erreichbaren Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-24T11:22:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46600",
+        "aliases": [
+          "GO-2026-5942"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/net"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle liegt im Parsen ungültiger SVCB-/HTTPS-Resource-Records in golang.org/x/net/dns/dnsmessage (https://pkg.go.dev/vuln/GO-2026-5942). Die betroffenen Symbole werden allerdings in der Anwendung nicht verwendet. Verifiziert über die ELF-Section 'pclntab' der Go-Binary '/opa' und mit govulncheck.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-24T11:22:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56852",
+        "aliases": [
+          "GO-2026-5970"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/text"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "DoS-Endlosschleife in golang.org/x/text/unicode/norm (norm.Iter) bei ungültigem UTF-8-Input (https://pkg.go.dev/vuln/GO-2026-5970). govulncheck (Source-Mode, gesamtes Modul github.com/open-policy-agent/opa) meldet als einzigen erreichbaren Pfad zu den verwundbaren Symbolen das Title-Casing von Tabellenüberschriften im CLI-Pretty-Printer: internal/presentation.generateTableWithKeys -> x/text/cases.Caser.String -> norm.Form.Properties. Die dort case-gemappten Strings sind fest kodierte ASCII-Tabellenüberschriften (statKeys = min/max/mean/90%/99% sowie 'num eval', 'num redo', 'num gen expr', 'location'). Es fließt kein angreiferkontrollierter und kein ungültiger UTF-8-Input ein, sodass die Trigger-Bedingung der Schwachstelle nie erfüllt wird. Der Pfad wird zudem nur bei der CLI-Profiling-Ausgabe (opa eval --profile / opa bench mit --format pretty) durchlaufen, nicht im Server-Betrieb, der im zeta-guard genutzt wird.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-24T12:45:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46600",
+        "aliases": [
+          "GO-2026-5942"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die betroffenen Symbole aus den Paketen net und golang.org/x/net/dns/dnsmessage werden in der Go-Binary '/opa' nicht geladen. Verifiziert mit dem Tool govulncheck des Go-Entwicklungsteams gegen die Codebasis der Version 1.18.2.",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-07-24T12:45:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33818",
+        "aliases": [
+          "GO-2026-5972"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "encoding/asn1 - DoS durch exzessive Rekursion in Unmarshal (https://pkg.go.dev/vuln/GO-2026-5972). govulncheck (Source-Modus über das gesamte Modul github.com/open-policy-agent/opa) meldet als einzigen Pfad zu asn1.Unmarshal die Funktion internal/providers/aws/crypto.VerifySignature (ecc.go:117). Diese wird ausschließlich aus ecc_test.go aufgerufen und ist im ausgelieferten Binary nicht enthalten: die Symboltabelle (.gopclntab) der Go-Binary '/opa' führt aus dem Paket internal/providers/aws/crypto nur ConstantTimeByteCompare und HMACKeyDerivation, VerifySignature wurde vom Linker per Dead-Code-Elimination entfernt. Der zweite OPA-eigene Aufrufer pointsFromDER (v1/plugins/rest/auth.go:162) gehört zum oauth2-Client-Credentials-Plugin mit AWS-KMS- bzw. Azure-Key-Vault-Signatur; im zeta-guard ist für den Bundle-Service ausschließlich eine Bearer-Credential konfiguriert, sodass dieses Plugin nie instanziiert wird. Die verbleibenden stdlib-Aufrufer (x509-Schlüsselparsing) verarbeiten nur das vom Betreiber bereitgestellte Bundle-Signaturmaterial (policy-signer.pub). Der verwundbare Code-Pfad ist damit nicht erreichbar.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-19T09:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39821",
+        "aliases": [
+          "GO-2026-5026"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "golang.org/x/net/idna - Privilege Escalation durch fehlerhafte Punycode-Label-Verarbeitung (https://pkg.go.dev/vuln/GO-2026-5026). Die Schwachstelle wird nur ausgelöst, wenn ein angreiferkontrollierter Hostname mit ASCII-only-Punycode-Labels verarbeitet wird. Beim Verarbeiten eingehender Requests wird idna serverseitig nicht durchlaufen; erreichbar ist der betroffene Code ausschließlich über den ausgehenden HTTP-Client (govulncheck-Trace: v1/download/oci_download.go -> http.Transport.RoundTrip), während die übrigen gemeldeten Traces in Testcode wurzeln (v1/test/e2e/testing.go, v1/sdk/test/test.go) und im ausgelieferten Binary nicht enthalten sind. Die Ziel-Hosts der OPA-Instanz stammen ausnahmslos aus der Helm-Konfiguration (OCI-Bundle-Registry, clusterinternes Telemetry-Gateway). Die Policies werden als OCI-Bundle von einem vertrauenswürdigen Anbieter (gematik) bezogen und vor dem Laden anhand ihrer ES256-Signatur gegen den über den Trust-Anchor bereitgestellten Signaturschlüssel geprüft (opa.bundle.verification, Schlüssel /var/trust-data/policy-signer.pub). Es kann somit kein fremder Policy-Code geladen werden, der eine Verbindung zu einem angreifergewählten Host aufbaut. Bei aktivierten NetworkPolicies ist der ausgehende Verkehr zusätzlich auf DNS, das Telemetry-Gateway und eine feste ipBlock-Liste begrenzt (templates/netpol/opa-netpol.yaml). Ein angreiferkontrollierter Hostname gelangt damit nicht in den verwundbaren Code.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-19T09:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56853",
+        "aliases": [
+          "GO-2026-6089"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "net/http - DoS über unverschlüsselte HTTP/2-Verbindungen (https://pkg.go.dev/vuln/GO-2026-6089). Der Fehler betrifft ausschließlich Server, die unverschlüsseltes HTTP/2 (h2c) annehmen: dort wird beim Prüfen der HTTP/2-Preface das konfigurierte ReadHeaderTimeout nicht angewendet. OPA aktiviert unverschlüsseltes HTTP/2 (http.Protocols.SetUnencryptedHTTP2) nur bei gesetztem Kommandozeilen-Flag --h2c (v1/server/server.go:665 und :743; Default false, cmd/run.go:229). Der zeta-guard startet OPA mit 'run --server --addr=0.0.0.0:8181' ohne --h2c, sowohl die produktive als auch die Simulations-Instanz, sodass der verwundbare Code-Pfad nie durchlaufen wird. Ergänzend ist Port 8181 ausschließlich clusterintern (ClusterIP) und per NetworkPolicy nur für den PEP erreichbar.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-17T16:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56858",
+        "aliases": [
+          "GO-2026-6091"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "html/template - Cross-Site Scripting bei bestimmtem Input (https://pkg.go.dev/vuln/GO-2026-6091). Die Ausnutzung erfordert, dass angreiferkontrollierte Daten in einen JavaScript-Regexp-Kontext eines Templates gerendert werden. Die einzige html/template-Nutzung im Binary ist die statische Index-Seite des OPA-Servers (v1/server/server.go:1030, indexHTML), die ausschließlich vier zur Compile-Zeit festgelegte Build-Informationen ausgibt (Version, Build Commit, Build Timestamp, Build Hostname). Das Template enthält weder JavaScript noch einen Regexp-Kontext, und es fließen weder Request- noch Policy-Daten ein. Der zweite von govulncheck gemeldete Pfad über golang.org/x/net/trace.Render betrifft die Debug-Handler unter /debug/requests am http.DefaultServeMux, den OPA nicht bedient (eigener Router). Der verwundbare Code ist damit nicht durch einen Angreifer beeinflussbar.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-17T16:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56859",
+        "aliases": [
+          "GO-2026-6088"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "encoding/xml - DoS durch Rekursionstiefe beim XML-Decoding (https://pkg.go.dev/vuln/GO-2026-6088). encoding/xml.Unmarshal wird im gesamten OPA-Code nur an zwei Stellen aufgerufen (v1/plugins/rest/aws.go:854 und :975) und dient dort dem Parsen der XML-Antworten von AWS STS (AssumeRole) bzw. der AWS-Signaturdienste. Im zeta-guard ist kein AWS-Service konfiguriert: die OPA-Konfiguration enthält ausschließlich den OTLP-Telemetry-Gateway und den OCI-Registry-Service mit Bearer-Credentials (templates/opa/_opa.tpl). Der verwundbare Code-Pfad wird daher nie ausgeführt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-17T16:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56860",
+        "aliases": [
+          "GO-2026-6218"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "net/url - DoS durch quadratische Komplexität beim Path-Parsing (https://pkg.go.dev/vuln/GO-2026-6218). Betroffen ist resolvePath, das nur über URL.Parse mit Basis-URL bzw. URL.ResolveReference erreicht wird. Eingehende Server-Requests werden mit url.ParseRequestURI geparst und laufen nicht durch resolvePath. Die beiden erreichbaren Pfade sind (1) die Redirect-Auflösung des ausgehenden HTTP-Clients gegenüber den fest konfigurierten Endpunkten (OCI-Bundle-Registry, Telemetry-Gateway) und (2) die $ref-Auflösung in internal/gojsonschema (Builtins json.match_schema und json.verify_schema), bei der das Schema aus dem signaturgeprüften Policy-Bundle stammt. Für die quadratische Laufzeit ist ein sehr langer, angreiferkontrollierter Pfadbestandteil nötig. Ein solcher Input erreicht den Code in dieser Konfiguration nicht.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-17T16:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56862",
+        "aliases": [
+          "GO-2026-6090"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/stdlib"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "crypto/tls - DoS durch unbegrenzte KeyUpdate-Nachrichten (https://pkg.go.dev/vuln/GO-2026-6090). Die Anwendung nutzt mindestens eine der betroffenen Symbole. Serverseitig besteht kein Risiko: der HTTPS-Listener von OPA setzt ein per --tls-cert-file bereitgestelltes Zertifikat voraus (v1/server/server.go, getListenerForHTTPSServer). Der zeta-guard startet OPA ohne TLS-Flags, die TLS-Terminierung erfolgt am Ingress bzw. im PEP. crypto/tls wird ausschließlich in der Client-Rolle gegenüber fest konfigurierten, TLS-authentifizierten Endpunkten genutzt (OCI-Bundle-Registry über HTTPS). Ein Angreifer müsste diese Gegenstelle kontrollieren, um unbegrenzt Post-Handshake-Nachrichten zu senden. Die govulncheck-Traces #3 (Conn.Read über io.ReadAll) und #4 (Conn.Write über fmt.Fprintf) sind Interface-Überapproximationen und stellen keine realen Aufrufpfade dar. Da der einzige Endpunkt, der die Schwachstelle ausnutzen kann, die OCI-Bundle-Registry der gematik ist, wurde der auf der öffentlichen Schwachstellenmeldung (https://nvd.nist.gov/vuln/detail/CVE-2026-56862) basierende CVSS3.1-Vektor über 'Environmental Score Metrics' angepasst (Attack Complexity: High). Außerdem wurden 'Temporal Score Metrics' gesetzt'. Der resultierende CVSS3.1-Score ist Medium. CVSS3.1-Vektor: AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:F/RL:O/RC:C/CR:X/IR:X/AR:X/MAV:X/MAC:H/MPR:X/MUI:X/MS:X/MC:X/MI:X/MA:X",
+      "timestamp": "2026-08-17T16:30:00Z"
+    }
+  ],
+  "timestamp": "2026-07-24T11:22:00Z",
+  "last_updated": "2026-08-19T09:00:00Z"
+}

@@ -1,0 +1,53 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* NIC mergeable minion for sekidp — mirrors charts/testdriver's ingress pattern */ -}}
+---
+{{- if .Values.ingressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sekidp
+  labels:
+    app: sekidp
+    app.kubernetes.io/name: sekidp
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /sekidp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}sekidp-gsi-server{{ end }}
+                port:
+                  {{- if .Values.routeViaTigerProxy }}
+                  number: 80
+                  {{- else }}
+                  name: api
+                  {{- end }}
+          - path: /sekidp-fedmaster
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}sekidp-fedmaster{{ end }}
+                port:
+                  {{- if .Values.routeViaTigerProxy }}
+                  number: 80
+                  {{- else }}
+                  name: api
+                  {{- end }}
+{{- end }}

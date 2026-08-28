@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailcatcher
+  labels:
+    {{- include "mailcatcher.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "mailcatcher.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: smtp
+      port: {{ .Values.service.smtpPort }}
+      targetPort: smtp
+    - name: http
+      port: {{ .Values.service.httpPort }}
+      targetPort: http
+  type: ClusterIP

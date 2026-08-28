@@ -1,0 +1,9 @@
+###############################################
+# Please only temporary ignores in this file
+# - also create an entry in the .vex/*.openvex.json as under_investigation
+# - Keep the expiry 1 week before the next planned release
+# - If it is determined that we are unaffected please make use of .vex/*.openvex.json
+###############################################
+
+# affected, medium(tech@spree): go:stdlib - crypto/tls: golang: Golang crypto/tls: Denial of Service via indefinite KeyUpdate messages
+CVE-2026-56862 exp:2026-09-15

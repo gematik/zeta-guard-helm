@@ -1,0 +1,45 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Dedicated NIC mergeable minion for WebSocket paths (derived from
+     pepproxy.nginxConf.proxyLocations entries with websocket: true).
+     NIC's nginx.org/websocket-services annotation is service-scoped: on the
+     main minion it would apply WebSocket connection handling to every
+     pep-proxy-svc location, sending `Connection: close` on ordinary requests
+     and defeating upstream keepalive. This minion confines the upgrade
+     handling to exactly the declared paths. */ -}}
+{{- $wsPaths := include "zeta-guard.ingress-ws-paths" . | fromJsonArray }}
+{{- if and .Values.ingressEnabled $wsPaths (not .Values.routeViaTigerProxy) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeta-guard-ws-minion
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    nginx.org/websocket-services: "pep-proxy-svc"
+    {{- if .Values.nginxIngressLbMethod }}
+    nginx.org/lb-method: "hash $zeta_route consistent"
+    {{- end }}
+    {{- end }}
+    {{- with .Values.ingressMinionAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  rules:
+    - {{- if .Values.authserver.hostname }}
+      host: {{ .Values.authserver.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- range $wsPaths }}
+          - path: {{ . | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
+          {{- end }}
+{{- end }}

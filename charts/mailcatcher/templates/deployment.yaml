@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailcatcher
+  labels:
+    {{- include "mailcatcher.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mailcatcher.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mailcatcher.labels" . | nindent 8 }}
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mailcatcher
+          image: "{{ include "mailcatcher.image" . }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          {{- if .Values.httpPath }}
+          args:
+            - "mailcatcher"
+            - "-f"
+            - "--ip"
+            - "0.0.0.0"
+            - "--http-path"
+            - "{{ .Values.httpPath }}"
+          {{- end }}
+          ports:
+            # Fixed container ports 1025 (SMTP)/1080 (UI); service.*Port only set Service ports.
+            - name: smtp
+              containerPort: 1025
+            - name: http
+              containerPort: 1080
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: "{{ .Values.httpPath | default "/" }}"
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: "{{ .Values.httpPath | default "/" }}"
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}

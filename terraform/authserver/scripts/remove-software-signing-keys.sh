@@ -24,8 +24,8 @@ SOFTWARE_PROVIDER_IDS=("rsa-generated" "ecdsa-generated")
 TOKEN_RESPONSE=$(curl "${CURL_OPTS[@]}" -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password" \
   -d "client_id=admin-cli" \
-  -d "username=${KC_USERNAME}" \
-  -d "password=${KC_PASSWORD}" 2>&1) || {
+  --data-urlencode "username=${KC_USERNAME}" \
+  --data-urlencode "password=${KC_PASSWORD}" 2>&1) || {
     echo "ERROR: Failed to authenticate against Keycloak at ${KC_URL}" >&2
     echo "${TOKEN_RESPONSE}" >&2
     exit 1
@@ -39,10 +39,8 @@ if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
   exit 1
 fi
 
-AUTH=(-H "Authorization: Bearer ${TOKEN}")
-
 # ── Find and remove software signing keys ────────────────────────────────────
-COMPONENTS=$(curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+COMPONENTS=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
   "${KC_URL}/admin/realms/${KC_REALM}/components?type=org.keycloak.keys.KeyProvider")
 
 REMOVED=0
@@ -51,7 +49,7 @@ for PID in "${SOFTWARE_PROVIDER_IDS[@]}"; do
 
   for ID in $IDS; do
     echo "Removing software signing key: providerId=${PID}, id=${ID}"
-    curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+    curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
       -X DELETE \
       "${KC_URL}/admin/realms/${KC_REALM}/components/${ID}"
     REMOVED=$((REMOVED + 1))

@@ -12,11 +12,14 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
   - `charts/zeta-guard` (Keycloak + nginx PEP + OPA + DB)
   - `charts/test-monitoring-service`,
   - `charts/testfachdienst`,
-  - `charts/exauthsim`,
-  - `charts/test-driver`
+  - `charts/testdriver`
+  - `charts/nativedriver`
   - `charts/tiger-testsuite` (Tiger based regression service + Workflow UI)
   - `charts/zeta-tls-test-tool-service` (optional TLS Test Tool control service)
   - `charts/zeta-cert-validation-mock` (optional local OCSP/CRL responder mock)
+  - `charts/push-gateway` (optional thin local deployment of gematik's Push Gateway; requires an operator-provided image)
+  - `charts/sekidp` (optional thin local deployment of gematik's SEK-IDP + Fedmaster; requires operator-provided images)
+  - `charts/mailcatcher` (optional thin local deployment of MailCatcher, an SMTP catch-all + web UI for inspecting test emails)
 
 ## Notes
 - Re-run `make deps` after changing `Chart.yaml` or any `charts/*/Chart.yaml`.
@@ -26,18 +29,29 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
 ## Installing zeta-guard
 
 > **Warning – insecure components**
-> Tiger Testsuite, Tiger Proxy, ExAuthSim, zeta-tls-test-tool-service, zeta-cert-validation-mock and TestFachdienst may contain critical security flaws. Do **not** run them in
-> production or any security-sensitive environment. Remove the chart or keep the chart disabled unless you are testing
-> in an isolated sandbox:
+> Tiger Testsuite, Tiger Proxy, zeta-tls-test-tool-service, zeta-cert-validation-mock, TestFachdienst,
+> Push Gateway, SEK-IDP/Fedmaster and MailCatcher may contain critical security flaws (or, for Push Gateway and
+> MailCatcher, run with no enforced authentication at all; SEK-IDP/Fedmaster ship gematik's public reference/test
+> signing keys). Do **not** run them in production or any security-sensitive environment. Remove the chart or
+> keep the chart disabled unless you are testing in an isolated sandbox:
 >
 > ```
 > tags:
 >   testfachdienst: false
->   exauthsim: false
 >   tiger-proxy: false
 >   tiger-testsuite: false
->   zeta-tls-test-tool-service: false
->   zeta-cert-validation-mock: false
+>
+> zetaTlsTestToolServiceEnabled: false
+> zetaCertValidationMockEnabled: false
+>
+> push-gateway:
+>   enabled: false
+>
+> sekidp:
+>   enabled: false
+>
+> mailcatcher:
+>   enabled: false
 > ```
 
 ### Prerequisites
@@ -245,11 +259,15 @@ Render checks:
 
 * Explanations
     * [Postgres Operator](docs/explanations/CloudNativePG.md)
+  * [Telemetry](docs/explanations/Telemetry.md)
 * How-to guides
     * [How to configure ZETA Guard Authserver](docs/how-to_guides/How_to_configure_authserver.md)
   * [How to configure a forward proxy](docs/how-to_guides/How_to_configure_forward_proxy.md)
   * [How to configure Egress NetworkPolicies](docs/how-to_guides/How_to_configure_NetworkPolicies.md)
   * [How to configure Ingress](docs/how-to_guides/How_to_configure_Ingress.md)
+  * [How to configure the Notification Service](docs/how-to_guides/How_to_configure_notification_service.md)
+  * [How to configure the SEK-IDP / Fedmaster test chart](docs/how-to_guides/How_to_configure_sekidp.md)
+  * [How to configure the MailCatcher test chart](docs/how-to_guides/How_to_configure_mailcatcher.md)
   * [How to create a docker-registry type secret for accessing the GitLab container registry](docs/how-to_guides/How_to_create_a_docker_registry_secret.md)
   * [How to deploy ZETA Guard](docs/how-to_guides/How_to_deploy_ZETA_Guard.md)
   * [How to install cert-manager](docs/how-to_guides/How_to_install_cert-manager.md)
@@ -259,6 +277,7 @@ Render checks:
   * [How to trigger the Tiger testsuite inside the cluster](docs/how-to_guides/How_to_run_tiger_testsuite.md)
 * Reference
     * [Makefile reference](docs/reference/Makefile_reference.md)
+  * [Telemetry attributes](docs/reference/Telemetry_attributes.md)
 
 ## License
 

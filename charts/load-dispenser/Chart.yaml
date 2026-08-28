@@ -1,0 +1,5 @@
+apiVersion: v2
+name: load-dispenser
+description: gRPC-controlled load generator for ZETA Guard load tests
+type: application
+version: 0.0.1

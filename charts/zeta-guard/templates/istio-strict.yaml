@@ -1,0 +1,11 @@
+{{- if .Values.global.istio.enabled }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: strict
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  mtls:
+    mode: STRICT
+{{- end }}

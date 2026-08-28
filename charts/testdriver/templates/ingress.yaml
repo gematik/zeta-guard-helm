@@ -1,0 +1,67 @@
+{{- /* vim: set ft=helm: */ -}}
+---
+{{- if .Values.ingressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: testdriver
+  labels:
+    app: testdriver
+    app.kubernetes.io/name: testdriver
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver"{{ else }}"testdriver"{{ end }}
+    nginx.org/client-max-body-size: "10m"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /proxy
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}testdriver{{ end }}
+                port:
+                  number: 80
+          - path: /testdriver-api
+            pathType: Prefix
+            backend:
+              service:
+                name: testdriver
+                port:
+                  number: 80
+          - path: /load
+            pathType: Prefix
+            backend:
+              service:
+                name: testdriver
+                port:
+                  number: 80
+          - path: /loaddriver-api
+            pathType: Prefix
+            backend:
+              service:
+                name: testdriver
+                port:
+                  number: 80
+          - path: /oidc
+            pathType: Prefix
+            backend:
+              service:
+                name: testdriver
+                port:
+                  number: 80
+{{- end }}

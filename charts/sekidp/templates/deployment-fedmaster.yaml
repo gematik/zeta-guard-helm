@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sekidp-fedmaster
+  labels:
+    {{- include "sekidp-fedmaster.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sekidp-fedmaster.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sekidp-fedmaster.labels" . | nindent 8 }}
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      {{- if .Values.fedmaster.serviceAccount.create }}
+      serviceAccountName: {{ .Values.fedmaster.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- with .Values.fedmaster.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.fedmaster.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.fedmaster.additionalTrustedCAs }}
+      initContainers:
+        - name: build-truststore
+          image: "{{ include "sekidp-fedmaster.image" . }}"
+          imagePullPolicy: "{{ .Values.fedmaster.imagePullPolicy }}"
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # /truststore emptyDir survives restarts within the pod — start
+              # clean each run to avoid "alias already exists" on retry.
+              rm -f /truststore/truststore.p12
+              for f in /trusted-ca-sources/*; do
+                keytool -importcert -noprompt -trustcacerts \
+                  -alias "$(basename "$f" .pem)" -file "$f" \
+                  -keystore /truststore/truststore.p12 \
+                  -storetype PKCS12 -storepass changeit
+              done
+          volumeMounts:
+            - name: trusted-ca-sources
+              mountPath: /trusted-ca-sources
+              readOnly: true
+            - name: truststore
+              mountPath: /truststore
+          {{- with .Values.fedmaster.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- end }}
+      containers:
+        - name: gsi-fedmaster
+          image: "{{ include "sekidp-fedmaster.image" . }}"
+          imagePullPolicy: "{{ .Values.fedmaster.imagePullPolicy }}"
+          ports:
+            # App listens on fixed ports 8083/8183; service.*Port only set the Service ports.
+            - name: api
+              containerPort: 8083
+            - name: management
+              containerPort: 8183
+          env:
+            - name: SERVER_PORT
+              value: "8083"
+            - name: MANAGEMENT_PORT
+              value: "8183"
+            - name: FEDMASTER_SERVER_URL
+              value: {{ .Values.fedmaster.env.serverUrl | quote }}
+            {{- if .Values.fedmaster.env.redirectUris }}
+            - name: FEDMASTER_REDIRECT_URIS
+              value: {{ .Values.fedmaster.env.redirectUris | quote }}
+            {{- end }}
+            - name: ISSUER_IDP_01
+              value: {{ .Values.fedmaster.env.issuerIdp01 | default .Values.gsiServer.env.serverUrl | quote }}
+            - name: LOG_LEVEL_GEMATIK
+              value: {{ .Values.fedmaster.env.logLevelGematik | quote }}
+            - name: REQUEST_LOGGING_ENABLED
+              value: {{ .Values.fedmaster.env.requestLoggingEnabled | quote }}
+            {{- if .Values.fedmaster.additionalTrustedCAs }}
+            - name: JDK_JAVA_OPTIONS
+              value: "-Djavax.net.ssl.trustStore=/truststore/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
+            {{- end }}
+            {{- if .Values.fedmaster.relyingPartyConfigs }}
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "optional:file:/fedmaster-config/application-relyingparties.yaml"
+            {{- end }}
+            {{- if .Values.fedmaster.relyingPartyKeySecretName }}
+            - name: RP01_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.fedmaster.relyingPartyKeySecretName }}
+                  key: keyid
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.fedmaster.additionalTrustedCAs }}
+            - name: truststore
+              mountPath: /truststore
+              readOnly: true
+            {{- end }}
+            {{- if .Values.fedmaster.relyingPartyConfigs }}
+            - name: fedmaster-config
+              mountPath: /fedmaster-config
+              readOnly: true
+            {{- end }}
+            {{- if .Values.fedmaster.relyingPartyKeySecretName }}
+            - name: public-keys
+              mountPath: /public-keys
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- with .Values.fedmaster.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.fedmaster.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.fedmaster.additionalTrustedCAs }}
+        - name: trusted-ca-sources
+          projected:
+            sources:
+              {{- range $i, $ca := .Values.fedmaster.additionalTrustedCAs }}
+              {{- if and $ca.secretName $ca.cert }}
+              {{- fail (printf "fedmaster.additionalTrustedCAs[%d]: set either secretName+secretKey or cert, not both" $i) }}
+              {{- else if $ca.secretName }}
+              - secret:
+                  name: {{ $ca.secretName }}
+                  items:
+                    - key: {{ $ca.secretKey }}
+                      path: {{ printf "ca-%d.pem" $i }}
+              {{- else if $ca.cert }}
+              - secret:
+                  name: sekidp-fedmaster-additional-cas
+                  items:
+                    - key: {{ printf "ca-%d.pem" $i }}
+                      path: {{ printf "ca-%d.pem" $i }}
+              {{- else }}
+              {{- fail (printf "fedmaster.additionalTrustedCAs[%d]: must set either secretName+secretKey or cert" $i) }}
+              {{- end }}
+              {{- end }}
+        - name: truststore
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.fedmaster.relyingPartyConfigs }}
+        - name: fedmaster-config
+          configMap:
+            name: sekidp-fedmaster-relyingparties
+        {{- end }}
+        {{- if .Values.fedmaster.relyingPartyKeySecretName }}
+        - name: public-keys
+          secret:
+            secretName: {{ .Values.fedmaster.relyingPartyKeySecretName }}
+            optional: true
+        {{- end }}

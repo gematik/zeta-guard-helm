@@ -43,7 +43,19 @@ settings, or run
 ## Makefile Targets
 
 - `make help` – lists all targets, usage, and effective variables
-- `make deps` – vendor/update chart deps (refreshes `Chart.lock`; included in `deploy`)
+- `make deps` – vendor the remote deps of `zeta-guard` and
+  `test-monitoring-service` as pinned in their `Chart.lock` (included in
+  `deploy`/`dry-run`/`template`). All remote deps are `oci://` and served from
+  helm's content cache after the first pull — no repo registration, works
+  offline. The umbrella's own subcharts are resolved directly from the
+  unpacked directories in `charts/` — no vendoring involved. Runs
+  `strip-remote-schemas` afterwards.
+- `make strip-remote-schemas` – drop `values.schema.json` from vendored subchart
+  tarballs whose `$ref`s point at remote URLs (currently `nginx-ingress`, which
+  references `raw.githubusercontent.com`). helm resolves such refs over the
+  network on every lint/template/upgrade, so a rate-limited egress IP fails the
+  deploy with `429 (Too Many Requests)`. Included in `deps`/`deps-update`; only
+  needed standalone after a manual `helm dependency build`.
 - `make template` – render manifests
 - `make dry-run` – server-side validation
 - `make deploy stage=STAGE [namespace=NAMESPACE] [DB_MODE=cloudnative]` – install/upgrade the release with `--rollback-on-failure --timeout 10m`
@@ -65,9 +77,9 @@ settings, or run
 - `make config-init stage=STAGE [namespace=NAMESPACE]` – runs `generate-main-and-backend` and initializes the Terraform backend
 - `make config-plan stage=STAGE [namespace=NAMESPACE] [PLAN_OUT=<file>]` – view
   incoming changes to the authserver by make config
-  - `PLAN_OUT=<file>` additionally saves the Terraform plan to a file so it
-    can be reviewed later with `config-show-plan`. Empty (default) writes no
-    file.
+    - `PLAN_OUT=<file>` additionally saves the Terraform plan to a file so it
+      can be reviewed later with `config-show-plan`. Empty (default) writes no
+      file.
 - `make config-show-plan stage=STAGE PLAN_OUT=<file>` – render a plan file saved
   by `config-plan` as a plain-text (no-color) diff to stdout, e.g.
   `make config-show-plan stage=dev PLAN_OUT=authserver.change.plan > authserver.change.txt`
@@ -96,7 +108,6 @@ All of these can be set as an environment variable or as a `make` argument (
 | `DB_MODE`    | Database bootstrap mode for local convenience targets                      | `cloudnative`      |
 
 ### SMCB keystore (required for `deploy`, `deploy-debug`, `template`,
-
 `template--debug`, `render`, `dry-run`)
 
 | Variable                     | Purpose                                           | Required |

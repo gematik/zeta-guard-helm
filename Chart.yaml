@@ -2,70 +2,75 @@ apiVersion: v2
 name: zeta-testenv
 description: ZETA Guard test installation
 type: application
-version: 1.2.3
+version: 1.3.1
 dependencies:
   - name: testfachdienst
     version: 0.0.1
-    repository: file://charts/testfachdienst
     tags:
       - testfachdienst
   - name: hsmsim
     version: 0.0.1
-    repository: file://charts/hsmsim
     condition: hsmsim.enabled
     tags:
       - hsmsim
   - name: popp-mocks
     version: 0.0.1
-    repository: file://charts/popp-mocks
     condition: popp-mocks.enabled
     tags:
       - popp-mocks
   - name: test-monitoring-service
     version: 0.1.0
-    repository: file://charts/test-monitoring-service
     alias: testMonitoringService
     condition: testMonitoringServiceEnabled
-  - name: exauthsim
-    version: 0.0.1
-    repository: file://charts/exauthsim
-    tags:
-      - exauthsim
   - name: zeta-guard
-    version: 1.2.3
-    repository: file://charts/zeta-guard
+    version: 1.3.1
     tags:
       - zeta-guard
   - name: testdriver
     version: 0.0.1
-    repository: file://charts/test-driver
     tags:
       - testdriver
   - name: nativedriver
     version: 0.0.1
-    repository: file://charts/native-driver
     tags:
       - nativedriver
   - name: tiger-proxy
     version: 0.0.1
-    repository: file://charts/tiger-proxy
     tags:
       - tiger-proxy
   - name: tiger-testsuite
     version: 0.0.1
-    repository: file://charts/tiger-testsuite
     tags:
       - tiger-testsuite
   - name: zeta-tls-test-tool-service
     version: 0.1.0
-    repository: file://charts/zeta-tls-test-tool-service
     condition: zetaTlsTestToolServiceEnabled
   - name: zeta-cert-validation-mock
     version: 0.1.0
-    repository: file://charts/zeta-cert-validation-mock
     condition: zetaCertValidationMockEnabled
+  - name: load-dispenser
+    version: 0.0.1
+    condition: load-dispenser.enabled
+    tags:
+      - load-dispenser
+  - name: lgtm
+    version: 0.0.1
+    condition: lgtm.enabled
+    tags:
+      - lgtm
   - name: infinispan-external
     version: 0.0.1
-    repository: file://charts/infinispan-external
     tags:
       - infinispan-external
+  - name: push-gateway
+    version: 0.0.1
+    repository: file://charts/push-gateway
+    condition: push-gateway.enabled
+  - name: sekidp
+    version: 0.0.1
+    repository: file://charts/sekidp
+    condition: sekidp.enabled
+  - name: mailcatcher
+    version: 0.0.1
+    repository: file://charts/mailcatcher
+    condition: mailcatcher.enabled

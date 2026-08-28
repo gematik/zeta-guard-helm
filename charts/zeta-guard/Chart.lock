@@ -3,7 +3,7 @@ dependencies:
   repository: oci://ghcr.io/nginx/charts
   version: 2.5.0
 - name: opentelemetry-collector
-  repository: https://open-telemetry.github.io/opentelemetry-helm-charts
-  version: 0.150.0
-digest: sha256:3d09d5d1f530e5444ae1392b01b8dea3fbdf8f3911e683544daf4654fb02e518
-generated: "2026-04-22T17:45:12.654008+02:00"
+  repository: oci://ghcr.io/open-telemetry/opentelemetry-helm-charts
+  version: 0.165.0
+digest: sha256:db544ae46291fbc1a0f5130b574b8e3b2cc98fcfab83ffc200f4e546a945f5b1
+generated: "2026-08-12T15:47:34.213318+02:00"

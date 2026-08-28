@@ -1,0 +1,81 @@
+{{- /* gRPC-controlled load generator;
+       synopsis:
+         kubectl port-forward svc/load-dispenser 50051:50051
+         grpcurl -plaintext '127.0.0.1:50051' describe load_dispenser.LoadDispenser
+       config:
+         see struct LdConfig for possible values and set_defaults:
+         ngx_pep/load_dispenser/src/main.rs
+    */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-dispenser
+  labels:
+    app.kubernetes.io/name: load-dispenser
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: load-dispenser
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: load-dispenser
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        # wide ephemeral port range: the driver opens many client connections
+        sysctls:
+          - name: net.ipv4.ip_local_port_range
+            value: "1024 65535"
+      containers:
+        - name: main
+          image: {{ required "load-dispenser.image is required when the chart is enabled" .Values.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy | default "Always" }}
+          env:
+            - name: LOAD_DISPENSER_HOST
+              value: {{ required "load-dispenser.host is required when the chart is enabled" .Values.host | quote }}
+          ports:
+            - containerPort: 50051
+              name: grpc
+          readinessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 1
+            periodSeconds: 1
+          livenessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 1
+            periodSeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: load-dispenser
+  labels:
+    app.kubernetes.io/name: load-dispenser
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: load-dispenser
+  ports:
+    - port: 50051
+      targetPort: grpc
+      name: grpc

@@ -1,0 +1,52 @@
+{{- if and .Values.networkPolicy.enabled .Values.notificationService.enabled }}
+{{- range $variant := list "rs" "fdv" }}
+{{- $ctx := dict "root" $ "variant" $variant }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "notificationService.fullname" $ctx }}-egress
+  labels:
+    {{- include "notificationService.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "notificationService.selectorLabels" $ctx | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "zeta-guard.dnsEgressRule" $ | nindent 4 }}
+    # Ingress allowed via the PEP (fdv) / resource servers (rs) egress rules —
+    # no Ingress policyType needed here.
+    {{- if eq $.Values.notificationService.db.mode "cloudnative" }}
+    # Postgres persistence (notification-db CNPG cluster). kindnet evaluates
+    # post-DNAT; -rw Service maps 5432 → targetPort 5432, so matching pods on 5432 is correct.
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $.Values.notificationService.db.clusterName | default "notification-db" }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- $pgUrls := $.Values.notificationService.env.pushGatewayAllowedBaseUrls }}
+    {{- if $pgUrls }}
+    # Push Gateway reached over the public ingress on 443 — reuse the RS JWK-fetch
+    # ingress ipBlock(s) (providerInternal.resourceServers.ipBlocks, e.g. HOST_IP/32).
+    {{- $ingressBlocks := $.Values.networkPolicy.egress.providerInternal.resourceServers.ipBlocks }}
+    {{- if $ingressBlocks }}
+    - to:
+        {{- range $ingressBlocks }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+    {{- else }}
+    # No Push Gateway egress: pushGatewayAllowedBaseUrls empty (dispatch is a
+    # no-op), so pod stays locked to DNS + DB egress.
+    {{- end }}
+{{- end }}
+{{- end }}

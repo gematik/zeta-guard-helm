@@ -12,6 +12,8 @@ spec:
     metadata:
       labels:
         app: infinispan
+      annotations:
+        checksum/config: {{ tpl (required "infinispan config is missing" .Values.global.infinispanExternal.config) . | sha256sum }}
     spec:
       {{- if .Values.global.infinispanExternal.serviceAccount.create }}
       serviceAccountName: {{ .Values.global.infinispanExternal.serviceAccount.name }}

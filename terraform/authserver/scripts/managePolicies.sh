@@ -43,8 +43,8 @@ fi
 TOKEN_RESPONSE=$(curl "${CURL_OPTS[@]}" \
   -X POST \
   -d "client_id=admin-cli" \
-  -d "username=$username" \
-  -d "password=$password" \
+  --data-urlencode "username=$username" \
+  --data-urlencode "password=$password" \
   -d "grant_type=password" \
   "$keycloak_url/realms/master/protocol/openid-connect/token" 2>&1) || {
     >&2 echo "ERROR: Failed to authenticate against Keycloak at $keycloak_url"
@@ -59,13 +59,11 @@ if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   exit 1
 fi
 
-AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
-
 # helper: GET components by name
 get_component_by_name() {
   local name="$1"
   curl "${CURL_OPTS[@]}" \
-    -H "$AUTH_HEADER" \
+    --oauth2-bearer "$ACCESS_TOKEN" \
     "$keycloak_url/admin/realms/$REALM/components?name=$(jq -rn --arg n "$name" '$n|@uri')&type=org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy" \
     2>/dev/null || echo '[]'
 }
@@ -84,7 +82,7 @@ for (( i=0; i<policy_count_delete; i++ )); do
     if [ -n "$POLICY_ID_DELETE" ] && [ "$POLICY_ID_DELETE" != "null" ]; then
       curl "${CURL_OPTS[@]}" \
         -X DELETE \
-        -H "$AUTH_HEADER" \
+        --oauth2-bearer "$ACCESS_TOKEN" \
         "$keycloak_url/admin/realms/$REALM/components/$POLICY_ID_DELETE" 2>/dev/null
       result="Policy deleted successfully."
     else
@@ -111,9 +109,8 @@ else
 
   curl "${CURL_OPTS[@]}" \
     -X POST \
-    -H "$AUTH_HEADER" \
-    -H "Content-Type: application/json" \
-    -d "$CREATE_PAYLOAD" \
+    --oauth2-bearer "$ACCESS_TOKEN" \
+    --json "$CREATE_PAYLOAD" \
     "$keycloak_url/admin/realms/$REALM/components" 2>/dev/null
   result="Policy created successfully."
 fi

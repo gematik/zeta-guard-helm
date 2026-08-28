@@ -1,0 +1,14 @@
+{{- if .Values.global.istio.enabled }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: zeta-tls-test-tool-service-permissive
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      {{- include "zeta-tls-test-tool-service.selectorLabels" . | nindent 6 }}
+  mtls:
+    mode: PERMISSIVE
+{{- end }}

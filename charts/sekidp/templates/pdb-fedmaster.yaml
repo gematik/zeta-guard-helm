@@ -1,0 +1,18 @@
+{{- if .Values.fedmaster.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sekidp-fedmaster
+  labels:
+    {{- include "sekidp-fedmaster.labels" . | nindent 4 }}
+spec:
+  {{- if not (kindIs "invalid" .Values.fedmaster.podDisruptionBudget.minAvailable) }}
+  minAvailable: {{ .Values.fedmaster.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if not (kindIs "invalid" .Values.fedmaster.podDisruptionBudget.maxUnavailable) }}
+  maxUnavailable: {{ .Values.fedmaster.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sekidp-fedmaster.selectorLabels" . | nindent 6 }}
+{{- end }}

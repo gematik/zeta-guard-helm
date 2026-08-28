@@ -2,6 +2,9 @@ global:
   imagePullSecrets: [ ]
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
   infinispanExternal: {}
+  # Istio PeerAuthentication resources
+  istio:
+    enabled: false
   # HTTP forward proxy for outbound requests from all ZETA Guard components.
   # Applies to: pepproxy (nginx), authserver (Keycloak), opa, opa-simulation,
   #             provisioning-processor (init container), opa-token-renewer (CronJob).
@@ -12,6 +15,9 @@ global:
   noProxy: null
   allProxy: null
 
+  # global.clusterFQDN is the cluster's public fully qualified domain name
+  clusterFQDN: "REPLACE ME"
+
 registry_name: ""
 
 # additionalLabels is a map of labels added to each zeta-guard resource.
@@ -20,12 +26,18 @@ additionalLabels: {}
 authserver:
   dbEnc:
     enabled: false
-    bootstrapInterval: "PT20S"
+    columnEncryptionEnabled: false
+    integrityChecksEnabled: false
+    integrityRowChecksEnabled: false
+    integrityTableChecksEnabled: false
+    periodicRowChecksEnabled: false
+    lockdownOnError: false
+    shutdownOnError: false
+    bootstrapInterval: "PT30S"
     bootstrapAttempts: 15
     keychainGenerator:
       resources:
         limits:
-          cpu: "500m"
           memory: "256Mi"
         requests:
           cpu: "100m"
@@ -33,7 +45,7 @@ authserver:
       extraVolumeMounts: []
       image:
         repository: keychain-generator
-        tag: 1.3.0
+        tag: 2.0.4
       imagePullPolicy: IfNotPresent
   serviceAccount:
     create: true
@@ -44,6 +56,14 @@ authserver:
   podDisruptionBudget:
     enabled: false
     minAvailable: 1
+  # Periodic reload of the SMC-B, TPM and OCSP truststores while the server runs, so a provisioning run takes effect
+  # without restarting the pod. Compared is a hash over the trust files, so every provisioning run triggers one reload
+  # even when the certificates are unchanged. Only has an effect if something actually rewrites the files at runtime,
+  # see provisioningProcessor.schedule.
+  truststoreReload:
+    enabled: true
+    # ISO-8601 duration between two checks, hours or less. The first check runs one interval after startup.
+    interval: PT1H
   initContainer:
     containerSecurityContext:
       allowPrivilegeEscalation: false
@@ -53,7 +73,6 @@ authserver:
         drop: [ "ALL" ]
     resources:
       limits:
-        cpu: "2"
         memory: "2Gi"
       requests:
         cpu: "500m"
@@ -67,18 +86,29 @@ authserver:
         drop: [ "ALL" ]
     resources:
       limits:
-        cpu: "8"
-        memory: "4Gi"
+        memory: "6Gi"
       requests:
         cpu: "4"
         memory: "4Gi"
     extraVolumeMounts: []
   extraVolumes: []
+  # CA certificates Keycloak trusts for its own outbound HTTPS calls; each is
+  # mounted under conf/truststores (auto-imported). Empty -> JVM defaults.
+  # Per entry set exactly one: secretName+secretKey (existing Secret) or an
+  # inline PEM cert (chart creates the Secret).
+  additionalTrustedCAs: []
+  # - secretName: zeta-guard-tls
+  #   secretKey: ca.crt
+  # - cert: |
+  #     -----BEGIN CERTIFICATE-----
+  #     ...
+  #     -----END CERTIFICATE-----
   replicaCount: 1
   hostname: ""
   wellKnownAuthServerPath: /
-  # When set, /auth/admin is blocked via the PEP proxy and a dedicated admin
-  # ingress is created. Terraform/CI must use this hostname for keycloak_url.
+  # When set, /auth/admin on the main hostname is routed to the PEP proxy, which
+  # denies it with 403, and a dedicated admin ingress is created for this
+  # hostname. Terraform/CI must use this hostname for keycloak_url.
   adminHostname: ""
   # TLS secret for the admin ingress. Defaults to "zeta-guard-admin-tls".
   # For local/KIND environments reuse the main cert by setting this to "zeta-guard-tls"
@@ -93,7 +123,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 1.2.3
+    tag: 1.3.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
@@ -106,6 +136,14 @@ authserver:
       decisionPath: "/v1/data/policies/zeta/authz/decision"
       connectionTimeoutMs: 1000
       readTimeoutMs: 2000
+      # HTTP timeouts for the SMC-B OCSP revocation check
+      ocspConnectTimeoutMs: 1000
+      ocspReadTimeoutMs: 3000
+      # ocspFailClosed: default false (fail-open) — only a REVOKED OCSP response denies the token exchange;
+      # an undetermined status (responder unreachable, timeout, unknown) is allowed so ZETA Guard stays operational
+      # during an OCSP responder outage/maintenance.
+      # Set to true to also deny when the revocation status cannot be determined.
+      ocspFailClosed: false
   # Secret pepper for SMC-B user hashes (SMCB_HASHING_PEPPER env var).
   # Required on first install (helm install); leave empty on upgrades — the chart
   # reads the existing cluster Secret automatically via lookup and leaves it unchanged.
@@ -144,16 +182,36 @@ authserver:
     enabled: false
     # certSecretName is the name of the Kubernetes Secret holding tls.crt and tls.key.
     certSecretName: ""
+  # Client mTLS identity presented to the SE-KIDP. On when keystore.secretName is set.
+  sekidp:
+    mtls:
+      keystore:
+        secretName: ""                 # Secret holding the PKCS12 keystore
+        secretKey: sekidp-client.p12   # key within that Secret
+      keystorePassword:
+        secretName: ""                 # Secret holding the keystore password
+        secretKey: ""
+  testmode: false
+  # verbose adds --verbose to the Keycloak start command, which makes the CLI
+  # print full stacktraces for startup/build errors. It does not change the
+  # runtime log level — use authserver.log.level for that.
+  verbose: false
   config:
     maxClients: "256"
+    userIdleTTL: "P1Y"
+    clientIdleTTL: "P1Y"
     clientRegistrationTTL: "PT5M"
     clientRegistrationSchedulerInterval: "PT2M"
+    # Enable the OIDC client flow (env ZETA_OIDC_FLOW_ENABLED).
+    oidcFlowEnabled: false
   # Mostly for test setup purposes.
   # Adds an entry to the authserver's host file, mapping hostAlias.ip to hostAlias.name
   hostAlias: { }
   dbPool:
-    minSize: 100
-    maxSize: 500
+    # Per-pod JDBC pool. replicaCount × maxSize (+ reserve) must stay ≤ maxConnections
+    # (enforced in cnpg-cluster.yaml).
+    minSize: 10
+    maxSize: 100
   httpPool:
     maxThreads: 300
   log:
@@ -163,15 +221,15 @@ authserver:
   probes:
     liveness:
       initialDelaySeconds: 0
-      periodSeconds: 15
+      periodSeconds: 5
       failureThreshold: 5
     readiness:
-      initialDelaySeconds: 30
-      periodSeconds: 10
+      initialDelaySeconds: 0
+      periodSeconds: 5
       failureThreshold: 5
     startup:
-      initialDelaySeconds: 30
-      periodSeconds: 10
+      initialDelaySeconds: 10
+      periodSeconds: 5
       failureThreshold: 20
   affinity: {}
   tolerations: []
@@ -192,25 +250,42 @@ pepproxy:
   podSecurityContext:
     seccompProfile:
       type: RuntimeDefault
+    sysctls:
+      # Outbound connections (inner ASL requests to localhost, nginx upstream
+      # connections) each park their ephemeral port in TIME_WAIT for 60s when
+      # closed — sustained connect/close churn needs ~rate × 60 free ports.
+      # Widen the range to raise that ceiling, and pin it explicitly (the
+      # effective default varies by base image / platform).
+      # "Safe" sysctl: https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls
+      - name: net.ipv4.ip_local_port_range
+        value: "10240 65535"
   replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 1.2.0
+    tag: 1.3.0
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
   podLabels: {}
   resources:
     limits:
-      cpu: "2"
-      memory: "1Gi"
+      memory: "2Gi"
     requests:
-      cpu: "250m"
-      memory: "200Mi"
+      cpu: "4"
+      memory: "1Gi"
+  workerProcesses: auto
+  workerConnections: 16384
+  # per worker process; must cover ~2x worker_connections (client + upstream
+  # side of each proxied connection) or nginx clamps below worker_connections
+  workerRlimitNofile: 40960
   wellKnownBase: http://localhost
   wellKnownResourceSuffix: /pep/
   # boolean that controls if ASL should be enabled (true) or not (false)
   asl_enabled: false
+  #
+  # ASL signer key in the HSM as store URI, e.g. "store:hsm:asl-signer.p256".
+  # Replaces the signer-key file from the asl-identity secret; requires hsmProxyAddr.
+  asl_hsm_key: null
   #
   #aslRootCA: "GEM.RCA7 TEST-ONLY"
   #
@@ -232,7 +307,8 @@ pepproxy:
     # enable (true) or disable (false) no-travel enforcement
     noTravel: false
 
-    # fachdienstUrl defines the fachdienst url to be used for the pep-proxy.
+    # fachdienstUrl defines a variable that could be referenced in the `locations`
+    # to avoid repeating the upstream URL. Irrelevant when using `proxyLocations`.
     fachdienstUrl: ""
 
     # JWKS issuer for PoPP key validation.
@@ -253,24 +329,88 @@ pepproxy:
 
     # requiredScopes defines scopes required for a valid access token.
     requiredScopes: [ ]
-    # Custom nginx `location` blocks (with `proxy_pass`) for the resource server.
+    # DEPRECATED in favor of `proxyLocations` below — raw nginx `location`
+    # blocks (with `proxy_pass`) for the resource server. Scheduled for removal
+    # once all stages have migrated; do not mix both worlds for the same path.
     # The PEP header handling (`include proxy_headers.conf;` — strips client-supplied
     # credentials and ZETA-* headers, sets the PEP's own headers + Forwarded) is included
     # once at the `server` level, so plain `proxy_pass` locations inherit it automatically.
     # nginx `proxy_set_header` inheritance is non-additive: a location that declares its own
     # `proxy_set_header` (e.g. a WebSocket upgrade) does NOT inherit it and must repeat
     # `include proxy_headers.conf;` itself — otherwise a `pep on;` location returns HTTP 500
-    # (ProxyHeadersMissing).
+    # (ProxyHeadersMissing). `proxyLocations` generates all of this correctly.
     locations: ""
+
+    # Structured alternative to `locations` for proxied resource-server paths —
+    # prefer this; it generates the correct nginx config so the footguns
+    # (credential-strip clobbering, missing upstream keepalive, hop-by-hop WebSocket
+    # headers) cannot happen.
+    # Each entry renders an http-level `upstream` block (connection keepalive)
+    # plus an exact + trailing-slash location pair, always including
+    # proxy_headers.conf. `websocket: true` entries additionally get routed
+    # via a dedicated ingress WebSocket minion, which restores upstream
+    # keepalive on all other ingress locations (see templates/ingress-ws.yaml).
+    # The deprecated raw `locations` string renders after these.
+    #
+    # proxyLocations:
+    #   - path: /pep                        # public path; no trailing slash
+    #     upstream: http://fachdienst:8080  # scheme://host[:port] — no path here; port defaults to 80/443 per scheme
+    #     upstreamPath: /                   # optional URI prefix on the upstream (default /)
+    #     websocket: false                  # WebSocket upgrade handling (+ ingress ws routing)
+    #     bypassAsl: false                  # satisfy all/allow all — public without ASL, mind your spec!
+    #     keepalive: 32                     # optional; idle upstream conns kept per worker
+    #     extraConfig: |                    # optional; tpl-rendered, appended inside both blocks
+    #       proxy_ssl_verify on;
+    proxyLocations: [ ]
   # set to gRPC URL of HSM Proxy to enable ossl_hsm integration
   hsmProxyAddr: null
+  # HSM key ID for the TLS listener ("store:hsm:<hsmTlsKeyId>")
+  hsmTlsKeyId: tls.p256
+  # certificate matching the HSM TLS key, relative to /etc/nginx; the default is
+  # baked into the PEP image — mount your own via extraVolumeMounts
+  hsmTlsCert: tls.p256.pem
+
+  # NOTE: keep in-sync with nginx-ingress' http-snippets
+  tlsConfig: |
+    # AFOs: GS-A_5035, GS-A_4387, A_18464, GS-A_4385, A_18467
+    ssl_protocols TLSv1.3 TLSv1.2;
+    # AFOs: A_17322, A_21275-01, A_17124-03, GS-A_5016; (GS-A_4384-03 omitted)
+    # tls 1.2
+    ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:@SECLEVEL=3;
+    # tls 1.3
+    ssl_conf_command Ciphersuites TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256;
+    # AFOs: GS-A_4359-02, GS-A_4357-02
+    ssl_ecdh_curve secp384r1:prime256v1:brainpoolP512r1:brainpoolP384r1:brainpoolP256r1;
+    # GS-A_5322: a server using RFC-5077 tickets MUST rotate the STEK <= 48h
+    # (+ BSI-TR-03116-1 algo, GS-A_4368 entropy). nginx's auto-generated STEK
+    # gives no such guarantee, so disable tickets rather than manage a rotated
+    # key file. Resumption is preserved via the server-side cache (session-ID for
+    # 1.2, stateful PSK for 1.3); ssl_session_timeout << 24h also satisfies the
+    # GS-A_5322 key-deletion bound.
+    ssl_session_tickets off;
+    ssl_session_cache   shared:SSL:10m; # 10 megabytes, not minutes — good for ~40k sessions
+    ssl_session_timeout 10m;
+    # A_26964
+    # ssl_certificate should include intermediates, or issuer should be present in ssl_trusted_certificate.
+    # Additionally, a resolver should be set to resolve the responder.
+    # If certs don't have OCSP AIA (e.g. LetsEncrypt), this is a no-op.
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    # AFOs: A_17775 - use client order
+    ssl_prefer_server_ciphers off; # default
   # podAnnotations is for setting additional Kubernetes Annotations to a Pod.
   podAnnotations: {}
   affinity: {}
   tolerations: []
+  # Optional extra volumes
+  # can be used to mount client certificate used by nginx when proxying to the fachdienst
+  # over mTLS. Mount a client certificate/key trusted by the fachdienst and,
+  # the CA chain used to verify the fachdienst certificate.
+  extraVolumes: []
+  extraVolumeMounts: []
 
 # pepproxyMetricsEnabled enables the metrics endpoint for Keycloak
-pepproxyMetricsEnabled: true
+pepproxyMetricsEnabled: false
 
 # pepproxyMetricsExporterImage is required if pepproxyMetricsEnabled is true
 # using a fixed version of the "edge" tag since the latest release 1.5.1 has vulnerabilities
@@ -307,27 +447,115 @@ cloudnativeDbSchema: "public"
 # For production use instances >= 3 to avoid a single point of failure.
 cloudnativePg:
   instances: 1
-  imageName: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/postgres:17.9-standard-trixie
+  # Additional postgresql.conf parameters, rendered verbatim into the CNPG
+  # Cluster (snake_case keys, string values). Example:
+  #   extraParameters:
+  #     log_min_duration_statement: "200"   # log statements slower than 200ms
+  #     track_io_timing: "on"
+  #     pg_stat_statements.track: top
+  extraParameters:
+    # optional: Give WAL headroom so checkpoints are paced by the timer, not
+    # by pressure.
+    # NOTE: max_wal_size is a SOFT cap and by default WAL shares the 10Gi data volume —
+    # raise only together with more disk / a dedicated walStorage
+    # max_wal_size: "2GB"
+    # min_wal_size: "1GB"
+    # checkpoint_timeout: "900"
+    # full_page_writes after each checkpoint balloon WAL (~3x observed);
+    # compression costs spare CPU and cuts checkpoint frequency and disk
+    # write volume alike
+    wal_compression: "on"
+  # Libraries for CNPG's spec.postgresql.shared_preload_libraries. CNPG-managed
+  # extensions (e.g. pg_stat_statements) are auto-CREATEd by the operator.
+  # Example:
+  # sharedPreloadLibraries: [pg_stat_statements]
+  # NOTE: changes here trigger a postgres restart.
+  sharedPreloadLibraries: []
+  imageName: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/postgres:17.11-standard-trixie
+  imagePullPolicy: ""
   resources:
     requests:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "2"
+      memory: 2Gi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      # No cpu limit: avoids CFS throttling; cpu.request is the floor, DB can burst.
+      memory: 3Gi
+  # empty → CNPG default
+  affinity: {}
+  # CNPG-native monitoring. The operator creates a PodMonitor when enablePodMonitor is true; requires the Prometheus Operator CRD in the cluster.
+  # Empty → no PodMonitor.
+  monitoring: {}
+  # enablePDB: leave unset for the CNPG default; set false on single-instance stages
   storage:
     size: 10Gi
+    # storageClass shortcut; empty → cluster default StorageClass
+    storageClass: ""
+    # Per-env PVC template (e.g. a specific storageClassName); empty → CNPG default
+    pvcTemplate: {}
+  # Optional dedicated volume for the write-ahead log (pg_wal). Empty → WAL
+  # lives on the data volume above (CNPG default). Set size (and optionally
+  # storageClass/pvcTemplate) to split WAL onto its own disk so WAL fsync does
+  # not contend with checkpoint flushes — recommended for write-heavy stages.
+  # Example:
+  #   walStorage:
+  #     size: 16Gi
+  #     storageClass: managed-csi-premium
+  walStorage: {}
   parameters:
-    sharedBuffers: 128MB
-    maxConnections: 400
+    # rule of thumb: ~25% of memory
+    sharedBuffers: 512MB
+    maxConnections: 250
+  # Connection pooler
+  pooler:
+    enabled: false
+    # type: rw
+    # instances: 1
+    # poolMode: session
+    # parameters: {}
+    # template: {} # pod template overrides (affinity, resources, ...)
+  # Continuous backup; disabled by default.
+  # When enabling, provide backup.barmanObjectStore + a ScheduledBackup schedule and the required credentials secret out-of-band.
+  backup:
+    enabled: false
+    # retentionPolicy: "30d"
+    # schedule: "0 0 2 * * *" # 6-field CNPG cron (leading seconds)
+    # method: barmanObjectStore
+    # barmanObjectStore: {} # destinationPath, endpointURL, credentials, wal, data
 
-# Which cert-manager ClusterIssuer to use for TLS on the Ingress (default)
+# Which cert-manager namespace-scoped Issuer to use for TLS on the Ingress.
+# If set, it takes precedence over clusterIssuer (emits cert-manager.io/issuer).
+issuer: ""
+
+# Which cert-manager ClusterIssuer to use for TLS on the Ingress (default).
 clusterIssuer: ""
 
-# If gematikConnectionEnabled is true, the CronJob gematik-oidc-token-renewer-cronjob is deployed and will maintain a valid access token in the Secret gematik-oidc-token
+# One-shot post-install/post-upgrade hook Job that adopts pre-existing
+# ingress-shim-created Certificates (zeta-guard-tls / zeta-guard-admin-tls)
+# into the helm release — only rendered while such a foreign Certificate
+# exists (see templates/certificate-adopt-hook.yaml). The next helm operation
+# after adoption renders and manages the Certificate normally.
+certificateAdoption:
+  # needs kubectl + bash; same default as the token-renewer worker image
+  image: google/cloud-sdk:549.0.0
+
+# If gematikConnectionEnabled is true, the CronJob ti-sim-token-renewer-cronjob is deployed and will maintain a valid access token in the Secret ti-sim-token
 gematikConnectionEnabled: true
 
 gematik:
+  tiSiem:
+    # serviceAccountEmailAddress refers to a Google service account to be impersonated
+    serviceAccountEmailAddress: ""
+    # idTokenAudience is the audience claim used in generateIdToken (ti-sim-token-renewer-cronjob).
+    # Typically, the OAuth 2.0 Client ID of the IAP-protected BDE data receiver.
+    idTokenAudience: "833409780574-lilt6qf6lli28r16b72q3p8epefop2gr.apps.googleusercontent.com"
+
+  tiSim:
+    # serviceAccountEmailAddress refers to a Google service account to be impersonated
+    serviceAccountEmailAddress: ""
+    # idTokenAudience is the audience claim used in generateIdToken (ti-sim-token-renewer-cronjob).
+    # Typically, the OAuth 2.0 Client ID of the IAP-protected BDE data receiver.
+    idTokenAudience: "833409780574-lilt6qf6lli28r16b72q3p8epefop2gr.apps.googleusercontent.com"
+
   # workloadIdentityFederation contains configuration for Google Workload Identity Federation
   workloadIdentityFederation:
     # The project number of the project that contains the workload identity pool
@@ -336,12 +564,6 @@ gematik:
     poolId: ""
     # The ID of the workload identity pool provider
     workloadIdentityProvider: ""
-
-  # serviceAccountEmailAddress refers to a Google service account to be impersonated
-  serviceAccountEmailAddress: ""
-  # idTokenAudience is the audience claim used in generateIdToken (gematik-oidc-token-renewer-cronjob).
-  # Typically, the OAuth 2.0 Client ID of the IAP-protected BDE data receiver.
-  idTokenAudience: "833409780574-lilt6qf6lli28r16b72q3p8epefop2gr.apps.googleusercontent.com"
 
 # IngressClass used by the generated Ingress.
 # - With the bundled NIC: keep equal to nginx-ingress.controller.ingressClass.name.
@@ -353,13 +575,34 @@ ingressEnabled: true
 ingressMasterAnnotations: { }
 ingressMinionAnnotations: { }
 
-# If nginxIngressEnabled is true, the nginx-ingress controller is deployed and Ingresses receive annotations.
+# Render F5-NIC-specific annotations on the Ingresses. Does NOT install the NIC —
+# that is `nginx-ingress.enabled`. Set false for non-F5 ingress controllers.
+# TODO: misleading name — rename to something like nginxIngressAnnotations (in extra branch).
 nginxIngressEnabled: true
 # When true, disable spec.tls of the master ingress to enable custom TLS configuration via ingressMasterAnnotations.\"nginx.org/server-snippets\", as required for ossl_hsm support
 nginxIngressHsm: false
+# When true, add the cookie-based sticky-session lb-method on the minion ingress.
+# Needs the NIC to provide the $zeta_route http-snippets (the bundled subchart ships
+# them; external NICs must add them). Disable where the NIC lacks them.
+nginxIngressLbMethod: true
 
 nginx-ingress:
+  # Whether to install the bundled F5 NIC subchart. Set to false on stages where
+  # NIC is installed cluster-wide out-of-band (e.g. qs on GKE). When false, the
+  # F5-NIC-specific annotations on Ingresses still render (gated by
+  # `nginxIngressEnabled`), so the chart works with an externally-installed NIC.
+  enabled: true
   controller:
+    # DaemonSet rather than Deployment, because `service.externalTrafficPolicy:
+    # Local` (below) only routes to nodes that host a controller pod: with a
+    # single-replica Deployment exactly one node is a valid load-balancer target,
+    # so every reschedule costs load-balancer probe convergence on top of pod
+    # startup. One pod per node keeps a healthy target everywhere and avoids the
+    # extra node-to-node hop.
+    kind: daemonset
+    # Upstream latency histograms (nginx_ingress_controller_upstream_server_
+    # response_latency_ms*) on the prometheus endpoint (:9113)
+    enableLatencyMetrics: true
     readOnlyRootFilesystem: true
     # NIC v5.4.0+ uses /tmp for thread-local temp files
     volumes:
@@ -368,17 +611,27 @@ nginx-ingress:
     volumeMounts:
       - name: tmp
         mountPath: /tmp
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+      sysctls:
+        # NIC upstream connections park their ephemeral port in TIME_WAIT
+        # for 60s when closed — sustained connect/close churn needs
+        # ~rate × 60 free ports. Widen the range to raise that ceiling.
+        # "Safe" sysctl: https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls
+        - name: net.ipv4.ip_local_port_range
+          value: "10240 65535"
     # We use standard Kubernetes Ingress; disable NIC CRDs to avoid CRD install requirement
     enableCustomResources: false
     ingressClass:
       name: nginx
     image:
       repository: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-ingress"
-      tag: 1.2.0
+      tag: 1.3.0
     service:
       # Default for standalone/cloud installs.
       type: LoadBalancer
-      externalTrafficPolicy: Cluster
+      externalTrafficPolicy: Local # preserve client ips
     pod:
       annotations:
         # Bump on HSM/TLS-related config changes to force a NIC pod restart —
@@ -387,11 +640,77 @@ nginx-ingress:
     enableSnippets: true
     config:
       entries:
+        # default NIC log format extended with request/upstream timing info
+        # (mirrors the PEP proxy's log_format)
+        log-format: >-
+          $remote_addr - $remote_user [$time_local] "$request"
+          $status $body_bytes_sent ${request_time}s
+          (${upstream_connect_time},${upstream_header_time},${upstream_response_time})
+          "$http_referer" "$http_user_agent" "$http_x_forwarded_for"
         # impl. nginx.org/lb-method: "hash $zeta_route consistent"
         main-snippets: |
           # see https://github.com/openresty/headers-more-nginx-module
           load_module modules/ngx_http_headers_more_filter_module.so;
+
+        # NOTE: keep ssl_* in-sync with pepproxy's tlsConfig
         http-snippets: |
+          # Clear client-supplied forwarding / client-address headers at the
+          # edge, so that only this ingress decides what the client address is.
+          #
+          # Why this is required: the ingress overwrites X-Real-IP and
+          # X-Forwarded-{Host,Port,Proto} with its own values, but it never sets
+          # `Forwarded` (RFC 7239) at all, and its X-Forwarded-For is built with
+          # $proxy_add_x_forwarded_for, which *appends* to whatever the client
+          # sent. Both are therefore attacker-controlled unless the incoming
+          # headers are cleared here: clearing the input makes
+          # $proxy_add_x_forwarded_for collapse to $remote_addr.
+          #
+          # This matters because the authorization server derives the client
+          # address claim of the access token from these headers, and the PEP
+          # then enforces that the claim matches the address of each request. A
+          # client that can inject a forwarding header can pick its own address
+          # and defeat that check.
+          #
+          # NOTE: this only yields a *true* client address if $remote_addr is
+          # the client — see `service.externalTrafficPolicy` below, and use
+          # set-real-ip-from/real-ip-header if a trusted proxy fronts this
+          # ingress.
+          #
+          # If you REMOVE a header from this list because you need to trust a
+          # reverse proxy in front of this ingress, then you are responsible for
+          # stripping the incoming forwarding headers *at that proxy*. Otherwise
+          # clients can spoof their address again.
+          more_clear_input_headers
+              # RFC 7239 and the de-facto X-Forwarded-* family
+              "Forwarded"
+              "X-Forwarded-For"
+              "X-Forwarded-Host"
+              "X-Forwarded-Port"
+              "X-Forwarded-Proto"
+              "X-Forwarded-Scheme"
+              "X-Forwarded-Server"
+              "X-Forwarded-Ssl"
+              "X-Original-Forwarded-For"
+              # single-value client-address variants used by proxies and CDNs
+              "X-Real-IP"
+              "Client-IP"
+              "X-Client-IP"
+              "X-Cluster-Client-IP"
+              "True-Client-IP"
+              "CF-Connecting-IP"
+              "CF-Connecting-IPv6"
+              "CF-Pseudo-IPv4"
+              "Fastly-Client-IP"
+              "Fly-Client-IP"
+              "X-Azure-ClientIP"
+              "X-Azure-SocketIP"
+              "X-ProxyUser-Ip"
+              # service-mesh sidecars, when traffic can reach the ingress through one
+              "X-Envoy-External-Address"
+              "X-Envoy-Internal"
+              # proxy chain metadata; not an address, but nothing downstream should trust it
+              "Via";
+
           map $cookie_zeta_route $zeta_route {
               ""      $request_id;
               default $cookie_zeta_route;
@@ -406,29 +725,52 @@ nginx-ingress:
           # -a for appending; don't override cookies set by upstream (or elsewhere in
           # nginx config).
           more_set_headers -a "Set-Cookie: $zeta_route_setcookie";
-        # AFOs: GS-A_5035, GS-A_4387, A_18464, GS-A_4385, A_18467
-        ssl-protocols: "TLSv1.3 TLSv1.2"
-        # AFOs: A_17322, A_21275-01, A_17124-03, GS-A_5016; (GS-A_4384-03 omitted)
-        ssl-ciphers: "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:@SECLEVEL=3"
-        # AFOs: GS-A_4359-02, GS-A_4357-02
-        ssl-ecdh-curve: "secp384r1:prime256v1:brainpoolP512r1:brainpoolP384r1:brainpoolP256r1"
-        # AFOs: GS-A_5322 - disable server side cache, use client tickets only
-        ssl-session-cache: "none"
-        # ssl_session_ticket_key (not specified, default) - use random generated keys with hourly rotation
-        ssl-session-tickets: "on"
-        ssl-session-timeout: "5m"
-        # ssl_stapling off (default) - A_26964 omitted, since LetsEncrypt does not provide OCSP anymore
-        ssl-stapling: "off"
-        # AFOs: A_17775 - use client order
-        ssl-prefer-server-ciphers: "false"
-        # AFOs: GS-A_5526 - renegotiation disabled by default since v0.8.23
+
+          # AFOs: GS-A_5035, GS-A_4387, A_18464, GS-A_4385, A_18467
+          ssl_protocols TLSv1.3 TLSv1.2;
+          # AFOs: A_17322, A_21275-01, A_17124-03, GS-A_5016; (GS-A_4384-03 omitted)
+          # tls 1.2
+          ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:@SECLEVEL=3;
+          # tls 1.3
+          ssl_conf_command Ciphersuites TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256;
+          # AFOs: GS-A_4359-02, GS-A_4357-02
+          ssl_ecdh_curve secp384r1:prime256v1:brainpoolP512r1:brainpoolP384r1:brainpoolP256r1;
+          # GS-A_5322: a server using RFC-5077 tickets MUST rotate the STEK <= 48h
+          # (+ BSI-TR-03116-1 algo, GS-A_4368 entropy). nginx's auto-generated STEK
+          # gives no such guarantee, so disable tickets rather than manage a rotated
+          # key file. Resumption is preserved via the server-side cache (session-ID for
+          # 1.2, stateful PSK for 1.3); ssl_session_timeout << 24h also satisfies the
+          # GS-A_5322 key-deletion bound.
+          ssl_session_tickets off;
+          ssl_session_cache   shared:SSL:10m; # 10 megabytes, not minutes — good for ~40k sessions
+          ssl_session_timeout 10m;
+          # A_26964
+          # ssl_certificate should include intermediates, or issuer should be present in ssl_trusted_certificate.
+          # Additionally, a resolver should be set to resolve the responder.
+          # If certs don't have OCSP AIA (e.g. LetsEncrypt), this is a no-op.
+          ssl_stapling on;
+          ssl_stapling_verify on;
+          # AFOs: A_17775 - use client order
+          ssl_prefer_server_ciphers off; # default
+
+        keepalive-requests: "10000"
+        # UPSTREAM keepalive (NIC -> backends): without it every proxied
+        # request opens a fresh upstream connection, and each closed one
+        # parks an ephemeral port in TIME_WAIT for 60s — the NIC pod runs
+        # out of ports around ~1000 rps (observed: connect() to pep failed
+        # (99: Cannot assign requested address)). Idle conns cached per
+        # worker; NIC adds the required proxy_http_version/Connection ""
+        # plumbing itself.
+        keepalive: "32"
+        worker-connections: "16384"
+        # per worker process; must cover ~2x worker_connections (client + upstream
+        # side of each proxied connection) or nginx clamps below worker_connections
+        worker-rlimit-nofile: "40960"
     resources:
       limits:
-        cpu: "2"
-        memory: "1Gi"
+        memory: "2Gi"
       requests:
-        cpu: "250m"
-        memory: "200Mi"
+        memory: "1Gi"
 opa:
   # opa.podLabels is a map of labels to add to the opa pod.
   podLabels: {}
@@ -436,16 +778,40 @@ opa:
   serviceAccountName: ""
   image:
     repository: opa
-    tag: 1.18.2-static
+    tag: 1.19.0-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
+  # --- Container security context (opa / opa-simulation main container) ---
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop: [ "ALL" ]
+  # --- CronJob security context (opa-token-renewer, ti-sim-token-renewer,
+  # ti-siem-token-renewer) ---
+  # No runAsUser here — stages that use workloadIdentityFederation.worker.image
+  # (google/cloud-sdk, runs as root by default) need an explicit runAsUser
+  # override in their own stage values, see private/values.jza.yaml.
+  cronjobSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    capabilities:
+      drop: [ "ALL" ]
   # Set OPA server log level: debug|info|warn|error (default: info)
   logLevel: info
   # If enabled, OPA will log decision logs to console.
   logDecisions: true
   # If enabled, OPA will log status updates to console.
   logStatusUpdates: false
-  # Bundle mode (disabled by default) — inline policyRego is used when disabled
+  # If enabled (and bundle mode is on), the readiness probe uses /health?bundles=true, so
+  # the pod only becomes Ready once a bundle has been downloaded and activated. During a
+  # rolling update the previous pod keeps serving (the rollout stalls instead), but a
+  # freshly scheduled pod — node drain, restart — stays NotReady while the registry is
+  # unreachable, which takes OPA out of service at replicaCount 1. Off by default.
+  bundleHealthCheck: false
+  # Bundle mode (enabled by default) — inline policyRego is used when disabled
   bundle:
     enabled: true
     # Logical service name used in OPA config (e.g., 'gitlab-registry' or 'local-proxy')
@@ -453,7 +819,7 @@ opa:
     # Base URL of registry
     url: https://europe-west3-docker.pkg.dev
     # fully qualified resource (including the registry host)
-    resource: europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies/test-fachdienst-policies:latest
+    resource: europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies-dev/testfachdienst-policy:latest
     credentials:
       # Reference a Secret containing registry bearer credentials.
       secretRef:
@@ -476,6 +842,9 @@ opa:
     bundle:
       # Optional explicit simulation bundle resource. If empty, chart derives from active resource.
       resource: ""
+      # Optional signature verification override for the simulation bundle (same keys as
+      # opa.bundle.verification). If empty, the shared opa.bundle.verification applies.
+      verification: { }
   # Workload Identity Federation (AKS → GCP STS) for GAR access
   workloadIdentityFederation:
     enabled: false
@@ -498,21 +867,47 @@ opa:
       imagePullSecrets: [ ]
       resources:
         limits:
-          cpu: "250m"
           memory: "200Mi"
         requests:
           cpu: "50m"
           memory: "50Mi"
 
+  # Periodically restart the opa (and, if enabled, opa-simulation) Deployment via
+  # `kubectl rollout restart`. Disabled by default — no impact unless explicitly
+  # enabled per stage.
+  rolloutRestart:
+    enabled: false
+    # Leave empty (default) to let the chart create its own ServiceAccount + minimal
+    # RBAC (get/patch on just the opa/opa-simulation Deployments) — see
+    # opa-rollout-restart-serviceaccount.yaml and opa-rollout-restart-rbac.yaml. Set
+    # to use an externally pre-provisioned ServiceAccount instead — the chart then
+    # creates no RBAC of its own and expects the given ServiceAccount to already
+    # have equivalent get/patch rights.
+    serviceAccountName: ""
+    # Default: daily at 3am, Europe/Berlin (see spec.timeZone in the CronJob template)
+    schedule: "0 3 * * *"
+    backoffLimit: 5
+    resources:
+      limits:
+        memory: "64Mi"
+      requests:
+        cpu: "10m"
+        memory: "32Mi"
+    # Reuses provisioningProcessor.image (now includes kubectl) and
+    # provisioningProcessor.containerSecurityContext, rather than a separate,
+    # generic CI tooling image that runs as root and isn't part of any vulnerability scan.
+
   # --- Example: Workload Identity Federation (WIF) ---
   #
-  # WIF mode (AKS → GCP STS → GAR)
+  # WIF mode (AKS → GCP STS → GAR). STS/IAM endpoints and scope are fixed in the
+  # token-renewer CronJob; the STS audience is derived from
+  # gematik.workloadIdentityFederation.{projectNumber,poolId,workloadIdentityProvider}.
   # serviceAccountName: opa
   # bundle:
   #   enabled: true
   #   serviceName: gar
   #   url: https://<region>-docker.pkg.dev
-  #   resource: <PROJECT_ID>/<REPO>/<IMAGE>:<TAG>
+  #   resource: <region>-docker.pkg.dev/<PROJECT_ID>/<REPO>/<IMAGE>:<TAG>
   #   credentials:
   #     secretRef:
   #       name: ""   # keep empty in WIF mode
@@ -523,13 +918,7 @@ opa:
   # workloadIdentityFederation:
   #   enabled: true
   #   sts:
-  #     # Use the provider resource name, for example:
-  #     # //iam.googleapis.com/projects/<PROJECT_ID>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
-  #     audience: ""
-  #     iamUrl: "https://iamcredentials.googleapis.com"
-  #     sa: ""
-  #     scope: "https://www.googleapis.com/auth/cloud-platform"
-  #     tokenUrl: "https://sts.googleapis.com/v1/token"
+  #     sa: ""   # Google service account email to impersonate
   #   tokenRenewer:
   #     schedule: "*/45 * * * *"
   #
@@ -549,7 +938,6 @@ opa:
       periodSeconds: 20
   resources:
     limits:
-      cpu: "2"
       memory: "1Gi"
     requests:
       cpu: "100m"
@@ -558,6 +946,167 @@ opa:
   podAnnotations: {}
   affinity: {}
   tolerations: []
+
+notificationService:
+  # Deploy the bundled notification-service (and its PEP location block, see
+  # pep/_pep-nginx-conf.tpl). Off by default; enable per-stage.
+  enabled: false
+  # notificationService.podLabels is a map of labels to add to the notification-service pod.
+  podLabels: {}
+  replicaCount: 1
+  serviceAccountName: ""
+  # One image repo, two variants by tag suffix: "-rs" (RS-facing) and "-fdv"
+  # (FdV-facing). Both are deployed and share one Postgres DB; repo/tag prefix
+  # are shared, the chart appends "-<variant>" per variant.
+  image:
+    repository: notification-service
+    # Tag prefix; "-rs"/"-fdv" appended per variant (e.g. main -> main-rs/main-fdv).
+    tag: 1.3.0
+  # Optional per-variant digest pins (rs/fdv differ). Empty -> tag only; else
+  # "<repo>:<tag>-<variant>@<digest>". Only digest is per-variant; the tag is
+  # always the shared image.tag + "-<variant>". A per-variant tag is not
+  # supported and would be ignored.
+  rs:
+    image:
+      digest: ""
+  fdv:
+    image:
+      digest: ""
+  imagePullPolicy: Always
+  imagePullSecrets: [ ]
+  # PSS 'restricted' defaults. readOnlyRootFilesystem: true — /tmp is a writable
+  # emptyDir (see _notification-service.tpl); seccompProfile set in the template.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop: [ "ALL" ]
+  # Postgres persistence (both variants connect to the same database).
+  db:
+    # mode: cloudnative -> provision a dedicated CNPG Cluster (see cloudnativePg
+    # below); external -> point jdbcUrl/secretName at an out-of-band Postgres.
+    mode: cloudnative
+    # CNPG Cluster name (cloudnative mode). Single source of truth: -rw/-app
+    # resources, NetworkPolicy/PeerAuthentication selectors, and the derived
+    # jdbcUrl/secretName/waitForDb.host all follow it.
+    clusterName: "notification-db"
+    # JDBC URL. Empty in cloudnative mode -> "jdbc:postgresql://<clusterName>-rw:5432/notification".
+    # Set explicitly for an external DB.
+    jdbcUrl: ""
+    # Secret with datasource username/password. Empty in cloudnative mode ->
+    # "<clusterName>-app". Set explicitly for an external DB.
+    secretName: ""
+    # Init container that blocks pod startup until Postgres accepts TCP, so
+    # Flyway doesn't crash-loop while the DB comes up. Mirrors push-gateway's
+    # wait-for-dependencies.
+    waitForDb:
+      enabled: true
+      # busybox provides `nc` for the TCP check.
+      image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+      imagePullPolicy: IfNotPresent
+      # DB host/port to probe. Empty host -> "<clusterName>-rw". Set for external DB.
+      host: ""
+      port: 5432
+      # Seconds between connection attempts.
+      intervalSeconds: 2
+      resources:
+        requests:
+          cpu: "10m"
+          memory: 16Mi
+        limits:
+          memory: 32Mi
+    # CNPG Cluster settings (mode=cloudnative). Plain Postgres — no pg_cron
+    # (record purging is in-app).
+    cloudnativePg:
+      instances: 1
+      imageName: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/postgres:17.11-standard-trixie
+      imagePullPolicy: ""
+      # enablePDB: leave unset for the CNPG default; set false on single-instance stages
+      storage:
+        size: 2Gi
+        storageClass: ""
+        pvcTemplate: {}
+      # Optional dedicated pg_wal volume (empty -> WAL on the data volume).
+      walStorage: {}
+      resources:
+        requests:
+          cpu: "500m"
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      parameters:
+        sharedBuffers: 128MB
+        maxConnections: 100
+      # Additional postgresql.conf parameters (snake_case keys, string values).
+      extraParameters: {}
+      affinity: {}
+      # CNPG-native monitoring (empty -> no PodMonitor).
+      monitoring: {}
+      backup:
+        enabled: false
+        # retentionPolicy: "30d"
+        # barmanObjectStore: {}
+  env:
+    # Allowlist of Push Gateway base URLs (-> push-gateway.allowed-base-urls).
+    # No default; empty fails startup validation — set at least one.
+    pushGatewayAllowedBaseUrls: []
+    # Allowed notification channels (notification.channels.allowed), comma-separated.
+    # No default — set at least one.
+    channelsAllowed: ""
+    # HSM-backed at-rest sealing of stored notification data.
+    persistenceSealingEnabled: false
+  pushGateway:
+    # Extra CA(s) trusted for the NS's outbound HTTPS to the (external) Push
+    # Gateway, in addition to system defaults. Empty -> defaults only. Mounted at
+    # /certs/push-gateway/ca-<i>.pem, passed via PUSH_GATEWAY_TRUSTED_CA_PATHS.
+    # Per entry set exactly one: secretName+secretKey or an inline cert.
+    trustedCAs: []
+    # - secretName: zeta-guard-tls
+    #   secretKey: ca.crt
+    # - cert: |
+    #     -----BEGIN CERTIFICATE-----
+    #     ...
+    #     -----END CERTIFICATE-----
+    # Client certificate presented to the Push Gateway for outbound mTLS.
+    # On when both clientCert.secretName and clientKey.secretName are set.
+    mtls:
+      clientCert:
+        secretName: ""      # Secret holding the PEM client certificate
+        secretKey: tls.crt  # key within that Secret
+      clientKey:
+        secretName: ""      # Secret holding the PEM private key
+        secretKey: tls.key  # key within that Secret
+      # Optional password for an encrypted private key.
+      keyPassword:
+        secretName: ""
+        secretKey: ""
+  accessLog:
+    # Quarkus HTTP access log (quarkus.http.access-log.* -> QUARKUS_HTTP_ACCESS_LOG_*).
+    # Off by default; enable to trace requests reaching the notification-service.
+    enabled: false
+    # Log pattern (QUARKUS_HTTP_ACCESS_LOG_PATTERN). Empty -> Quarkus "common".
+    # %{i,Header-Name} captures a request header.
+    pattern: ""
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+  podAnnotations: {}
+  affinity: {}
+  tolerations: []
+  # A_29974: single knob for the optional history feature — drives the NS's
+  # NOTIFICATION_HISTORY_ENABLED env, discovery scopes_supported, and (via
+  # terraform notification_history_enabled) the Keycloak scope.
+  historyEnabled: false
+  # RFC 9728 resource identifier for the NS (source of truth). Combined with
+  # pepproxy.wellKnownBase to form the aud; well-known location, `resource`,
+  # pep_require_aud and ConfigMap path all derive from it. Single leading-slash
+  # segment, decoupled from the /push/v1 API prefix.
+  wellKnownResourceSuffix: /notification-service
 
 # Optional: Install CloudNativePG operator in the same namespace (namespace-scoped)
 # Enabled by default so each namespace manages its own operator instance.
@@ -593,6 +1142,17 @@ openshiftIngress:
   certName: ""
 
 provisioningProcessor:
+  # OCSP validation of SMC-B / TSL certs (env PROCESSORS_TSL_OCSP_ENABLED).
+  # Default true per A_24624-01; false skips live OCSP checks (test envs).
+  tslOcspEnabled: true
+  # Keep the processor resident as a native sidecar and re-run it daily, so refreshed trust anchors take effect
+  # without restarting the pod. enabled: false runs it as a one-shot init container that exits after the first pass.
+  schedule:
+    enabled: true
+    # Local time of the daily re-run, format HH:MM (env SCHEDULE_TIME). Not a cron expression.
+    time: "03:00"
+    # IANA timezone the time above is read in (env TZ).
+    timezone: "Europe/Berlin"
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
@@ -601,9 +1161,9 @@ provisioningProcessor:
       drop: [ "ALL" ]
   image:
     repository: provisioning-processor
-    tag: 1.2.0
+    tag: 1.3.0
   imagePullPolicy: Always
-  provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
+  provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning@sha256:72d1ae7329c95346a9ef82cf5baf28ec31a78ecbc761a36884a2a1056b5d6665" # "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
   # --- CA for the provisioning container registry (Option A and B are mutually exclusive) ---
   # Option A (existing default): mount the CA from a Secret. Auto-wires env var
   #           PROVISIONING_CONTAINER_REGISTRY_CA_FILE + mount /var/registry-ca/ca.crt.
@@ -633,7 +1193,6 @@ provisioningProcessor:
   #   tokenKey: token         # default: token
   resources:
     limits:
-      cpu: "1"
       memory: "200Mi"
     requests:
       cpu: "100m"
@@ -642,48 +1201,365 @@ provisioningProcessor:
 # telemetryGatewayEnabled adds the telemetry gateway to the helm release
 telemetryGatewayEnabled: true
 
+# telemetryGatewayHost sets the hostname that ALL telemetry is sent to: the PEP
+# OTLP traces endpoint and syslog error_log/access_log, the OPA OTLP address, and
+# the authserver OTLP endpoint. Leave empty to use the default bundled collector
+# name (telemetry-gateway.fullnameOverride, else "<release>-telemetry-gateway").
+#
+# Set this to the fully-qualified hostname of the telemetry gateway when the bare
+# service name does not resolve from the components — e.g. clusters whose DNS does
+# not apply the pod search path to the exporter's resolver, cross-namespace setups,
+# or a non-default cluster domain. Example:
+#   telemetryGatewayHost: zeta-guard-telemetry-gateway.<namespace>.svc.cluster.local
+# Being a Helm value, it survives chart upgrades — no hand-editing of the rendered
+# ConfigMap (which is not permitted in production). This is the same pattern the
+# chart already uses for OPA via authserver.provider.smcB.opaBaseUrl.
+#
+# This changes ONLY the address under which the telemetry-gateway is reached, never
+# the destination: telemetry must always go to the telemetry-gateway, whose redaction
+# processor and ti_sim/ti_siem filters are not bypassable. To feed your own
+# observability backend, add an exporter INSIDE the gateway's dienst_hersteller
+# pipelines instead of redirecting the producers.
+#
+# The in-cluster hops are plaintext; transport security is delegated to the service
+# mesh (global.istio.enabled renders a namespace-wide STRICT PeerAuthentication that
+# also covers the OTLP, syslog and OPA ports).
+#
+# Hostname only — ports (4317/54526/49152/49153) are fixed. When the gateway runs
+# outside this chart, the operator must also allow egress to it: the pep-proxy, opa,
+# opa-simulation and authserver egress NetworkPolicies only permit a same-namespace
+# opentelemetry-collector pod as the destination.
+telemetryGatewayHost: ""
+
+# telemetryGatewaySendingQueuePVCResources sizes the PersistentVolumeClaim backing the sending queue
+telemetryGatewaySendingQueuePVCResources:
+  requests:
+    storage: 5Gi
+
 telemetry-gateway:
   mode: deployment
+  # Plain RollingUpdate defaults (maxSurge: 25%, maxUnavailable: 25%) would
+  # start the new pod before the old one releases the ReadWriteOnce
+  # file-storage PVC (see fileStoragePvc below), leaving it stuck in
+  # ContainerCreating. maxSurge: 0 forbids creating the new pod while the
+  # old one still counts toward capacity, and maxUnavailable: 1 lets the
+  # old one scale to zero first — so at replicaCount: 1 the old pod is
+  # always fully gone (and the PVC released) before the new one is
+  # created, the same guarantee `Recreate` would give, without switching
+  # `strategy.type` on a live Deployment (which hits a Kubernetes
+  # field-defaulting quirk: `rollingUpdate: Forbidden when type is
+  # Recreate`, since Kubernetes silently defaults that field on the live
+  # object whenever type is RollingUpdate, and nothing ever prunes it).
+  rollout:
+    strategy: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
-    tag: "v0.153.0"
-    digest: "sha256:a2a435beb9a2ba74073367ee885bd266ad1708a8bd7d49ffe2d77c5f40fe94ae"
+    tag: "v0.155.0"
+    digest: "sha256:281b10b113e43f80b798319a11ef921448c68e7428cb77e41c0bceeef7f2a852"
     pullPolicy: Always
   command:
     name: /otelcol/zeta-telemetry-gateway
   resources:
     limits:
-      cpu: "4"
-      memory: "2Gi"
+      memory: "4Gi"
     requests:
-      cpu: "100m"
-      memory: "200Mi"
+      cpu: "1"
+      memory: "1Gi"
   podSecurityContext:
     seccompProfile:
       type: RuntimeDefault
+    # PVCs/emptyDirs are created root:root by default; fsGroup makes the
+    # mounted file-storage volume group-writable by the non-root user below.
+    fsGroup: 1000
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ "ALL" ]
   config:
     connectors:
+      # WARNING metrics created by count connector are discarded by prometheus.
+      # Use deltatocumulative processor to rectify metrics before sending them
+      # to prometheus.
       count/siem:
         logs:
+          # ToDo ZETAP-1307 Attribute bei Metriken setzen: `service.name`, `service.version`
           attack.detection.count:
-            description: The number of detected attacks
+            description: 'Anzahl erkannte Angriffe in Kategorie (siehe A_25404-*) plus weitere breakdown in Versicherte und LE (A_25484-03)'
             conditions:
-              - 'attributes["bridge.name"] == "de.gematik.zeta.zetaguard.keycloak.commons.server.AttackDetectionLogger"'
+              - HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+                log.attributes["attackDetection.capecId"] != nil
             attributes:
-              - key: 'attributes["attackDetection.capecId"]'
-                default_value: "unknown capec id"
+              - key: zeta-client.date
+              - key: attackDetection.capecId
+              - key: zeta-client.user_category
+                default_value: "provider"
+
+          zeta_guard_kpi.botnet_accesses_24h:
+            description: 'Anzahl von Zugriffen von Botnetzen (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+                log.attributes["opa.event_type"] == "decision_log" and
+                log.attributes["zeta-client.access_via_botnet"] == true
+            attributes:
+              - key: zeta-client.date
+
+          zeta_guard_kpi.country_accesses_24h:
+            description: 'Anzahl von Zugriffen aus jedem Land gezählt plus weitere Zugriffe, die separat in Versicherte und LE ausgewiesen werden (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+                log.attributes["opa.event_type"] == "decision_log"
+            attributes:
+              - key: zeta-client.date
+              - key: zeta-client.user_category
+                default_value: "provider"
+
+          zeta_guard_kpi.failed_authorization_codes_24h:
+            description: 'Anzahl fehlerhafte Authorization Codes vom IDP (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
+                log.attributes["event_type"] == "authn_authorization_code_invalid"
+            attributes:
+              - key: zeta-client.date
+              - key: zeta-client.reason
+
+          zeta_guard_kpi.failed_client_activations_24h:
+            description: 'Anzahl fehlerhafter Clientfreischaltungen plus weitere breakdown in Versicherte und LE (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
+                log.attributes["event_type"] == "authn_client_registration_fail"
+            attributes:
+              - key: zeta-client.date
+              - key: zeta-client.reason
+              - key: zeta-client.user_category
+                default_value: "provider"
+
+          zeta_guard_kpi.tor_accesses_24h:
+            description: 'Anzahl von Zugriffen über TOR Netzwerke plus weitere breakdown in Versicherte und LE (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+                log.attributes["opa.event_type"] == "decision_log" and
+                log.attributes["zeta-client.access_via_tor"] == true
+            attributes:
+              - key: zeta-client.date
+              - key: zeta-client.user_category
+                default_value: "provider"
+
+          zeta_guard_kpi.vpn_accesses_24h:
+            description: 'Anzahl von Zugriffen über VPNs plus weitere breakdown in Versicherte und LE (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+                log.attributes["opa.event_type"] == "decision_log" and
+                log.attributes["zeta-client.access_via_vpn"] == true
+            attributes:
+              - key: zeta-client.date
+              - key: zeta-client.user_category
+                default_value: "provider"
+
+        spans:
+          zeta_guard_kpi.requests_by_unregister_clients.authorization_server.count:
+            description: 'Anzahl versuchter Zugriffe von nicht registrierten Clients auf Authorization Server APIs (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
+                span.kind == SPAN_KIND_SERVER and
+                (
+                  span.attributes["http.response.status_code"] == 401 or
+                  span.attributes["http.response.status_code"] == 403
+                ) and
+                span.attributes["http.route"] == "/realms/{realm}/clients-registrations/{provider}"
+
+          zeta_guard_kpi.requests_by_unregister_clients.resource_server.count:
+            description: 'Anzahl versuchter Zugriffe von nicht registrierten Clients auf Resource Server APIs (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+                span.kind == SPAN_KIND_SERVER and
+                span.attributes["http.response.status_code"] == 401 and
+                (
+                  span.attributes["http.route"] == "/ASL" or
+                  span.attributes["http.route"] == "/pep" or
+                  HasPrefix(span.attributes["http.route"], "/ASL/") or
+                  HasPrefix(span.attributes["http.route"], "/pep/")
+                )
+
+      # RED metrics (rate/latency/errors per service+span_name+kind) synthesized
+      # from the span stream, with exemplars linking each histogram bucket to a
+      # contributing trace. Fed from the dienst_hersteller trace pipeline and
+      # consumed by the dienst_hersteller metrics pipeline (see service.pipelines).
+      # Must run on the unsampled trace stream — before any tail-sampling — or
+      # the derived metrics are biased by what sampling kept. Requires the
+      # spanmetrics connector to be compiled into the collector distribution.
+      spanmetrics:
+        metrics_flush_interval: 15s
+        exemplars:
+          enabled: true
+        # key metric streams by stable resource attrs only — otherwise every
+        # PEP pod generation becomes a separate stream that differs in
+        # unpromoted attrs and collides onto the same Prometheus series
+        # (alternating counter values -> bogus rate() spikes)
+        resource_metrics_key_attributes:
+          - service.name
+          - service.namespace
+          - service.instance.id
+          - service.version
+        # stop re-flushing counters of resources that no longer send spans
+        # (default: never expire -> dead-pod series flushed forever)
+        metrics_expiration: 5m
+        dimensions:
+          - name: http.route
+          - name: is_asl
+          - name: zeta-test.oauth_grant
+            default: unknown
+        histogram:
+          explicit:
+            buckets: [50us, 100us, 250us, 500us, 1ms, 2ms, 4ms, 6ms, 8ms, 10ms, 15ms, 20ms, 30ms, 50ms, 75ms, 100ms, 200ms, 500ms, 1s, 2s, 5s]
 
     exporters:
+      otlp_grpc/ti_siem:
+        endpoint: https://otlp.siem.prod.ccs.gematik.solutions:443
+        auth:
+          authenticator: bearertokenauth/ti-siem
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 1215s
+          max_elapsed_time: 1820s
+        sending_queue:
+          enabled: true
+          queue_size: 2048
+          batch:
+            flush_timeout: 5s
+            min_size: 512
+          storage: file_storage
+        timeout: 30s
+
       otlp_grpc/ti_sim:
         endpoint: https://otlp.v1.bd.prod.ccs.gematik.solutions:443
         auth:
-          authenticator: bearertokenauth/gematik
+          authenticator: bearertokenauth/ti-sim
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 1215s
+          max_elapsed_time: 1820s
+        sending_queue:
+          enabled: true
+          queue_size: 2048
+          batch:
+            flush_timeout: 5s
+            min_size: 512
+          storage: file_storage
+        timeout: 30s
 
     extensions:
-      bearertokenauth/gematik:
-        filename: "/etc/gcp/token"
+      bearertokenauth/ti-siem:
+        filename: "/etc/ti-siem/token"
+      bearertokenauth/ti-sim:
+        filename: "/etc/ti-sim/token"
+      file_storage:
+        create_directory: true
+        directory: /var/lib/storage/otc
 
     processors:
+      transform/siem:
+        error_mode: ignore
+        log_statements:
+            # extract attributes from OPA decision log
+          - context: log
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+                log.attributes["opa.event_type"] == "decision_log"
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine (simulation)" and
+                log.attributes["opa.event_type"] == "decision_log"
+            statements:
+              # A_25484-03 - Security Monitoring - Security KPIs
+              - set(log.attributes["zeta-client.user_category"],
+                    log.body["result"]["security"]["user_category"])
+              - set(log.attributes["zeta-client.access_via_botnet"],
+                    log.body["result"]["security"]["access_via"]["botnet"])
+              - set(log.attributes["zeta-client.access_via_tor"],
+                    log.body["result"]["security"]["access_via"]["tor"])
+              - set(log.attributes["zeta-client.access_via_vpn"],
+                    log.body["result"]["security"]["access_via"]["vpn"])
+
+              # A_28793 - Telemetriedaten für Policy Entscheidungen
+              - set(log.attributes["app.build_id"],
+                    log.body["input"]["client_registration_data"]["product_version"])
+              - set(log.attributes["device.model.identifier"],
+                    log.body["input"]["client_registration_data"]["device_info"]["device_model"])
+              - set(log.attributes["os.name"],
+                    log.body["input"]["client_registration_data"]["device_info"]["os"])
+              - set(log.attributes["os.version"],
+                    log.body["input"]["client_registration_data"]["device_info"]["os_version"])
+
+            # add date attribute for count connector
+          - statements:
+              # A_25484-03 - Security Monitoring - Security KPIs
+              - set(log.attributes["zeta-client.date"],
+                FormatTime(log.time, "%F"))
+
+        trace_statements:
+          # add date attribute for count connector
+          - statements:
+              # A_25484-03 - Security Monitoring - Security KPIs
+              - set(span.attributes["zeta-client.date"],
+                FormatTime(span.start_time, "%F"))
+
+      # sets `server.address` attribute for TI-SIEM and TI-SIM
+      transform/siem_and_sim:
+        log_statements:
+          - set(resource.attributes["server.address"], "{{ .Values.global.clusterFQDN }}")
+            where resource.attributes["server.address"] == nil
+        metric_statements:
+          - set(resource.attributes["server.address"], "{{ .Values.global.clusterFQDN }}")
+            where resource.attributes["server.address"] == nil
+        profile_statements:
+          - set(resource.attributes["server.address"], "{{ .Values.global.clusterFQDN }}")
+            where resource.attributes["server.address"] == nil
+        trace_statements:
+          - set(resource.attributes["server.address"], "{{ .Values.global.clusterFQDN }}")
+            where resource.attributes["server.address"] == nil
+
+      # tag KC span events with the OAuth grant type; the shipped dashboards
+      # split token traffic on zeta-test.oauth_grant
+      transform/keycloak_oauth_grant:
+        error_mode: ignore
+        trace_statements:
+          - context: spanevent
+            statements:
+              - set(span.attributes["zeta-test.oauth_grant"], "refresh") where attributes["kc.details.grant_type"] == "refresh_token"
+              - set(span.attributes["zeta-test.oauth_grant"], "token_exchange") where attributes["kc.details.grant_type"] == "urn:ietf:params:oauth:grant-type:token-exchange"
+              - set(span.attributes["zeta-test.oauth_grant"], "token_exchange") where attributes["kc.details.grant_type"] == "urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange"
+
+      # PEP's tracing layer emits #[instrument(err)] events as log records whose
+      # body is empty — the error text lives in attributes["error"] only
+      # (opentelemetry-appender-tracing hardcodes the message field as the body).
+      # Copy it into the body so log UIs show a message. OTTL: an unset body is
+      # nil, not "". Must run on every logs pipeline that reaches an exporter.
+      transform/error_body:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - set(log.body, log.attributes["error"]) where log.attributes["error"] != nil and (log.body == nil or log.body == "")
+
+      # set log severity 'error' for OPA status updates containing error codes
+      transform/log_severity_opa_errors:
+        log_statements:
+          - conditions:
+              - log.attributes["opa.event_type"] == "status_update" and
+                (
+                  log.body["bundles"]["authz"]["code"] != nil or
+                  log.body["decision_logs"]["code"] != nil
+                )
+            statements:
+              - set(log.severity_number, SEVERITY_NUMBER_ERROR)
+              - set(log.severity_text, "error")
+
       # Workaround for outdated implementation of OpenTelemetry semantic conventions in PEP. Remove when fixed in PEP.
       attributes/semantic_conventions_migration:
         actions:
@@ -708,43 +1584,90 @@ telemetry-gateway:
             - "ZETA Guard PEP HTTP proxy"
 
       filter/ti_sim:
+        # removes all logs and metrics except those created by the resource server, and error/fatal logs created by ZETA guard
+        # removes most spans except those created by the resource server
+        # keeps certain HTTP server spans created by the HTTP proxy
         error_mode: ignore
         log_conditions:
-          - |
-            resource.attributes["service.name"] != "ZETA Guard PDP authorization server" and
-            resource.attributes["service.name"] != "ZETA Guard PEP HTTP proxy" and
-            resource.attributes["service.name"] != "ZETA Guard PDP policy engine" and
-            resource.attributes["service.name"] != "resource server"
+          - >-
+            not (
+              resource.attributes["service.name"] == "resource server" or
+              HasPrefix(resource.attributes["service.name"], "rs.") or
+              HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+              (
+                log.severity_number >= SEVERITY_NUMBER_ERROR
+              )
+            )
         metric_conditions:
-          - HasPrefix(resource.attributes["service.name"], "ZETA Guard ")
+          - >-
+            not (
+              resource.attributes["service.name"] == "resource server" or
+              HasPrefix(resource.attributes["service.name"], "rs.")
+            )
         trace_conditions:
-          - span.kind != SPAN_KIND_SERVER
-          - |
-            resource.attributes["service.name"] != "ZETA Guard PEP HTTP proxy" and
-            resource.attributes["service.name"] != "resource server"
-          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
-            span.attributes["url.path"] == "/status"
-          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
-            span.attributes["http.route"] == "/status"
+          - >-
+            not (
+              resource.attributes["service.name"] == "resource server" or
+              HasPrefix(resource.attributes["service.name"], "rs.") or
+              (
+                resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+                span.kind == SPAN_KIND_SERVER and
+                (
+                  span.attributes["url.path"] != "/status" and
+                  span.attributes["http.route"] != "/status"
+                )
+              )
+            )
+
       filter/ti_siem:
+        # removes all logs/metrics/spans except those created by ZETA guard
         error_mode: ignore
-        log_conditions:     # ToDo align conditions with ZETA specification when released
-          - resource.attributes["service.name"] == "none"
-        metric_conditions:  # ToDo align conditions with ZETA specification when released
-          - resource.attributes["service.name"] == "none"
-        trace_conditions:   # ToDo align conditions with ZETA specification when released
-          - span.kind != SPAN_KIND_SERVER
-          - |
-            resource.attributes["service.name"] != "ZETA Guard PDP authorization server" and
-            resource.attributes["service.name"] != "ZETA Guard PEP HTTP proxy" and
-            resource.attributes["service.name"] != "ZETA Guard PDP policy engine" and
-            resource.attributes["service.name"] != "resource server"
-          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
-            span.attributes["url.path"] == "/status"
-          - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
-            span.attributes["http.route"] == "/status"
-          - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
-            span.attributes["url.path"] == "/health"
+        log_conditions:
+          - >-
+            not (
+              HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+              (
+                log.attributes["attackDetection.capecId"] != nil or
+                log.attributes["opa.event_type"] != nil or
+                log.attributes["event_type"] == "authn_client_deleted" or
+                log.attributes["event_type"] == "authn_client_registered" or
+                log.attributes["event_type"] == "authn_client_registration_fail" or
+                log.attributes["event_type"] == "authn_token_created"
+              )
+            )
+        metric_conditions:
+          - >-
+            not (
+              HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+              (
+                HasPrefix(metric.name, "attack.detection.") or
+                HasPrefix(metric.name, "zeta_guard_kpi.")
+              )
+            )
+        trace_conditions:
+          - >-
+            not (
+              HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+              span.attributes["attackDetection.capecId"] != nil or
+              (
+                resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
+                span.kind == SPAN_KIND_SERVER
+              ) or
+              (
+                resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+                span.kind == SPAN_KIND_SERVER and
+                (
+                  span.attributes["url.path"] != "/status" and
+                  span.attributes["http.route"] != "/status"
+                )
+              ) or
+              (
+                resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
+                span.kind == SPAN_KIND_CLIENT and
+                span.attributes["http.request.method"] == "POST" and
+                IsMatch(span.attributes["url.full"], "/v1/data/policies/zeta/authz/decision$")
+              )
+            )
       redaction/zeta_guard:
         # by default, keep all attributes
         allow_all_keys: true
@@ -828,26 +1751,36 @@ telemetry-gateway:
           - '^service\..+'
         ignored_keys:
           - http.user_agent
+          - app.installation.id
         redact_all_types: true
-        summary: info
+        # NOT info: summary attributes (redaction.*.count) vary per batch; on
+        # metric datapoints they become label churn that fragments each series
+        # (counters appear non-monotonic, sums overcount). Applies to every
+        # consumer of the metrics pipelines.
+        summary: silent
 
     receivers:
       opa/policy_engine:
-        endpoint: 0.0.0.0:49152
+        endpoint: ${env:MY_POD_IP}:49152
         service_name: "ZETA Guard PDP policy engine"
       opa/policy_engine_simulation:
-        endpoint: 0.0.0.0:49153
+        endpoint: ${env:MY_POD_IP}:49153
         service_name: "ZETA Guard PDP policy engine (simulation)"
       otlp:
         protocols:
           grpc:
             endpoint: ${env:MY_POD_IP}:4317
+            # default 4MiB rejects KC's fat 512-span batches as PERMANENT
+            # errors -> KC-side span loss (the "~15x PDP undercount")
+            max_recv_msg_size_mib: 32
           http:
             endpoint: ${env:MY_POD_IP}:4318
       prometheus:
         config:
           scrape_configs:
-            - job_name: authserver
+            # NOTE: job names are load-bearing — the shipped dashboards
+            # (charts/lgtm/dashboards/) select on them
+            - job_name: ZETA Guard PDP authorization server
               metrics_path: /auth-mgmt/metrics  # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
               scrape_interval: 5s
               static_configs:
@@ -859,7 +1792,7 @@ telemetry-gateway:
               static_configs:
                 - targets: [ opa:8181 ]
 
-            - job_name: policy-execution-point
+            - job_name: ZETA Guard PEP HTTP proxy
               scrape_interval: 5s
               static_configs:
                 - targets: [ pep-proxy-svc:9113 ]
@@ -868,6 +1801,14 @@ telemetry-gateway:
               scrape_interval: 5s
               static_configs:
                 - targets: [ "${env:MY_POD_IP}:8888" ]
+
+            # ingress metrics are the reliable rps/latency source for
+            # consumers (spanmetrics shed under load); scraped via the
+            # chart's stable nginx-ingress-metrics Service alias
+            - job_name: nginx-ingress
+              scrape_interval: 5s
+              static_configs:
+                - targets: [ nginx-ingress-metrics:9113 ]
       syslog/http_proxy:
         udp:
           listen_address: "${env:MY_POD_IP}:54526"
@@ -878,7 +1819,9 @@ telemetry-gateway:
 
     service:
       extensions:
-        - bearertokenauth/gematik
+        - bearertokenauth/ti-siem
+        - bearertokenauth/ti-sim
+        - file_storage
         - health_check
       pipelines:
         logs: null
@@ -891,8 +1834,9 @@ telemetry-gateway:
             - syslog/http_proxy
           processors:
             - memory_limiter
-            - batch
+            - transform/error_body
             - redaction/zeta_guard
+            - batch
           exporters:
             # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
             - debug
@@ -905,9 +1849,12 @@ telemetry-gateway:
             - syslog/http_proxy
           processors:
             - memory_limiter
+            - transform/log_severity_opa_errors
             - filter/ti_sim
-            - batch
+            - transform/error_body
+            - transform/siem_and_sim
             - redaction/zeta_guard
+            - batch
           exporters:
             - otlp_grpc/ti_sim
 
@@ -920,11 +1867,14 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_siem
-            - batch
+            - transform/error_body
+            - transform/siem
+            - transform/siem_and_sim
             - redaction/zeta_guard
+            - batch
           exporters:
             - count/siem
-            - otlp_grpc/ti_sim
+            - otlp_grpc/ti_siem
 
         metrics: null
 
@@ -932,10 +1882,12 @@ telemetry-gateway:
           receivers:
             - otlp
             - prometheus
+            # RED metrics synthesized from the dienst_hersteller trace stream
+            - spanmetrics
           processors:
             - memory_limiter
-            - batch
             - redaction/zeta_guard
+            - batch
           exporters:
             # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
             - debug
@@ -946,8 +1898,9 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_sim
-            - batch
+            - transform/siem_and_sim
             - redaction/zeta_guard
+            - batch
           exporters:
             - otlp_grpc/ti_sim
 
@@ -959,10 +1912,11 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_siem
-            - batch
+            - transform/siem_and_sim
             - redaction/zeta_guard
+            - batch
           exporters:
-            - otlp_grpc/ti_sim
+            - otlp_grpc/ti_siem
 
         traces: null
 
@@ -971,11 +1925,14 @@ telemetry-gateway:
             - otlp
           processors:
             - memory_limiter
-            - batch
+            - transform/keycloak_oauth_grant
             - redaction/zeta_guard
+            - batch
           exporters:
             # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
             - debug
+            # also feed the (unsampled) trace stream into the spanmetrics connector
+            - spanmetrics
 
         traces/ti_sim:
           receivers:
@@ -983,9 +1940,10 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_sim
-            - batch
-            - redaction/zeta_guard
             - attributes/semantic_conventions_migration
+            - transform/siem_and_sim
+            - redaction/zeta_guard
+            - batch
           exporters:
             - otlp_grpc/ti_sim
 
@@ -995,20 +1953,34 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_siem
-            - batch
-            - redaction/zeta_guard
             - attributes/semantic_conventions_migration
+            - transform/siem_and_sim
+            - redaction/zeta_guard
+            - batch
           exporters:
-            - otlp_grpc/ti_sim
+            - count/siem
+            - otlp_grpc/ti_siem
 
   extraVolumeMounts:
-    - name: gcp-token
-      mountPath: /etc/gcp
+    - name: ti-siem-token
+      mountPath: /etc/ti-siem
       readOnly: true
+    - name: ti-sim-token
+      mountPath: /etc/ti-sim
+      readOnly: true
+    - name: file-storage
+      mountPath: /var/lib/storage/otc
   extraVolumes:
-    - name: gcp-token
+    - name: ti-siem-token
       secret:
-        secretName: gematik-oidc-token
+        secretName: ti-siem-token
+    - name: ti-sim-token
+      secret:
+        secretName: ti-sim-token
+    - name: file-storage
+      persistentVolumeClaim:
+        # Standalone PVC for the sending_queue file_storage extension above.
+        claimName: '{{ include "opentelemetry-collector.fullname" . }}-file-storage'
 
   ports:
     jaeger-compact:
@@ -1038,7 +2010,7 @@ telemetry-gateway:
     zipkin:
       enabled: false
   additionalLabels:
-    app.kubernetes.io/part-of: zeta-guards
+    app.kubernetes.io/part-of: zeta-guard
 
 # ---------------------------------------------------------------------------
 # Egress NetworkPolicies (A_27864-01)
@@ -1049,6 +2021,29 @@ telemetry-gateway:
 # Ports are not restricted in this release (Phase 1 — IP-only).
 networkPolicy:
   enabled: false
+
+  # DNS egress peer for the egress NetworkPolicies. Defaults to the upstream
+  # Kubernetes / KIND kube-dns service. To target a different DNS service (e.g.,
+  # OpenShift: openshift-dns / dns.operator.openshift.io/daemonset-dns=default /
+  # port 5353, since OVN-Kubernetes evaluates egress post-DNAT), set `to` to a
+  # raw peer list — it is rendered as-is and overrides namespaceSelector/
+  # podSelector. Do not override the selectors directly: Helm deep-merges maps,
+  # so a new label would be added to `k8s-app: kube-dns` (AND semantics) and
+  # match no pod. Lists like `to` are replaced wholesale, so they override
+  # cleanly.
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+    ports:
+      - port: 53
+        protocol: UDP
+      - port: 53
+        protocol: TCP
+    to: []
 
   egress:
     # A_27864-01 — gematik telemetry data receiver (OTLP endpoint)
@@ -1088,5 +2083,5 @@ networkPolicy:
         ipBlocks: [ ]
       # podSelectors: allow egress to cluster-local pods by label (post-DNAT, kindnet pattern).
       # Each entry: {matchLabels: {<label>: <value>}, port: <targetPort>}
-      # Use for test-only cluster-local backends (e.g. testfachdienst in local KIND stages).
+      # Use for test-only cluster-local backends (e.g., testfachdienst in local KIND stages).
       podSelectors: [ ]

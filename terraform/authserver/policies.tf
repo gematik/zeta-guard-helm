@@ -3,7 +3,8 @@ data "external" "manage_policies" {
   count = var.skip_external_resources ? 0 : 1
 
   program = [
-    "/bin/bash",
+    "/usr/bin/env",
+    "bash",
     "scripts/managePolicies.sh"
   ]
 

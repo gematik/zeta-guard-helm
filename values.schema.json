@@ -4,6 +4,20 @@
     "testMonitoringServiceEnabled": {
       "type": "boolean"
     },
+    "global": {
+      "type": "object",
+      "properties": {
+        "istio": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "When true, deploy Istio PeerAuthentication resources: a namespace-wide STRICT mTLS policy applying to every workload in the release namespace, plus (when databaseMode=cloudnative) a policy that adds PERMISSIVE port-level exceptions for Postgres and CNPG communication"
+            }
+          }
+        }
+      }
+    },
     "smcb_keystore": {
       "type": "object",
       "description": "Keystore and password containing SMC-B cert and key for the testdriver and",

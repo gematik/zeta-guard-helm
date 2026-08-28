@@ -1,14 +1,38 @@
 {{/*
   Helper: telemetryGateway.hostname
-  Used by:
-    - pep/_pep-nginx-conf.tpl (OTLP exporter endpoint)
+  Resolves the hostname that every telemetry stream is sent to. Used by:
+    - pep/_pep-nginx-conf.tpl (OTLP exporter endpoint + syslog error_log/access_log)
     - opa/_opa.tpl (OTLP address)
     - authserver/authserver-deployment.yaml (OTLP endpoint env var)
+  This always resolves to the telemetry-gateway itself — the values below change only
+  the ADDRESS it is reached under, never the destination (its redaction and
+  ti_sim/ti_siem filters must not be bypassed).
+  Precedence:
+    1. .Values.telemetryGatewayHost — address override for the telemetry-gateway,
+       e.g. the FQDN when the bare service name does not resolve in the cluster.
+    2. telemetry-gateway.fullnameOverride — name of the bundled collector subchart.
+    3. {{ .Release.Name }}-telemetry-gateway — default in-namespace service name.
 */}}
 {{- define "telemetryGateway.hostname" -}}
 {{- $telemetryGateway := get .Values "telemetry-gateway" }}
 {{- $defaultHostname := tpl "{{ .Release.Name }}-telemetry-gateway" . }}
-{{- $telemetryGateway.fullnameOverride | default $defaultHostname }}
+{{- .Values.telemetryGatewayHost | default $telemetryGateway.fullnameOverride | default $defaultHostname }}
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.ns-well-known-subpath
+  RFC 9728 well-known subpath for the NS, derived from wellKnownResourceSuffix. Used by
+  the nginx location/alias, the pep-well-known-resources ConfigMap key, and the
+  pep-proxy volume mount so they stay in sync. Rejects multi-segment values (a
+  ConfigMap key / subPath cannot contain '/').
+*/}}
+{{- define "zeta-guard.ns-well-known-subpath" -}}
+{{- $suffix := .Values.notificationService.wellKnownResourceSuffix -}}
+{{- $subpath := trimPrefix "/" $suffix -}}
+{{- if or (not (hasPrefix "/" $suffix)) (eq $subpath "") (contains "/" $subpath) -}}
+{{- fail (printf "notificationService.wellKnownResourceSuffix must be a single leading-slash path segment (e.g. /notification-service); got %q" $suffix) -}}
+{{- end -}}
+{{- $subpath -}}
 {{- end -}}
 
 {{/*
@@ -67,6 +91,10 @@ app.kubernetes.io/name: authserver
 {{- printf "%s%s" $registry .Values.authserver.image.repository -}}
 {{- if .Values.authserver.image.tag }}:{{ .Values.authserver.image.tag }}{{ end }}
 {{- if .Values.authserver.image.digest }}@{{ .Values.authserver.image.digest }}{{ end }}
+{{- end -}}
+
+{{- define "authserver.otel-service-name" -}}
+ZETA Guard PDP authorization server
 {{- end -}}
 
 {{/*
@@ -152,6 +180,10 @@ app.kubernetes.io/component: ingress
 {{- if .Values.pepproxy.image.tag }}:{{ .Values.pepproxy.image.tag }}{{ end }}
 {{- if .Values.pepproxy.image.digest }}@{{ .Values.pepproxy.image.digest }}{{ end }}
 {{- end }}
+
+{{- define "pep-proxy.otel-service-name" -}}
+ZETA Guard PEP HTTP proxy
+{{- end -}}
 
 {{/*
 Common labels
@@ -276,4 +308,47 @@ Secret takes precedence) plus any provisioningProcessor.extraVolumes.
 {{- with .Values.provisioningProcessor.extraVolumes }}
 {{- toYaml . }}
 {{- end }}
+{{- end -}}
+
+{{/*
+registryCaVolumeMount: read-only registry-ca mount for a *main* container. OPA needs the
+registry CA at runtime (not just in the init container) to pull the policy bundle from a
+private OCI registry. Unlike caVolumeMounts this deliberately omits
+provisioningProcessor.extraVolumeMounts, whose paths are init-container specific.
+The registry-ca volume itself is emitted by zeta-guard.provisioningProcessor.caVolumes.
+*/}}
+{{- define "zeta-guard.provisioningProcessor.registryCaVolumeMount" -}}
+{{- if or .Values.provisioningProcessor.provisioningContainerCaSecretRef .Values.provisioningProcessor.provisioningContainerCaConfigMapRef }}
+- name: registry-ca
+  mountPath: /var/registry-ca
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.dnsEgressRule
+  Emits the DNS egress rule shared by all egress NetworkPolicies (netpol/*.yaml).
+  Driven by `.Values.networkPolicy.dns`:
+    - default: namespaceSelector + podSelector (kube-system / k8s-app: kube-dns)
+    - OpenShift: openshift-dns / dns.operator.openshift.io/daemonset-dns=default,
+      port 5353 (OVN-Kubernetes evaluates egress post-DNAT)
+    - `dns.to`: a raw peer list rendered as-is, overriding the selectors
+  Include with `nindent 4` as the first entry under `egress:`.
+*/}}
+{{- define "zeta-guard.dnsEgressRule" -}}
+{{- $dns := .Values.networkPolicy.dns -}}
+# DNS resolution
+- to:
+{{- if $dns.to }}
+    {{- toYaml $dns.to | nindent 4 }}
+{{- else }}
+    - namespaceSelector:
+        matchLabels:
+          {{- toYaml $dns.namespaceSelector.matchLabels | nindent 10 }}
+      podSelector:
+        matchLabels:
+          {{- toYaml $dns.podSelector.matchLabels | nindent 10 }}
+{{- end }}
+  ports:
+    {{- toYaml $dns.ports | nindent 4 }}
 {{- end -}}

@@ -41,10 +41,16 @@ data:
   opa.yaml: |
     {{- $opaSimulationConfig := "" }}
     {{- if .Values.opa.bundle.enabled }}
-      {{- $opaSimulationConfig = include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .)) }}
+      {{- $opaSimulationConfig = include "opa.bundleConfigYaml" (dict "ctx" . "bundleResource" (include "opa.simBundleResource" .) "verification" (include "opa.simVerification" . | fromJson)) }}
     {{- else }}
       {{- $opaSimulationConfig = include "opa.configYaml" . }}
     {{- end }}
+    {{- /* Base with the simulation fragment merged on top: mergeOverwrite <base> <override>,
+           deep for maps. Everything the base renders — credentials, tls, keys — is inherited,
+           only the telemetry keys in "opa-simulation.config" are replaced. Note the
+           fromYaml/toYamlPretty roundtrip re-sorts keys alphabetically and drops comments,
+           so this ConfigMap looks different from opa-config even though both come from the
+           same source. */}}
     {{- $rectifiedOpaSimulationConfig := mergeOverwrite (fromYaml $opaSimulationConfig) (fromYaml (include "opa-simulation.config" .)) | toYamlPretty }}
     {{- $rectifiedOpaSimulationConfig | nindent 4 }}
 

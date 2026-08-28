@@ -1,4 +1,13 @@
+{{- /* TODO: adopt upstream cloudnative-pg/cluster chart for generic config pass-through */}}
 {{- if eq .Values.databaseMode "cloudnative" }}
+{{- /* Connection-budget guard: fail render if replicaCount × dbPool.maxSize (+ reserve for
+       CNPG/superuser slots) exceeds max_connections, which would exhaust the DB (SQLSTATE 53300). */}}
+{{- $reserve := 25 }}
+{{- $needed := add (mul (int .Values.authserver.replicaCount) (int .Values.authserver.dbPool.maxSize)) $reserve }}
+{{- $maxConn := int .Values.cloudnativePg.parameters.maxConnections }}
+{{- if gt $needed $maxConn }}
+{{- fail (printf "zeta-guard connection budget exceeded: authserver.replicaCount (%d) × authserver.dbPool.maxSize (%d) + %d reserve = %d, which exceeds cloudnativePg.parameters.maxConnections (%d). Lower dbPool.maxSize or replicaCount, or raise maxConnections and cloudnativePg.resources.limits.memory accordingly. See docs/how-to_guides/How_to_configure_authserver.md." (int .Values.authserver.replicaCount) (int .Values.authserver.dbPool.maxSize) $reserve $needed $maxConn) }}
+{{- end }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -7,16 +16,73 @@ metadata:
     app.kubernetes.io/part-of: zeta-guard
 spec:
   instances: {{ .Values.cloudnativePg.instances }}
+  {{- if kindIs "bool" .Values.cloudnativePg.enablePDB }}
+  enablePDB: {{ .Values.cloudnativePg.enablePDB }}
+  {{- end }}
   postgresql:
+    {{- with .Values.cloudnativePg.sharedPreloadLibraries }}
+    {{- /* dedicated CNPG field, NOT a postgresql.conf parameter. For CNPG-
+         managed extensions (pg_stat_statements, auto_explain, ...) the
+         operator also creates the extension. Changing this restarts postgres. */}}
+    shared_preload_libraries:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     parameters:
       shared_buffers: {{ .Values.cloudnativePg.parameters.sharedBuffers | quote }}
       max_connections: {{ .Values.cloudnativePg.parameters.maxConnections | quote }}
+      {{- /* any further postgresql.conf parameters, passed through verbatim
+           (snake_case keys, values as strings) */}}
+      {{- range $k, $v := .Values.cloudnativePg.extraParameters }}
+      {{ $k }}: {{ $v | quote }}
+      {{- end }}
   imageName: {{ .Values.cloudnativePg.imageName | quote }}
+  {{- with .Values.cloudnativePg.imagePullPolicy }}
+  imagePullPolicy: {{ . | quote }}
+  {{- end }}
   storage:
     size: {{ .Values.cloudnativePg.storage.size | quote }}
+    {{- with .Values.cloudnativePg.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.cloudnativePg.storage.pvcTemplate }}
+    pvcTemplate:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- /* Optional dedicated volume for pg_wal. When set, WAL fsync no longer
+       contends with checkpoint data flushes on the same disk. Gated on the
+       block being non-empty, so the default (single PVC) is unchanged. */}}
+  {{- with .Values.cloudnativePg.walStorage }}
+  walStorage:
+    size: {{ .size | quote }}
+    {{- with .storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    {{- with .pvcTemplate }}
+    pvcTemplate:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
   {{- with .Values.cloudnativePg.resources }}
   resources:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.cloudnativePg.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.cloudnativePg.monitoring }}
+  monitoring:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .Values.cloudnativePg.backup.enabled }}
+  backup:
+    {{- with .Values.cloudnativePg.backup.retentionPolicy }}
+    retentionPolicy: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.cloudnativePg.backup.barmanObjectStore }}
+    barmanObjectStore:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
   {{- end }}
   bootstrap:
     initdb:

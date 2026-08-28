@@ -1,0 +1,31 @@
+# grafana/otel-lgtm single-pod observability stack — the Diensthersteller-side
+# telemetry consumer for load-test/debug stages. Not part of the ZETA Guard
+# product; opt-in via the umbrella chart (lgtm.enabled / tag "lgtm").
+enabled: false
+
+# Grafana admin password. Optional: when unset, an existing lgtm-grafana-admin
+# Secret is reused (it survives uninstalls, in lockstep with the lgtm-data
+# pvc), else one is generated. Fetch the effective password with:
+# kubectl get secret -n <ns> lgtm-grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
+adminPassword: null
+
+# Public hostname (same host the zeta-guard minion ingresses use). Grafana is
+# served under https://<hostname>/grafana via a minion ingress.
+hostname: ""
+
+# Must match the zeta-guard ingress class (mergeable minion).
+ingressClassName: "nginx"
+
+storageClassName: ""
+storageRequest: 150Gi
+
+# 30d of metrics, size-capped so the TSDB can never fill the PVC
+prometheusArgs: |
+  --storage.tsdb.retention.time=30d --storage.tsdb.retention.size=30GB
+
+# trace sampling (after spanmetrics)
+samplingPercentage: 100
+
+resources:
+  requests: { memory: 6Gi, cpu: "1" }
+  limits:   { memory: 10Gi }

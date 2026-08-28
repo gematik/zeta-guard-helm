@@ -1,0 +1,958 @@
+{
+ "apiVersion": "dashboard.grafana.app/v2",
+ "kind": "Dashboard",
+ "metadata": {
+  "name": "adn48q3"
+ },
+ "spec": {
+  "annotations": [
+   {
+    "kind": "AnnotationQuery",
+    "spec": {
+     "query": {
+      "kind": "DataQuery",
+      "group": "grafana",
+      "version": "v0",
+      "datasource": {
+       "name": "-- Grafana --"
+      },
+      "spec": {}
+     },
+     "enable": true,
+     "hide": true,
+     "iconColor": "rgba(0, 211, 255, 1)",
+     "name": "Annotations & Alerts",
+     "builtIn": true
+    }
+   },
+   {
+    "kind": "AnnotationQuery",
+    "spec": {
+     "query": {
+      "kind": "DataQuery",
+      "group": "datasource",
+      "version": "v0",
+      "datasource": {
+       "name": "grafana"
+      },
+      "spec": {
+       "limit": 100,
+       "matchAny": false,
+       "tags": [
+        "report"
+       ],
+       "type": "tags"
+      }
+     },
+     "enable": true,
+     "hide": true,
+     "iconColor": "red",
+     "name": "annotation"
+    }
+   },
+   {
+    "kind": "AnnotationQuery",
+    "spec": {
+     "query": {
+      "kind": "DataQuery",
+      "group": "datasource",
+      "version": "v0",
+      "datasource": {
+       "name": "grafana"
+      },
+      "spec": {
+       "limit": 100,
+       "matchAny": false,
+       "tags": [],
+       "type": "dashboard"
+      }
+     },
+     "enable": true,
+     "hide": true,
+     "iconColor": "red",
+     "name": "dashboard"
+    }
+   }
+  ],
+  "cursorSync": "Tooltip",
+  "editable": true,
+  "elements": {
+   "panel-3": {
+    "kind": "Panel",
+    "spec": {
+     "id": 3,
+     "title": "latency / rps",
+     "description": "",
+     "links": [],
+     "data": {
+      "kind": "QueryGroup",
+      "spec": {
+       "queries": [
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(traces_span_metrics_duration_milliseconds_count{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"POST /realms/{realm}/clients-registrations/{provider}\"}[1m])) or vector(0)",
+            "legendFormat": "register rps",
+            "range": true
+           }
+          },
+          "refId": "A",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "histogram_quantile(${pct:raw}, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"POST /realms/{realm}/clients-registrations/{provider}\"}[1m])) by(le)) >= 0 or vector(0)",
+            "instant": false,
+            "legendFormat": "register",
+            "range": true
+           }
+          },
+          "refId": "B",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(traces_span_metrics_duration_milliseconds_count{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"GET /realms/{realm}/{extension}\"}[1m])) or vector(0)",
+            "legendFormat": "nonce rps",
+            "range": true
+           }
+          },
+          "refId": "C",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "histogram_quantile(${pct:raw}, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"GET /realms/{realm}/{extension}\"}[1m])) by(le)) >= 0 or vector(0)",
+            "instant": false,
+            "legendFormat": "nonce",
+            "range": true
+           }
+          },
+          "refId": "D",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(traces_span_metrics_duration_milliseconds_count{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"POST /realms/{realm}/protocol/{protocol}/token\"}[1m])) or vector(0)",
+            "legendFormat": "token rps",
+            "range": true
+           }
+          },
+          "refId": "E",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "histogram_quantile(${pct:raw}, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"POST /realms/{realm}/protocol/{protocol}/token\"}[1m])) by(le)) >= 0 or vector(0)",
+            "instant": false,
+            "legendFormat": "token",
+            "range": true
+           }
+          },
+          "refId": "F",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(traces_span_metrics_duration_milliseconds_count{service_name=\"ZETA Guard PEP HTTP proxy\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"/ASL\", is_asl=\"handle_subrequest\"}[1m])) or vector(0)",
+            "legendFormat": "asl rps",
+            "range": true
+           }
+          },
+          "refId": "G",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "histogram_quantile(${pct:raw}, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"ZETA Guard PEP HTTP proxy\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"/ASL\", is_asl=\"handle_subrequest\"}[1m])) by(le)) >= 0 or vector(0)",
+            "instant": false,
+            "legendFormat": "asl",
+            "range": true
+           }
+          },
+          "refId": "H",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(traces_span_metrics_duration_milliseconds_count{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\"}[1m])) or vector(0)",
+            "legendFormat": "pdp (total) rps",
+            "range": true
+           }
+          },
+          "refId": "I",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "histogram_quantile(${pct:raw}, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"ZETA Guard PDP authorization server\", span_kind=\"SPAN_KIND_SERVER\"}[1m])) by(le)) >= 0 or vector(0)",
+            "instant": false,
+            "legendFormat": "pdp (total)",
+            "range": true
+           }
+          },
+          "refId": "J",
+          "hidden": false
+         }
+        }
+       ],
+       "transformations": [
+        {
+         "kind": "Transformation",
+         "group": "joinByField",
+         "spec": {
+          "options": {
+           "byField": "Time",
+           "mode": "outer"
+          }
+         }
+        }
+       ],
+       "queryOptions": {}
+      }
+     },
+     "vizConfig": {
+      "kind": "VizConfig",
+      "group": "xychart",
+      "version": "13.0.1",
+      "spec": {
+       "options": {
+        "legend": {
+         "calcs": [],
+         "displayMode": "list",
+         "placement": "bottom",
+         "showLegend": true
+        },
+        "mapping": "manual",
+        "series": [
+         {
+          "frame": {
+           "matcher": {
+            "id": "byIndex",
+            "options": 0
+           }
+          },
+          "name": {
+           "fixed": "register"
+          },
+          "x": {
+           "matcher": {
+            "id": "byName",
+            "options": "register rps"
+           }
+          },
+          "y": {
+           "matcher": {
+            "id": "byName",
+            "options": "register"
+           }
+          }
+         },
+         {
+          "frame": {
+           "matcher": {
+            "id": "byIndex",
+            "options": 0
+           }
+          },
+          "name": {
+           "fixed": "nonce"
+          },
+          "x": {
+           "matcher": {
+            "id": "byName",
+            "options": "nonce rps"
+           }
+          },
+          "y": {
+           "matcher": {
+            "id": "byName",
+            "options": "nonce"
+           }
+          }
+         },
+         {
+          "frame": {
+           "matcher": {
+            "id": "byIndex",
+            "options": 0
+           }
+          },
+          "name": {
+           "fixed": "token"
+          },
+          "x": {
+           "matcher": {
+            "id": "byName",
+            "options": "token rps"
+           }
+          },
+          "y": {
+           "matcher": {
+            "id": "byName",
+            "options": "token"
+           }
+          }
+         },
+         {
+          "frame": {
+           "matcher": {
+            "id": "byIndex",
+            "options": 0
+           }
+          },
+          "name": {
+           "fixed": "asl"
+          },
+          "x": {
+           "matcher": {
+            "id": "byName",
+            "options": "asl rps"
+           }
+          },
+          "y": {
+           "matcher": {
+            "id": "byName",
+            "options": "asl"
+           }
+          }
+         },
+         {
+          "frame": {
+           "matcher": {
+            "id": "byIndex",
+            "options": 0
+           }
+          },
+          "name": {
+           "fixed": "pdp (total)"
+          },
+          "x": {
+           "matcher": {
+            "id": "byName",
+            "options": "pdp (total) rps"
+           }
+          },
+          "y": {
+           "matcher": {
+            "id": "byName",
+            "options": "pdp (total)"
+           }
+          }
+         }
+        ],
+        "tooltip": {
+         "hideZeros": false,
+         "mode": "single",
+         "sort": "none"
+        }
+       },
+       "fieldConfig": {
+        "defaults": {
+         "thresholds": {
+          "mode": "absolute",
+          "steps": [
+           {
+            "value": 0,
+            "color": "green"
+           },
+           {
+            "value": 80,
+            "color": "red"
+           }
+          ]
+         },
+         "color": {
+          "mode": "palette-classic"
+         },
+         "custom": {
+          "axisBorderShow": false,
+          "axisCenteredZero": false,
+          "axisColorMode": "text",
+          "axisLabel": "",
+          "axisPlacement": "auto",
+          "axisWidth": 75,
+          "fillOpacity": 50,
+          "hideFrom": {
+           "legend": false,
+           "tooltip": false,
+           "viz": false
+          },
+          "pointShape": "circle",
+          "pointSize": {
+           "fixed": 5
+          },
+          "pointStrokeWidth": 1,
+          "scaleDistribution": {
+           "type": "linear"
+          },
+          "show": "points"
+         }
+        },
+        "overrides": [
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "register rps"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "reqps"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "register"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "ms"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "nonce rps"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "reqps"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "nonce"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "ms"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "token rps"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "reqps"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "token"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "ms"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "asl rps"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "reqps"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "asl"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "ms"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "pdp (total) rps"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "reqps"
+           }
+          ]
+         },
+         {
+          "matcher": {
+           "id": "byName",
+           "scope": "series",
+           "options": "pdp (total)"
+          },
+          "properties": [
+           {
+            "id": "unit",
+            "value": "ms"
+           }
+          ]
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "panel-6": {
+    "kind": "Panel",
+    "spec": {
+     "id": 6,
+     "title": "rps",
+     "description": "",
+     "links": [],
+     "data": {
+      "kind": "QueryGroup",
+      "spec": {
+       "queries": [
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=\"ZETA Guard PDP authorization server\",uri=\"/realms/{realm}/clients-registrations/{provider}\"}[1m]))",
+            "legendFormat": "registration",
+            "range": true
+           }
+          },
+          "refId": "A",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=\"ZETA Guard PDP authorization server\",uri=\"/realms/{realm}/{extension}\"}[1m]))",
+            "legendFormat": "nonce",
+            "range": true
+           }
+          },
+          "refId": "B",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=\"ZETA Guard PDP authorization server\",uri=\"/realms/{realm}/protocol/{protocol}/token\"}[1m]))",
+            "legendFormat": "token",
+            "range": true
+           }
+          },
+          "refId": "C",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(traces_span_metrics_duration_milliseconds_count{service_name=\"ZETA Guard PEP HTTP proxy\",span_kind=\"SPAN_KIND_SERVER\", span_name=\"/ASL\", is_asl=\"handle_subrequest\"}[1m]))",
+            "legendFormat": "asl",
+            "range": true
+           }
+          },
+          "refId": "D",
+          "hidden": false
+         }
+        },
+        {
+         "kind": "PanelQuery",
+         "spec": {
+          "query": {
+           "kind": "DataQuery",
+           "group": "prometheus",
+           "version": "v0",
+           "datasource": {
+            "name": "prometheus"
+           },
+           "spec": {
+            "editorMode": "code",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=\"ZETA Guard PDP authorization server\"}[1m]))",
+            "legendFormat": "pdp (total)",
+            "range": true
+           }
+          },
+          "refId": "E",
+          "hidden": false
+         }
+        }
+       ],
+       "transformations": [],
+       "queryOptions": {}
+      }
+     },
+     "vizConfig": {
+      "kind": "VizConfig",
+      "group": "timeseries",
+      "version": "13.0.1",
+      "spec": {
+       "options": {
+        "annotations": {
+         "clustering": -1,
+         "multiLane": false
+        },
+        "legend": {
+         "calcs": [],
+         "displayMode": "list",
+         "placement": "bottom",
+         "showLegend": true
+        },
+        "tooltip": {
+         "hideZeros": false,
+         "mode": "single",
+         "sort": "none"
+        }
+       },
+       "fieldConfig": {
+        "defaults": {
+         "unit": "reqps",
+         "thresholds": {
+          "mode": "absolute",
+          "steps": [
+           {
+            "value": 0,
+            "color": "green"
+           },
+           {
+            "value": 80,
+            "color": "red"
+           }
+          ]
+         },
+         "color": {
+          "mode": "palette-classic"
+         },
+         "custom": {
+          "axisBorderShow": false,
+          "axisCenteredZero": false,
+          "axisColorMode": "text",
+          "axisLabel": "",
+          "axisPlacement": "auto",
+          "axisWidth": 75,
+          "barAlignment": 0,
+          "barWidthFactor": 0.6,
+          "drawStyle": "line",
+          "fillOpacity": 0,
+          "gradientMode": "none",
+          "hideFrom": {
+           "legend": false,
+           "tooltip": false,
+           "viz": false
+          },
+          "insertNulls": false,
+          "lineInterpolation": "linear",
+          "lineWidth": 1,
+          "pointSize": 5,
+          "scaleDistribution": {
+           "type": "linear"
+          },
+          "showPoints": "auto",
+          "showValues": false,
+          "spanNulls": false,
+          "stacking": {
+           "group": "A",
+           "mode": "none"
+          },
+          "thresholdsStyle": {
+           "mode": "off"
+          }
+         }
+        },
+        "overrides": []
+       }
+      }
+     }
+    }
+   }
+  },
+  "layout": {
+   "kind": "TabsLayout",
+   "spec": {
+    "tabs": [
+     {
+      "kind": "TabsLayoutTab",
+      "spec": {
+       "title": "$pct",
+       "layout": {
+        "kind": "GridLayout",
+        "spec": {
+         "items": [
+          {
+           "kind": "GridLayoutItem",
+           "spec": {
+            "x": 0,
+            "y": 0,
+            "width": 24,
+            "height": 14,
+            "element": {
+             "kind": "ElementReference",
+             "name": "panel-3"
+            }
+           }
+          },
+          {
+           "kind": "GridLayoutItem",
+           "spec": {
+            "x": 0,
+            "y": 14,
+            "width": 24,
+            "height": 8,
+            "element": {
+             "kind": "ElementReference",
+             "name": "panel-6"
+            }
+           }
+          }
+         ]
+        }
+       },
+       "repeat": {
+        "mode": "variable",
+        "value": "pct"
+       }
+      }
+     }
+    ]
+   }
+  },
+  "links": [],
+  "liveNow": false,
+  "preload": true,
+  "tags": [],
+  "timeSettings": {
+   "timezone": "browser",
+   "from": "now-30m",
+   "to": "now",
+   "autoRefresh": "10s",
+   "autoRefreshIntervals": [
+    "5s",
+    "10s",
+    "30s",
+    "1m",
+    "5m",
+    "15m",
+    "30m",
+    "1h",
+    "2h",
+    "1d"
+   ],
+   "hideTimepicker": false,
+   "fiscalYearStartMonth": 0
+  },
+  "title": "report (/rps)",
+  "variables": [
+   {
+    "kind": "CustomVariable",
+    "spec": {
+     "name": "pct",
+     "query": "0.5, 0.9, 0.99, 0.999, max : 1.0",
+     "current": {
+      "text": [
+       "0.5",
+       "0.9",
+       "0.99",
+       "0.999",
+       "max"
+      ],
+      "value": [
+       "0.5",
+       "0.9",
+       "0.99",
+       "0.999",
+       "1.0"
+      ]
+     },
+     "options": [],
+     "multi": true,
+     "includeAll": false,
+     "hide": "dontHide",
+     "skipUrlSync": false,
+     "allowCustomValue": true,
+     "valuesFormat": "csv"
+    }
+   }
+  ],
+  "preferences": {
+   "layout": {
+    "kind": "GridLayout",
+    "spec": {
+     "items": []
+    }
+   }
+  }
+ }
+}

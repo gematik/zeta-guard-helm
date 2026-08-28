@@ -61,7 +61,7 @@ spec:
         - name: seed-keys
           image: "{{ include "hsm-sim.image" . | trim }}"
           imagePullPolicy: "{{ .Values.imagePullPolicy }}"
-          command: ["sh", "-c", "cp -r /etc/hsm_sim/keys/. /seed-keys/"]
+          command: ["sh", "-c", "cp -r /etc/hsm_sim/keys/. /seed-keys/{{ if .Values.extraKeys.enabled }} && cp -L /extra-keys/* /seed-keys/{{ end }}"]
           {{- with .Values.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -69,13 +69,10 @@ spec:
           volumeMounts:
             - name: keys
               mountPath: /seed-keys
-
           {{- if .Values.extraKeys.enabled }}
-            {{- range $item := .Values.extraKeys.items }}
             - name: extra-keys
-              mountPath: /seed-keys/{{ $item | quote }}
-              subPath: {{ $item | quote }}
-            {{- end }}
+              mountPath: /extra-keys
+              readOnly: true
           {{- end }}
       volumes:
         - name: keys
@@ -84,6 +81,13 @@ spec:
         - name: extra-keys
           secret:
             secretName: {{ .Values.extraKeys.secret }}
+            {{- with .Values.extraKeys.items }}
+            items:
+              {{- range . }}
+              - key: {{ . }}
+                path: {{ . }}
+              {{- end }}
+            {{- end }}
       {{- end }}
 
       securityContext:

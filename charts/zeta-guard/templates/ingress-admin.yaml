@@ -1,0 +1,55 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* Minion of ingress-admin-master.yaml: /auth on the dedicated admin hostname,
+     including the admin REST API and console — that is the point of this hostname. */ -}}
+{{- if and .Values.ingressEnabled .Values.authserver.adminHostname .Values.nginxIngressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeta-guard-admin-auth
+  labels:
+    {{- include "ingress.labels" . | nindent 4 }}
+  annotations:
+    nginx.org/mergeable-ingress-type: "minion"
+    {{- if .Values.nginxIngressLbMethod }}
+    {{- /* Same reason as the public /auth ingress: zeta-guard-nonce is per-node. Not
+         known to be required by any admin API, kept for consistency. */}}
+    nginx.org/lb-method: "hash $zeta_route consistent"
+    {{- end }}
+    {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
+    {{- /* This ingress routes to the https port; without this NIC would speak plain
+         HTTP to it. */}}
+    nginx.org/ssl-services: "authserver"
+    {{- end }}
+    {{- /* Nested in the prefix location NIC generates for /auth below (legal: nginx only
+         refuses locations nested in a regex or exact-match parent). Regex, so it holds
+         for any realm name and wins over the enclosing prefix. */}}
+    nginx.org/location-snippets: |
+      # Session revocation is intra-cluster only — the PEPs reach it directly at
+      # http://authserver/auth/... .
+      location ~ ^/auth/realms/[^/]+/zeta-guard-revocation {
+          return 404;
+      }
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.authserver.adminHostname | quote }}
+      secretName: {{ .Values.authserver.adminTlsSecretName | default "zeta-guard-admin-tls" | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.authserver.adminHostname | quote }}
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: authserver
+                port:
+                  {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
+                  name: https
+                  {{- else }}
+                  name: http
+                  {{- end }}
+{{- end }}

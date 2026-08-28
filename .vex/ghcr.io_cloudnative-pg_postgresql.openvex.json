@@ -1,0 +1,1144 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
+  "author": "Unknown Author",
+  "version": 3,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-24882"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/gnupg"
+        }
+      ],
+      "status": "not_affected",
+      "status_note": "GnuPG wird hier nicht in Kombination mit einem TPM verwendet.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-02-23T16:02:07.699281286Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4878"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "TOCTOU-Racecondition in cap_set_file(). libcap2 gelangt transitiv über postgresql-17 → libsystemd0 → libcap2 in das Image. Weder das Postgres-Binary noch libsystemd0 importiert oder ruft cap_set_file() auf; kein PostgreSQL-Binary referenziert das Symbol (überprüft mittels nm -D und binärem Zeichenketten-Scan), es sind keine Dateifähigkeiten (File Capabilities) auf PostgreSQL-Binaries gesetzt (getcap -r), und kein Skript ruft setcap/getcap auf. Der Exploit erfordert zusätzlich einen lokalen nicht privilegierten Angreifer, der einen gleichzeitigen setcap-Aufruf ausnutzt – keine dieser Vorbedingungen ist im Container erfüllt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33845"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Keine Postgres binary lädt libgnutls30t64. Postgres verwendet kein DTLS. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33846"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Keine Postgres binary lädt libgnutls30t64. Postgres verwendet kein DTLS. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42010"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Postgres ist nicht mit RSA-PSK (Rivest–Shamir–Adleman – Pre-Shared Key) konfiguriert. Kein anderer Service im Container ist mit RSA-PSK (Rivest–Shamir–Adleman – Pre-Shared Key) konfiguriert. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-40356"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgssapi-krb5-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libk5crypto3"
+        },
+        {
+          "@id": "pkg:deb/debian/libkrb5-3"
+        },
+        {
+          "@id": "pkg:deb/debian/libkrb5support0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "NegoEx Mechanismus nicht konfiguriert unter etc/gss/mech oder the /etc/gss/mech.d/.",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-05-13T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42009"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libgnutls30t64"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Keine Postgres binary lädt libgnutls30t64. Postgres verwendet kein DTLS. Kein anderer Service ist von außen erreichbar (keine offenen Ports außer von Postgres). Zusätzlich ist der Posgres-Container ist nur aus dem Cluster erreichbar, daher kann der Attack Vector CVSSv3.1-Bewertung auf 'Adjacent Network' angepasst werden. Das resultiert im CVSSv3.1-Vektor AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H und einem Base Score von 6,5 (MEDIUM).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-05-21T09:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-8376"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Der Container läuft mit einem 64bit-Image. Daher kann die Schwachstelle nicht ausgenutzt werden. Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42496"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42497"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-48962"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-9538"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-08T12:28:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-11822"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "libsqlite3-0 ist ausschließlich als transitive Abhängigkeit enthalten, nicht weil PostgreSQL es nutzt. Es wird durch util-linux (über liblastlog2-2) und durch gpg hereingezogen. PostgreSQL selbst linkt nicht gegen SQLite und verwendet es nicht. CVE-2026-11822 betrifft ausschließlich die FTS5-Volltextsuche und ist nur erreichbar, indem eine FTS5-MATCH-Query gegen eine angreiferkontrollierte, präparierte Datenbank ausgeführt wird. Keiner der beiden Konsumenten in diesem Image nutzt die FTS5-Erweiterung, führt MATCH-Queries aus oder öffnet extern bereitgestellte Datenbankdateien.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-17T12:19:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-11824"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "libsqlite3-0 ist ausschließlich als transitive Abhängigkeit enthalten, nicht weil PostgreSQL es nutzt. Es wird durch util-linux (über liblastlog2-2) und durch gpg hereingezogen. PostgreSQL selbst linkt nicht gegen SQLite und verwendet es nicht. CVE-2026-11824 betrifft ausschließlich die FTS5-Volltextsuche und ist nur erreichbar, indem eine FTS5-MATCH-Query gegen eine angreiferkontrollierte, präparierte Datenbank ausgeführt wird. Keiner der beiden Konsumenten in diesem Image nutzt die FTS5-Erweiterung, führt MATCH-Queries aus oder öffnet extern bereitgestellte Datenbankdateien.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-17T12:19:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-48959"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-17T12:19:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-41992"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/gzip"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Buffer-Over-read im LZH-Decompressor des gzip-Binaries (unlzh.c, read_c_len). Auslösbar nur durch 'gzip -d' auf eine präparierte .Z (LZW)- gefolgt von einer .lzh (LZH)-Datei im selben Aufruf (cgit.git.savannah.gnu.org/cgit/gzip.git/commit/?id=63dbf6b3b9e6e781df1a6a64e609b10e23969681). Der verwundbare LZW/LZH-Code existiert ausschließlich im gzip-CLI-Binary. PostgreSQL verwendet gzip (pg_backupcluster / pg_basebackup) ausschließlich zum Komprimieren eigener WAL- bzw. Backup-Daten im Deflate-Format und dekomprimiert niemals angreiferkontrollierte .Z-/.lzh-Dateien, der verwundbare LZH-Decoder wird daher nie erreicht. Die gzip-Wrapper-Skripte rufen zwar gzip auf, werden aber im Container nicht aufgerufen (z.B. zcat, zdiff). savelog nutzt gzip nur zum Komprimieren. Ein Auslösen erfordert manuelles lokales Ausführen von gzip/gunzip/zcat auf einer präparierten .Z-gefolgt-von-.lzh-Kombination in einem Aufruf. Kein Laufzeit- oder Remote-Pfad speist solchen Input ein.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-06T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54369"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libacl1"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "libacl ist im Base-Image vorhanden und wird nur von OS-Utilities (cp/mv/install/tar/sed) importiert, die im Betrieb von PostgreSQL nicht ausgeführt werden. Keines der acl-importierenden Binaries ist setuid. Ausnutzung erfordert einen privilegierten Aufruf auf angreiferkontrollierten Pfaden — im Laufzeitkontext des Containers nicht gegeben.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-07-06T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54370"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libacl1"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "libacl ist im Base-Image vorhanden und wird nur von OS-Utilities (cp/mv/install/tar/sed) importiert, die im Betrieb von PostgreSQL nicht ausgeführt werden. Keines der acl-importierenden Binaries ist setuid. Ausnutzung erfordert einen privilegierten Aufruf auf angreiferkontrollierten Pfaden — im Laufzeitkontext des Containers nicht gegeben. Die CLI-Tools getfacl/setfacl/chacl sind im Image nicht enthalten.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-07-06T10:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53615"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur die Bibliothek libblkid1. Der verwundbare Code wird ausschließlich beim Einlesen der Partitionstabelle eines Datenträgers oder Disk-Images ausgeführt. Ein Angriff setzt voraus, dass ein Angreifer einen präparierten Datenträger einhängt, der von libblkid geprüft wird. Im Container passiert das nicht: PostgreSQL erhält ein fertig gemountetes Dateisystem, kein rohes Blockgerät mit Partitionstabelle, und ruft den verwundbaren Code nie auf. Die Werkzeuge, die solches Partition-Probing automatisch auslösen (udev, cloud-init, CSI-Treiber, systemd-repart), sind im Image nicht enthalten und laufen — falls überhaupt — außerhalb des Containers mit einer anderen libblkid. Der verwundbare Code-Pfad wird daher in diesem Image nie betreten.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-13595"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur die Bibliothek libblkid1. Der verwundbare Code (Use-after-free in den Partition-Probern für BSD/Minix/Solaris/UnixWare) wird ausschließlich beim Einlesen der Partitionstabelle eines Datenträgers oder Disk-Images ausgeführt. Ein Angriff setzt lokalen Zugriff voraus (CVSS AV:L) und dass ein Angreifer einen präparierten Datenträger einhängt, der von libblkid geprüft wird. Im Container passiert das nicht: PostgreSQL erhält ein fertig gemountetes Dateisystem, kein rohes Blockgerät mit Partitionstabelle, und ruft den verwundbaren Code nie auf. Die Werkzeuge, die solches Partition-Probing automatisch als root auslösen (udev/udisks, cloud-init, CSI-Treiber), sind im Image nicht enthalten und laufen — falls überhaupt — außerhalb des Containers mit einer anderen libblkid. Der verwundbare Code-Pfad wird daher in diesem Image nie betreten.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27456"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur das Tool mount. Es gibt keinen Eintrag in /etc/fstab. Daher kann der Angreifer die Schwachstelle nicht ausnutzen (s. https://nvd.nist.gov/vuln/detail/CVE-2026-27456). Ein Angreifer bräuchte zusätzlich Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53612"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur das Tool mount. Weiterhin gibt es keinen Eintrag in /etc/fstab. Daher kann der Angreifer die Schwachstelle nicht ausnutzen (s. https://github.com/util-linux/util-linux/security/advisories/GHSA-g8wm-75wr-g2vh). Ein Angreifer bräuchte zusätzlich Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53613"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur das Tool mount. Weiterhin gibt es keinen Eintrag in /etc/fstab. Daher kann der Angreifer die Schwachstelle nicht ausnutzen (s. https://github.com/util-linux/util-linux/security/advisories/GHSA-8gj5-72r3-428g). Ein Angreifer bräuchte zusätzlich Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53614"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Diese Schwachstelle betrifft nur das Tool mount. Weiterhin gibt es keinen Eintrag in /etc/fstab. Daher kann der Angreifer die Schwachstelle nicht ausnutzen (s. https://github.com/util-linux/util-linux/security/advisories/GHSA-67r7-8m5w-22wx). Ein Angreifer bräuchte zusätzlich Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-68972"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/dirmngr"
+        },
+        {
+          "@id": "pkg:deb/debian/gnupg"
+        },
+        {
+          "@id": "pkg:deb/debian/gnupg-l10n"
+        },
+        {
+          "@id": "pkg:deb/debian/gpg"
+        },
+        {
+          "@id": "pkg:deb/debian/gpg-agent"
+        },
+        {
+          "@id": "pkg:deb/debian/gpgconf"
+        },
+        {
+          "@id": "pkg:deb/debian/gpgsm"
+        }
+      ],
+      "status": "not_affected",
+      "status_note": "Durch diese Schwachstelle in GnuPG kann ein Angreifer bei Nachrichten, die ein '\f' am Ende einer Zeile enthalten, die Signierung umgehen. GnuPG wird in diesem Container nur von der Bibliothek apt verwendet (verifiziert mit 'apt-cache rdepends'). Die Bibliothek apt wird in diesem Image nicht zur Laufzeit ausgeführt. Daher wird der vulnerable Code-Pfad zur Laufzeit nicht erreicht.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-13221"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Der verwundbare Code liegt im Perl-Interpreter selbst bzw. in einem Modul, das /usr/share/postgresql-common/pg_wrapper mitlädt, und ist damit bei einer Perl-Ausführung präsent. Zur Laufzeit ist Perl nur über pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Zu Gunsten des Angreifers wird angenommen, dass der verwundbare Code dabei erreicht wird. pg_wrapper verarbeitet als Eingaben jedoch nur die Aufrufparameter des Client-Tools, /etc/postgresql-common/user_clusters und ~/.postgresqlrc — sämtlich aus dem Image bzw. der Helm-Konfiguration, keine aus Angreiferdaten. Anschließend ersetzt sich der Perl-Prozess per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin; er verarbeitet zu keinem Zeitpunkt Nutzdaten der Datenbank. Von außen ist der Container nur über den PostgreSQL-Wire-Protocol-Port erreichbar, und über diesen Weg gelangen keine Daten in ein Perl-Programm. Es existiert damit kein Pfad, über den ein Angreifer die verwundbare Funktion mit kontrollierten Eingaben (Archive, serialisierte Daten, pack/unpack-Templates, reguläre Ausdrücke, Adress-/Socket-Argumente, HTTP-Antworten) erreichen könnte.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-07-10T16:32:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-57432"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Der verwundbare Code liegt im Perl-Interpreter selbst bzw. in einem Modul, das /usr/share/postgresql-common/pg_wrapper mitlädt, und ist damit bei einer Perl-Ausführung präsent. Zur Laufzeit ist Perl nur über pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Zu Gunsten des Angreifers wird angenommen, dass der verwundbare Code dabei erreicht wird. pg_wrapper verarbeitet als Eingaben jedoch nur die Aufrufparameter des Client-Tools, /etc/postgresql-common/user_clusters und ~/.postgresqlrc — sämtlich aus dem Image bzw. der Helm-Konfiguration, keine aus Angreiferdaten. Anschließend ersetzt sich der Perl-Prozess per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin; er verarbeitet zu keinem Zeitpunkt Nutzdaten der Datenbank. Von außen ist der Container nur über den PostgreSQL-Wire-Protocol-Port erreichbar, und über diesen Weg gelangen keine Daten in ein Perl-Programm. Es existiert damit kein Pfad, über den ein Angreifer die verwundbare Funktion mit kontrollierten Eingaben (Archive, serialisierte Daten, pack/unpack-Templates, reguläre Ausdrücke, Adress-/Socket-Argumente, HTTP-Antworten) erreichen könnte.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-07-10T16:32:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-57433"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-41991"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/gzip"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Betroffen sind nur die Fallback-Zweige in den Shell-Skripten gzexe und zdiff, die ausschließlich bei fehlendem mktemp einen vorhersehbaren Dateinamen verwenden. /usr/bin/mktemp ist im Image vorhanden, daher wird immer 'mktemp ... XXXXXXXXX' genutzt und der verwundbare $$-Pfad nie erreicht (verifiziert an usr/bin/gzexe Z.127-130 und usr/bin/zdiff Z.159-164, cgit.git.savannah.gnu.org/cgit/gzip.git/commit/?id=4e6f8b24ab823146ab8776f0b7fe486ab34d4269). Zudem werden gzexe/zdiff in keinem Skript im Container zur Laufzeit nicht verwendet.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54371"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libattr1"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft die CLI-Tools getfattr und setfattr (aus dem attr-Paket). Diese Tools sind nicht im Image enthalten (verifiziert mit 'find / -name getfattr' und 'find / -name setfattr'). Im Image ist nur die Bibliothek libattr1 vorhanden.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42250"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libbz2-1.0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Das Tool bzip2recover, in dem die Schwachstelle besteht, wird nicht im Image nicht verwendet. Für einen erfolgreichen Angriff müsste ein Angreifer bzip2recover auf eine von ihm kontrollierte Datei aufrufen können. Ein Angreifer bräuchte Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42250"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libbz2-1.0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Das Tool bzip2recover, in dem die Schwachstelle besteht, ist im Container nicht vorhanden.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5435"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc6"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-l10n"
+        },
+        {
+          "@id": "pkg:deb/debian/locales"
+        },
+        {
+          "@id": "pkg:deb/debian/locales-all"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Betroffen sind die veralteten Debug-Funktionen ns_printrrf, ns_printrr und fp_nquery, die beim Drucken von TSIG-Records die Pufferlänge des Aufrufers nicht prüfen. Diese Funktionen werden ausschließlich von libresolv exportiert, nicht von libc. Die Bibliothek kommt nur als ungenutzter Bestandteil des glibc-Pakets ins Image und wird von keinem Binary geladen, der verwundbare Code liegt dort als toter Code. Weder PostgreSQL noch die OS-Utilities im Image drucken DNS-Records, TSIG-Verarbeitung findet nicht statt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5450"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc6"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Eine Funktion der scanf-Familie wird in diversen Executables und Libraries importiert. Dabei ist unklar, ob '%mc' verwendet wird. Dieser Format Specifier ist notwendig, um die Schwachstellen ausnutzen zu können. Es kann daher nicht ausgeschlossen werden, dass eine der Executables oder Libraries betroffen ist. Einige PostgreSQL-Bibliotheken und Executables importieren Funktionen der scanf-Familie. Im Code von PostgreSQL 17.10 wird der Format Specifier '%mc' nicht verwendet. Für das Ausnutzen der Schwachstelle müsste der Angreifer den Input kontrollieren und die Executable aufrufen oder die betroffene Library-Funktion triggern. Die Schwachstelle wird von der NVD als Critical eingestuft (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H). Doch Red Hat bietet eine gut begründete Analyse (https://access.redhat.com/security/cve/cve-2026-5435), durch die diese Schwachstelle eine Kritikalität einen CVSS3.1-Score von 5.9 (Medium) erhält (CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:H).",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5450"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-l10n"
+        },
+        {
+          "@id": "pkg:deb/debian/locales"
+        },
+        {
+          "@id": "pkg:deb/debian/locales-all"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft nur das Paket libc6, nicht die aufgezählten Pakete unter products",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5928"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc6"
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Die Funktion ungetwc wird von libstdc++ geladen, welche wiederum von anderen Bibliothek genutzt wird. Ob es einen Pfad von den importierten Funktion aus libstdc++ zur betroffenen Funktion ungetwc gibt, ist unklar. Daher kann daher nicht ausgeschlossen werden, dass die Schwachstelle theoretisch ausnutzbar ist. Die Schwachstelle wird von der NVD als High eingestuft (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H). Doch Red Hat bietet eine Analyse (https://access.redhat.com/security/cve/cve-2026-5928), durch die diese Schwachstelle eine Kritikalität einen CVSS3.1-Score von 5 (Medium) erhält (CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:N/A:H).",
+      "timestamp": "2026-05-21T15:09:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5928"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-l10n"
+        },
+        {
+          "@id": "pkg:deb/debian/locales"
+        },
+        {
+          "@id": "pkg:deb/debian/locales-all"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft nur das Paket libc6, nicht die aufgezählten Pakete unter products.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6238"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libc6"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libc-l10n"
+        },
+        {
+          "@id": "pkg:deb/debian/locales"
+        },
+        {
+          "@id": "pkg:deb/debian/locales-all"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Betroffen sind die veralteten Debug-Funktionen ns_printrrf, ns_printrr und fp_nquery, die beim Drucken von TSIG-Records die Pufferlänge des Aufrufers nicht prüfen. Diese Funktionen werden ausschließlich von libresolv exportiert, nicht von libc. Die Bibliothek kommt nur als ungenutzter Bestandteil des glibc-Pakets ins Image und wird von keinem Binary geladen, der verwundbare Code liegt dort als toter Code. Weder PostgreSQL noch die OS-Utilities im Image drucken DNS-Records, TSIG-Verarbeitung findet nicht statt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-69720"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libncursesw6"
+        },
+        {
+          "@id": "pkg:deb/debian/libtinfo6"
+        },
+        {
+          "@id": "pkg:deb/debian/ncurses-base"
+        },
+        {
+          "@id": "pkg:deb/debian/ncurses-bin"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft ncurses. Das betroffene Werkzeug ist infocmp (/usr/bin/infocmp). infocmp wird im Container nicht aufgerufen, außer im Perl-Modul Term/Cap.pm. Term::Cap ist nicht Teil der Ladekette von /usr/share/postgresql-common/pg_wrapper — dem einzigen zur Laufzeit erreichbaren Perl-Programm — und wird von keinem im Container ausgeführten Perl-Skript geladen. Damit ein Angreifer infocmp mit benutzerdefinierten Parametern aufrufen könnte, müsste er Zugriff auf eine lokale Shell (Terminal/SSH) haben.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-13757"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libp11-kit0"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Verwundbar ist die gegenseitig rekursive Aufrufkette p11_rpc_message_get_attribute() / p11_rpc_message_get_attribute_array_value() in p 11-kit/rpc-message.c, die verschachtelte CKA_WRAP_TEMPLATE-, CKA_UNWRAP_TEMPLATE- und CKA_DERIVE_TEMPLATE-Attribute ohne Begrenzung der Rekursionstiefe verarbeitet (Stack-Erschöpfung). Dieser Code ist in libp11-kit.so.0 einkompiliert – nachgewiesen durch die eingebetteten Assert-Dateinamen rpc-message.c, rpc-client.c, rpc-server.c und rpc-transport.c, die Symbole p11_rpc_message_parse, p11_rpc_server_handle und p11_rpc_transport_read/write sowie die exportierte Server-API p11_kit_remote_serve_module/_tokens/_token. Die Ausnutzung erfordert Zugriff auf den p11-kit-RPC-Unix-Socket. Im Container ist weder das Paket p11-kit (kein p11-kit-server, kein p11-kit-remote) noch p11-kit-modules (keine p11-kit-client.so) installiert. dpkg -l zeigt ausschliesslich libp11-kit0 0.25.5-3, dpkg -L libp11-kit0 nur die Bibliothek selbst. Kein Prozess bindet oder kontaktiert einen RPC-Socket. Zudem ist keine PKCS#11-Konfiguration vorhanden (weder /etc/pkcs11 noch das pkcs11-Modulverzeichnis existieren), einziger Konsument der Bibliothek ist libgnutls.so.30, und PostgreSQL nutzt in dieser Konfiguration kein PKCS#11.",
+      "justification": "component_not_present",
+      "timestamp": "2026-07-10T16:32:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54411"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libpam-modules"
+        },
+        {
+          "@id": "pkg:deb/debian/libpam-modules-bin"
+        },
+        {
+          "@id": "pkg:deb/debian/libpam-runtime"
+        },
+        {
+          "@id": "pkg:deb/debian/libpam0g"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Laut https://access.redhat.com/security/cve/cve-2026-54411 muss pam_userdb mit 'crypt=none' oder ausgelassenem 'crypt'-Attribut konfiguriert sein, damit die Schwachstelle ausnutzbar ist. pam_userdb ist nicht konfiguriert, da es keine Konfigurationsdatei für das Modul 'pam_userdb' im Container gibt.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-17T12:19:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-15649"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-07-10T16:32:00Z",
+      "last_updated": "2026-08-03T14:37:09Z",
+      "version": 2
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-12087"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-03T14:37:09Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-48961"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-03T14:37:09Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-7010"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-03T14:37:09Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-7017"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript, das sich nach Auswertung der Cluster-Konfiguration per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin ersetzt. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Der verwundbare Code wird daraus nicht erreicht: das betroffene Modul ist entweder nicht Teil dieser Ladekette, oder die betroffene Funktion wird von keinem Modul der Ladekette aufgerufen. Die übrigen Perl-Skripte des Images (u. a. ptar, ptardiff, ptargrep, streamzip, zipdetails, cpan, json_pp, pg_upgradecluster, pg_backupcluster) werden von keiner Komponente referenziert: das Image enthält keine Entrypoint- oder Init-Hook-Verzeichnisse, und in /etc, /usr/share/postgresql-common und /usr/lib/postgresql existiert keine Referenz auf diese Skripte. Ein Aufruf setzt damit eine manuelle, interaktive Ausführung im Container voraus. Der verwundbare Code liegt nicht im Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-03T14:37:09Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50812"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "Reverse-Abhängigkeiten von libsqlite3-0 im Image (apt-cache rdepends --installed): liblastlog2-2 und gpg. Keine der beiden nutzt die SQLite-Session-/Changeset-API, die den einzigen verwundbaren Codepfad dieser CVE darstellt. GnuPG verwendet SQLite ausschließlich als Backend für seinen TOFU-Vertrauensspeicher (Trust-On-First-Use) ~/.gnupg/tofu.db, eine reguläre SQLite-Datenbank, auf die über gewöhnliche SQL-Transaktionen zugegriffen wird (siehe https://www.gnupg.org/documentation/manuals/gnupg/GPG-Configuration-Options.html zum TOFU-Vertrauensmodell und https://lists.gnupg.org/pipermail/gnupg-users/2017-August/058856.html als Beleg dafür, dass tofu.db eine einfache SQLite-Datei ist). liblastlog2 nutzt SQLite ausschließlich als Speicher-Backend für die Last-Login-Datenbank /var/lib/lastlog/lastlog2.db, bereitgestellt über High-Level-Funktionen ll2_* zum Lesen/Schreiben/Aktualisieren ohne jegliche Changeset-Verarbeitung (siehe https://github.com/util-linux/util-linux/blob/master/liblastlog2/README.md und https://man7.org/linux/man-pages/man3/lastlog2.3.html). Da kein Konsument von Angreifern bereitgestellte Changesets anwendet, liegt der verwundbare Code nicht im Ausführungspfad.",
+      "timestamp": "2026-08-03T14:37:09Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50813"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "Reverse-Abhängigkeiten von libsqlite3-0 im Image (apt-cache rdepends --installed): liblastlog2-2 und gpg. Keine der beiden nutzt die SQLite-Session-/Changeset-API, die den einzigen verwundbaren Codepfad dieser CVE darstellt. GnuPG verwendet SQLite ausschließlich als Backend für seinen TOFU-Vertrauensspeicher (Trust-On-First-Use) ~/.gnupg/tofu.db, eine reguläre SQLite-Datenbank, auf die über gewöhnliche SQL-Transaktionen zugegriffen wird (siehe https://www.gnupg.org/documentation/manuals/gnupg/GPG-Configuration-Options.html zum TOFU-Vertrauensmodell und https://lists.gnupg.org/pipermail/gnupg-users/2017-August/058856.html als Beleg dafür, dass tofu.db eine einfache SQLite-Datei ist). liblastlog2 nutzt SQLite ausschließlich als Speicher-Backend für die Last-Login-Datenbank /var/lib/lastlog/lastlog2.db, bereitgestellt über High-Level-Funktionen ll2_* zum Lesen/Schreiben/Aktualisieren ohne jegliche Changeset-Verarbeitung (siehe https://github.com/util-linux/util-linux/blob/master/liblastlog2/README.md und https://man7.org/linux/man-pages/man3/lastlog2.3.html). Da kein Konsument von Angreifern bereitgestellte Changesets anwendet, liegt der verwundbare Code nicht im Ausführungspfad.",
+      "timestamp": "2026-08-03T14:37:09Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-15534"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Der verwundbare Code liegt im Perl-Interpreter selbst (Regex-Engine, regexec.c) und ist damit bei jeder Perl-Ausführung präsent. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. Zu Gunsten des Angreifers wird angenommen, dass der verwundbare Code dabei erreicht wird. pg_wrapper verarbeitet als Eingaben jedoch nur die Aufrufparameter des Client-Tools, /etc/postgresql-common/user_clusters und ~/.postgresqlrc — sämtlich aus dem Image bzw. der Helm-Konfiguration, keine aus Angreiferdaten. Anschließend ersetzt sich der Perl-Prozess per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin; er verarbeitet zu keinem Zeitpunkt Nutzdaten der Datenbank. Von außen ist der Container nur über den PostgreSQL-Wire-Protocol-Port erreichbar, und über diesen Weg gelangen keine Daten in ein Perl-Programm.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-15T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-19487"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libperl5.40"
+        },
+        {
+          "@id": "pkg:deb/debian/perl"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        },
+        {
+          "@id": "pkg:deb/debian/perl-modules-5.40"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Perl ist in diesem Image ausschließlich Debian-Basisbestandteil: perl-base ist Essential (Priority: required), perl, libperl* und perl-modules-* kommen als Abhängigkeit von postgresql-common, postgresql-client-common, ucf und debconf hinzu. Eine PL/Perl-Extension, über die Angreifer eigenen Perl-Code in die Datenbank einbringen könnten, ist nicht installiert und nicht aktivierbar: es existiert weder ein Paket postgresql-*-plperl noch eine plperl.so im pkglibdir noch eine plperl-Control-Datei im Extension-Verzeichnis; CREATE EXTENSION plperl schlägt daher fehl. Der verwundbare Code liegt im Perl-Interpreter selbst (Regex-Engine, regexec.c) und ist damit bei jeder Perl-Ausführung präsent. Zur Laufzeit ist Perl nur über /usr/share/postgresql-common/pg_wrapper erreichbar: die Client-Tool-Namen in /usr/bin (psql, pg_dump, pg_basebackup, pg_isready, pg_restore, pgbench u. a.) sind Symlinks auf dieses Perl-Skript. Die vollständige Ladekette dieses Skripts besteht aus PgCommon, POSIX, Socket, IPC::Open3, Fcntl, Carp, Exporter, Symbol, Tie::Hash, XSLoader, constant, overloading, strict und warnings. pg_wrapper verarbeitet als Eingaben nur die Aufrufparameter des Client-Tools, /etc/postgresql-common/user_clusters und ~/.postgresqlrc — sämtlich aus dem Image bzw. der Helm-Konfiguration, keine aus Angreiferdaten. Anschließend ersetzt sich der Perl-Prozess per exec durch das echte PostgreSQL-Binary aus /usr/lib/postgresql/<major>/bin; er verarbeitet zu keinem Zeitpunkt Nutzdaten der Datenbank. Von außen ist der Container nur über den PostgreSQL-Wire-Protocol-Port erreichbar, und über diesen Weg gelangen keine Daten in ein Perl-Programm.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-15T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-18477"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/tar"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "TOCTOU-Race-Condition im inkrementellen Backup-/Restore-Pfad von GNU tar, konkret in der Dumpdir-'X'-/Rename-Behandlung. Beim Restore mit --listed-incremental (-g/-G) können dadurch Dateien und Verzeichnisse außerhalb des Extraktionsverzeichnisses erzeugt, umbenannt oder überschrieben werden. Ein Angriff setzt einen inkrementellen tar-Lauf voraus, dazu Schreibzugriff des Angreifers auf gesicherte Inhalte sowie lokalen Zugriff auf das Restore-System, um das Race-Fenster zu treffen. Das Paket ist als Essential-Paket im Image enthalten. Es existiert jedoch kein verwundbarer tar-Aufruf: keine Aufrufstelle im Image verwendet --listed-incremental, -g oder -G, und keine wird im Betrieb des PostgreSQL-Images ausgeführt. Gescannt wurde über alle regulären Dateien des Rootfs (find / -xdev -type f | xargs grep -alE) nach 'tar' in Kommandoposition sowie nach den Optionsstrings --listed-incremental und -g/-G, jeweils in Text- und in Binärdateien (grep -a); die dabei gefundenen Aufrufstellen wurden einzeln auf ihre Argumente geprüft. Ergänzend wurde geprüft, dass kein Cron-/Anacron-Daemon und kein systemd im Image vorhanden ist und dass keine .snar-Snapshot-Datei existiert.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-15T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-18508"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/tar"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Fehlerhafte Auflösung von Hardlink-Zielen bei der Extraktion mit der Option --one-top-level: Die Hardlink-Ziele werden nicht auf das angegebene Top-Level-Verzeichnis beschränkt, sondern relativ zum Arbeitsverzeichnis der Extraktion aufgelöst. Ein Angriff setzt kumulativ voraus, dass ein angreiferkontrolliertes Archiv genau mit --one-top-level extrahiert wird und im Arbeitsverzeichnis ein passender Symlink existiert. Das Paket ist als Essential-Paket im Image enthalten. Es existiert jedoch kein verwundbarer tar-Aufruf: keine Aufrufstelle im Image verwendet --one-top-level, keine extrahiert ein angreiferkontrolliertes Archiv, und keine wird im Betrieb des PostgreSQL-Images ausgeführt. Gescannt wurde über alle regulären Dateien des Rootfs (find / -xdev -type f | xargs grep -alE) nach 'tar' in Kommandoposition sowie nach dem Optionsstring --one-top-level, jeweils in Text- und in Binärdateien (grep -a); die dabei gefundenen Aufrufstellen wurden einzeln auf ihre Argumente geprüft. Ergänzend wurde geprüft, dass kein Cron-/Anacron-Daemon und kein systemd im Image vorhanden ist.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-15T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5704"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/tar"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Tar wird von keinem im PostgreSQL-Image ausgeführten Prozess verwendet. Es wird nur für das dpkg und für pg_backupcluster genutzt. Für das Ausnutzen der Schwachstelle bräuchte ein Angreifer Zugriff auf eine Shell/Terminal.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-15T00:00:00Z"
+    }
+  ],
+  "timestamp": "2026-02-27T15:41:26Z",
+  "last_updated": "2026-08-15T00:00:00Z"
+}

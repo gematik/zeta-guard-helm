@@ -1,0 +1,39 @@
+{{/*
+  Standalone PVC backing the telemetry-gateway's file_storage extension
+  (sending_queue WAL for the OTLP exporters, see charts/zeta-guard/values.yaml
+  telemetry-gateway.config.extensions.file_storage). mode: deployment has no
+  volumeClaimTemplates support (that's statefulset-only), so this claim is
+  created here, once, and referenced by name from telemetry-gateway.
+  extraVolumes' persistentVolumeClaim.claimName in values — a stage that
+  overrides extraVolumes/extraVolumeMounts (Helm lists replace, they don't
+  merge) can't drop this claim along with them, since it no longer lives in
+  values at all.
+
+  .Subcharts is the real context Helm builds for the telemetry-gateway
+  (opentelemetry-collector alias) dependency, so `include
+  "opentelemetry-collector.fullname"`/".name" against it match exactly what
+  that subchart names its own Deployment/Service — including the alias
+  quirk that its .Chart.Name is "telemetry-gateway", not "opentelemetry-
+  collector", once it's consumed as an aliased dependency.
+
+  No storageClassName set -> uses the cluster's default StorageClass; a
+  stage needing a specific class means editing this template (none does).
+*/}}
+{{- $telemetryGateway := index .Subcharts "telemetry-gateway" }}
+{{- if $telemetryGateway.Values.config.service.extensions | has "file_storage" }}
+{{- $fullname := include "opentelemetry-collector.fullname" $telemetryGateway }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-file-storage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "zeta-guard.baseLabels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ include "opentelemetry-collector.name" $telemetryGateway }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    {{- .Values.telemetryGatewaySendingQueuePVCResources | toYaml | nindent 4 }}
+{{- end }}

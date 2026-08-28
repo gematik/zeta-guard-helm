@@ -24,8 +24,8 @@ PROVIDER_ID="zeta-hsm-token-signing"
 TOKEN_RESPONSE=$(curl "${CURL_OPTS[@]}" -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password" \
   -d "client_id=admin-cli" \
-  -d "username=${KC_USERNAME}" \
-  -d "password=${KC_PASSWORD}" 2>&1) || {
+  --data-urlencode "username=${KC_USERNAME}" \
+  --data-urlencode "password=${KC_PASSWORD}" 2>&1) || {
     echo "ERROR: Failed to authenticate against Keycloak at ${KC_URL}" >&2
     echo "${TOKEN_RESPONSE}" >&2
     exit 1
@@ -39,10 +39,8 @@ if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
   exit 1
 fi
 
-AUTH=(-H "Authorization: Bearer ${TOKEN}")
-
 # ── Find and remove HSM token signing components ────────────────────────────
-COMPONENTS=$(curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+COMPONENTS=$(curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
   "${KC_URL}/admin/realms/${KC_REALM}/components?type=org.keycloak.keys.KeyProvider")
 
 IDS=$(echo "$COMPONENTS" | jq -r --arg pid "$PROVIDER_ID" '.[] | select(.providerId == $pid) | .id')
@@ -50,7 +48,7 @@ IDS=$(echo "$COMPONENTS" | jq -r --arg pid "$PROVIDER_ID" '.[] | select(.provide
 REMOVED=0
 for ID in $IDS; do
   echo "Removing HSM token signing component: id=${ID}"
-  curl "${CURL_OPTS[@]}" "${AUTH[@]}" \
+  curl "${CURL_OPTS[@]}" --oauth2-bearer "${TOKEN}" \
     -X DELETE \
     "${KC_URL}/admin/realms/${KC_REALM}/components/${ID}"
   REMOVED=$((REMOVED + 1))

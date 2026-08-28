@@ -1,0 +1,46 @@
+{{- if and .Values.global.istio.enabled (eq .Values.databaseMode "cloudnative") }}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: keycloak-db
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: keycloak-db
+  mtls:
+    mode: STRICT
+  portLevelMtls:
+    "5432": # Postgres replica communication
+      mode: PERMISSIVE
+    "8000": # CNPG operator to pod communication
+      mode: PERMISSIVE
+{{- end }}
+{{- /* Same exception for the notification-service's dedicated CNPG cluster. Without
+     it, the namespace-wide STRICT policy (istio-strict.yaml) blocks the CNPG operator
+     from reaching the instance-manager on :8000, so the Cluster never reports
+     Ready=True and helm's --wait hangs — even though Postgres itself is serving. */}}
+{{- if and .Values.global.istio.enabled .Values.notificationService.enabled (eq .Values.notificationService.db.mode "cloudnative") }}
+{{- $clusterName := .Values.notificationService.db.clusterName | default "notification-db" }}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ $clusterName }}
+  labels:
+    app.kubernetes.io/part-of: zeta-guard
+    app.kubernetes.io/component: notification-service
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: {{ $clusterName }}
+  mtls:
+    mode: STRICT
+  portLevelMtls:
+    "5432": # Postgres replica communication
+      mode: PERMISSIVE
+    "8000": # CNPG operator to pod communication
+      mode: PERMISSIVE
+{{- end }}

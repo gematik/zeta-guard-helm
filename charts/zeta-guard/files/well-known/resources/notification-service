@@ -1,0 +1,15 @@
+{
+  "resource": "{{ .Values.pepproxy.wellKnownBase }}{{ .Values.notificationService.wellKnownResourceSuffix }}",
+  "authorization_servers": [
+    "https://{{ .Values.authserver.hostname }}{{ .Values.authserver.wellKnownAuthServerPath }}"
+  ],
+  "scopes_supported": [
+    "notification.pusher.read",
+    "notification.pusher.write",
+    "notification.channel.read",
+    "notification.channel.write"{{ if .Values.notificationService.historyEnabled }},
+    "notification.history.read"{{ end }}
+  ],
+  "dpop_bound_access_tokens_required": true,
+  "zeta_asl_use": "not_supported"
+}

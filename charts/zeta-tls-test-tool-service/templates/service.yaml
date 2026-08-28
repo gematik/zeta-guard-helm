@@ -4,7 +4,7 @@ metadata:
   name: zeta-tls-test-tool-server
 spec:
   selector:
-    app.kubernetes.io/name: zeta-tls-test-tool-service
+    {{- include "zeta-tls-test-tool-service.selectorLabels" . | nindent 4 }}
   ports:
     - name: tls-test-tool
       port: {{ default 4433 .Values.service.ports.tlsTestToolServer }}
@@ -17,7 +17,7 @@ metadata:
   name: zeta-tls-test-tool-service
 spec:
   selector:
-    app.kubernetes.io/name: zeta-tls-test-tool-service
+    {{- include "zeta-tls-test-tool-service.selectorLabels" . | nindent 4 }}
   type: {{ default "ClusterIP" .Values.service.type }}
   {{- $svcType := default "ClusterIP" .Values.service.type }}
   ports:

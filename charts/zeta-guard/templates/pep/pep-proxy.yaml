@@ -87,7 +87,7 @@ spec:
           image: "{{ include "pep-proxy.image" . | trim }}"
           imagePullPolicy: "{{ .Values.pepproxy.imagePullPolicy }}"
           {{- $pepProxyEnvVars := include "zeta-guard.proxyEnvVars" .Values.global | trim }}
-          {{- if or .Values.pepproxy.hsmProxyAddr $pepProxyEnvVars }}
+          {{- if or .Values.pepproxy.hsmProxyAddr $pepProxyEnvVars .Values.pepproxyTracingEnabled }}
           env:
             {{- with .Values.pepproxy.hsmProxyAddr }}
             - name: HSM_PROXY_ADDR
@@ -95,6 +95,14 @@ spec:
             {{- end }}
             {{- with $pepProxyEnvVars }}
             {{- . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.pepproxyTracingEnabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ include "telemetryGateway.hostname" $ }}:4317"
+            - name: OTEL_SERVICE_NAME
+              value: "{{ include "pep-proxy.otel-service-name" $ }}"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.version={{ .Chart.Version }}"
             {{- end }}
           {{- end }}
           ports:
@@ -107,21 +115,20 @@ spec:
               containerPort: 8443
           {{- end }}
           livenessProbe:
-            httpGet:
-              path: /status
+            tcpSocket:
               port: status
+            periodSeconds: 1
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /status
               port: status
+            periodSeconds: 1
+            failureThreshold: 30
           {{- if .Values.pepproxy.containerSecurityContext }}
           securityContext:
           {{- toYaml .Values.pepproxy.containerSecurityContext | nindent 12 }}
           {{- end }}
-          startupProbe:
-            httpGet:
-              path: /status
-              port: status
           {{- with .Values.pepproxy.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -138,10 +145,12 @@ spec:
               mountPath: /etc/nginx/signer_cert.pem
               subPath: signer_cert.pem
               readOnly: true
+            {{- if not .Values.pepproxy.asl_hsm_key }}
             - name: asl-signer-key
               mountPath: /etc/nginx/signer_key.pem
               subPath: signer_key.pem
               readOnly: true
+            {{- end }}
             - name: asl-issuer-cert
               mountPath: /etc/nginx/issuer_cert.pem
               subPath: issuer_cert.pem
@@ -159,6 +168,18 @@ spec:
             - name: well-known
               mountPath: /srv/.well-known/{{ base $path }}
               subPath: {{ base $path }}
+            {{- end }}
+            {{- if .Values.notificationService.enabled }}
+            {{- /* mountPath/subPath use the RFC 9728 subpath (single source of truth),
+                   matching the pep-well-known-resources ConfigMap key, not the filename. */}}
+            {{- range $path, $_ := .Files.Glob "files/well-known/resources/*" }}
+            - name: well-known-resources
+              mountPath: /srv/.well-known/resources/{{ include "zeta-guard.ns-well-known-subpath" $ }}
+              subPath: {{ include "zeta-guard.ns-well-known-subpath" $ }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.pepproxy.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
 
       {{- if .Values.pepproxyMetricsEnabled }}
@@ -179,14 +200,14 @@ spec:
           livenessProbe:
             tcpSocket:
               port: metrics
+            periodSeconds: 1
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /metrics
               port: metrics
-          startupProbe:
-            httpGet:
-              path: /metrics
-              port: metrics
+            periodSeconds: 1
+            failureThreshold: 30
           {{- if .Values.pepproxy.containerSecurityContext }}
           securityContext:
           {{- toYaml .Values.pepproxy.containerSecurityContext | nindent 12 }}
@@ -219,12 +240,14 @@ spec:
             items:
               - key: signer-cert
                 path: "signer_cert.pem"
+        {{- if not .Values.pepproxy.asl_hsm_key }}
         - name: asl-signer-key
           secret:
             secretName: asl-identity
             items:
               - key: signer-key
                 path: "signer_key.pem"
+        {{- end }}
         - name: asl-issuer-cert
           secret:
             secretName: asl-identity
@@ -242,6 +265,15 @@ spec:
           configMap:
             name: pep-well-known
             defaultMode: 0444
+        {{- if .Values.notificationService.enabled }}
+        - name: well-known-resources
+          configMap:
+            name: pep-well-known-resources
+            defaultMode: 0444
+        {{- end }}
+        {{- with .Values.pepproxy.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.pepproxy.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

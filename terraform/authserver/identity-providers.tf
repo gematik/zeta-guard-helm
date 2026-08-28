@@ -12,6 +12,7 @@ resource "keycloak_oidc_identity_provider" "smc_b" {
   accepts_prompt_none_forward_from_client = false
   disable_user_info                       = false
   store_token                             = false
+  hide_on_login_page                      = true
 
   backchannel_supported = false
   validate_signature    = false

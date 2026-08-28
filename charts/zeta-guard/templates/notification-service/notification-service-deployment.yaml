@@ -1,0 +1,8 @@
+{{- if .Values.notificationService.enabled }}
+{{- /* Split deployment: one Deployment per API variant (rs-facing, fdv-facing),
+       both from the same image repo (variant tag suffix), sharing one DB. */}}
+{{- range $variant := list "rs" "fdv" }}
+---
+{{ include "notificationService.deployment" (dict "root" $ "variant" $variant) }}
+{{- end }}
+{{- end }}

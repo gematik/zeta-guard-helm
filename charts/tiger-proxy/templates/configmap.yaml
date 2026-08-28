@@ -26,7 +26,8 @@ data:
         {{- end }}
       {{- end }}
       - from: {{ $route.from }}
-        to: {{ $route.to }}
+        to: {{ $route.to }}{{ if $route.preserveHostHeader }}
+        preserveHostHeader: {{ $route.preserveHostHeader }}{{ end }}
       {{- end }}
       {{- with .Values.proxyConfig.tls }}
       tls:

@@ -1,6 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
-# Covers OPA pods, opa-token-renewer CronJob, and gematik-oidc-token-renewer CronJob
-# (all three use opa.selectorLabels).
+# Covers OPA pods, opa-token-renewer CronJob, opa-rollout-restart CronJob, and
+# ti-sim-token-renewer CronJob (all four use opa.selectorLabels).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -14,19 +14,7 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # kube-dns
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    {{- include "zeta-guard.dnsEgressRule" . | nindent 4 }}
     # telemetry-gateway (OTLP gRPC)
     - to:
         - podSelector:
@@ -42,7 +30,7 @@ spec:
     {{- $siem := .Values.networkPolicy.egress.siem.ipBlocks }}
     {{- /* Merge all external destinations:
          - pip/artifactRegistry for OPA bundle pull (opa-token-renewer)
-         - telemetry/siem for gematik OIDC token renewal (gematik-oidc-token-renewer) */}}
+         - telemetry/siem for gematik OIDC token renewal (ti-sim-token-renewer) */}}
     {{- $external := concat $pip $gar $pgar $telemetry $siem | uniq }}
     {{- if $external }}
     # External: OPA bundle registries (PIP/artifact) + gematik OIDC/telemetry endpoints

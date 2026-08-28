@@ -1,0 +1,159 @@
+{{- if .Values.gematikConnectionEnabled }}
+
+{{- /* This CronJob is based on example Job from
+     * https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-kubernetes#deploy
+     */}}
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ti-sim-token-renewer-cronjob
+  labels:
+    {{- include "opa.labels" . | nindent 4 }}
+spec:
+  failedJobsHistoryLimit: 2
+  schedule: "*/30 * * * *"
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 5
+      template:
+        metadata:
+          labels:
+            {{- include "opa.labels" . | nindent 12 }}
+            {{- with .Values.opa.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $.Values.devMode }}
+          annotations:
+            zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+          {{- end }}
+        spec:
+          {{- with .Values.opa.workloadIdentityFederation.worker.imagePullSecrets | default .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          serviceAccountName: opa-token-renewer
+          restartPolicy: OnFailure
+          containers:
+            - name: token-renewer
+              image: "{{ .Values.opa.workloadIdentityFederation.worker.image }}"
+              imagePullPolicy: "{{ .Values.opa.workloadIdentityFederation.worker.imagePullPolicy }}"
+              {{- with .Values.opa.workloadIdentityFederation.worker.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.opa.cronjobSecurityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              env:
+                - name: AUDIENCE
+                  value: "{{ .Values.gematik.tiSim.idTokenAudience | default .Values.gematik.idTokenAudience }}"
+                - name: SECRET_NAME
+                  value: ti-sim-token
+                - name: SERVICE_ACCOUNT
+                  value: "{{ .Values.gematik.tiSim.serviceAccountEmailAddress | default .Values.gematik.serviceAccountEmailAddress }}"
+                {{- with include "zeta-guard.proxyEnvVars" .Values.global | trim }}
+                {{- . | nindent 16 }}
+                {{- end }}
+              command: [ "/bin/bash", "-c" ]
+              args:
+                - |
+                  set -euo pipefail
+                  echo "Beginne Token-Erneuerung..."
+
+                  # 1. K8s Service Account Token aus dem projizierten Volume lesen
+                  K8S_TOKEN=$(cat /var/run/secrets/sts.googleapis.com/serviceaccount/token)
+
+                  # 2. Token beim GCP Security Token Service (STS) gegen ein GCP Access Token tauschen
+                  {{- /* Authenticate a workload using the REST API
+                       * See https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-other-clouds#rest
+                       * REST API reference: https://docs.cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token
+                       */}}
+
+                  # JSON-Payload für STS aufbauen
+                  {{- $resourceNameOfIdentityProvider := include "gematik.full-resource-name-of-identity-provider" . }}
+                  GCP_STS_SCOPE="https://www.googleapis.com/auth/cloud-platform"
+                  read -r -d '' STS_PAYLOAD << JSON || true
+                  {
+                    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                    "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+                    "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                    "subject_token": "${K8S_TOKEN}",
+                    "audience": "{{ $resourceNameOfIdentityProvider }}",
+                    "scope": "${GCP_STS_SCOPE}"
+                  }
+                  JSON
+
+                  # Debug: STS Payload (ohne sensiblen Token-Inhalt)
+                  echo "STS Payload (redacted):" >&2
+                  echo "$STS_PAYLOAD" | sed -E 's/("subject_token"\s*:\s*")([^"]+)(")/\1<REDACTED>\3/' >&2
+                  echo "" >&2
+
+                  # K8s JWT gegen kurzlebiges GCP Access Token eintauschen (mit Debug-Ausgabe)
+                  HTTP_CODE=$(curl -s -o /tmp/sts.json -w "%{http_code}" -X POST \
+                    "https://sts.googleapis.com/v1/token" \
+                    --json "$STS_PAYLOAD")
+                  command -v python3 >/dev/null 2>&1 || { echo "python3 not found in image" >&2; exit 1; }
+                  GCP_ACCESS_TOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/sts.json")).get("access_token",""))')
+
+                  if [ "$HTTP_CODE" != "200" ] || [ -z "$GCP_ACCESS_TOKEN" ] || [ "$GCP_ACCESS_TOKEN" = "null" ]; then
+                    echo "FEHLER: STS Aufruf fehlgeschlagen (HTTP $HTTP_CODE)." >&2
+                    echo "STS Antwort:" >&2
+                    cat /tmp/sts.json >&2 || true
+                    echo "" >&2
+                    echo "Verwendete Audience: {{ $resourceNameOfIdentityProvider }}" >&2
+                    echo "Verwendeter Scope: $GCP_STS_SCOPE" >&2
+                    # uncomment when debugging
+                    #echo "Verwendeter token: $K8S_TOKEN" >&2
+                    exit 1
+                  fi
+
+                  # 3. GSA-Impersonation: STS Access Token gegen GSA Access Token tauschen (GAR-kompatibel)
+                  {{- /* Generate an OIDC ID token for Identity-Aware Proxy
+                       * See https://docs.cloud.google.com/iap/docs/authentication-howto#obtain_an_oidc_token_by_using_service_account_impersonation
+                       * See https://docs.cloud.google.com/iam/docs/create-short-lived-credentials-direct#create-id
+                       * REST API reference: https://docs.cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateIdToken
+                       */}}
+                  IAM_CRED_URL="https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/$SERVICE_ACCOUNT:generateIdToken"
+                  echo "used url for impersonation: $IAM_CRED_URL"
+
+                  IMP_HTTP_CODE=$(curl -s -o /tmp/imp.json -w "%{http_code}" -X POST \
+                    "$IAM_CRED_URL" \
+                    --oauth2-bearer "${GCP_ACCESS_TOKEN}" \
+                    --json "{\"audience\": \"$AUDIENCE\", \"includeEmail\": true}")
+                  IMP_TOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/imp.json")).get("token",""))')
+
+                  if [ "$IMP_HTTP_CODE" != "200" ] || [ -z "$IMP_TOKEN" ] || [ "$IMP_TOKEN" = "null" ]; then
+                    echo "FEHLER: GSA-Impersonation fehlgeschlagen (HTTP $IMP_HTTP_CODE)." >&2
+                    echo "Antwort IAM Credentials API:" >&2
+                    cat /tmp/imp.json >&2 || true
+                    exit 1
+                  fi
+
+                  # 4. Das Secret '$SECRET_NAME' mit dem neuen, base64-kodierten Token patchen
+                  # Zuerst die Klartext-Datei, dann base64-kodiere den Dateiinhalt.
+                  echo -n "${IMP_TOKEN}" > /tmp/gar_basic.txt
+                  ENCODED_TOKEN=$(base64 -w0 /tmp/gar_basic.txt 2>/dev/null || base64 /tmp/gar_basic.txt | tr -d '\n')
+
+                  kubectl patch secret $SECRET_NAME --type=merge -p "{\"data\":{\"token\":\"${ENCODED_TOKEN}\"}}"
+                  kubectl annotate --overwrite secret $SECRET_NAME last-updated="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+                  echo "Kubernetes Secret '$SECRET_NAME' aktualisiert (Basic-Präfix gesetzt)."
+
+              volumeMounts:
+                - name: gcp-sa-token
+                  mountPath: /var/run/secrets/sts.googleapis.com/serviceaccount
+          volumes:
+            - name: gcp-sa-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: "{{ include "gematik.token-audience" . }}"
+                      expirationSeconds: 3600
+                      path: token
+{{- end }}
