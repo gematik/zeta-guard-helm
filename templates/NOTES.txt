@@ -19,18 +19,38 @@ and your administration frontend is at
     {{- end }}
 
 
-Deployed component versions:
 {{- $zg := (index .Subcharts "zeta-guard") }}
-  authserver:                {{ $zg.Values.authserver.image.tag | default "default" }}
+Deployed component versions
+  (release {{ .Release.Name }} · namespace {{ .Release.Namespace }})
+  chart: {{ $zg.Chart.Name }}-{{ $zg.Chart.Version }}{{ if $zg.Chart.AppVersion }} (app {{ $zg.Chart.AppVersion }}){{ end }}  ·  umbrella: {{ .Chart.Name }}-{{ .Chart.Version }}
+  images pulled from: {{ .Values.global.registry_host | default "(chart default registry)" }}
+  authserver:                {{ $zg.Values.authserver.image.tag | default "default" }}  (replicas: {{ $zg.Values.authserver.replicaCount | default 1 }})
     hsm:            {{ $zg.Values.authserver.hsm.enabled | ternary "enabled" "disabled" }}
     hsm-tls:        {{ $zg.Values.authserver.hsm.tls.enabled | ternary "enabled" "disabled" }}
     hsm-token-sign: {{ $zg.Values.authserver.hsm.tokenSigning.enabled | ternary "enabled" "disabled" }}
+    db-enc:         {{ $zg.Values.authserver.dbEnc.enabled | ternary "enabled" "disabled" }}
 {{- if $zg.Values.authserver.provisioningProcessor }}
   provisioning-processor:    {{ $zg.Values.authserver.provisioningProcessor.image.tag | default "default" }}
 {{- end }}
-  pepproxy:                  {{ $zg.Values.pepproxy.image.tag | default "default" }}
-  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}
+  pepproxy:                  {{ $zg.Values.pepproxy.image.tag | default "default" }}  (replicas: {{ $zg.Values.pepproxy.replicaCount | default 1 }})
+    asl:            {{ $zg.Values.pepproxy.asl_enabled | ternary "enabled" "disabled" }}
+    nic-hsm-tls:    {{ $zg.Values.nginxIngressHsm | ternary "enabled" "disabled" }}
+{{- with $zg.Values.pepproxy.nginxConf }}
+    pep issuer:     {{ .pepIssuer | default "(unset)" }}
+    required aud:   {{ .requiredAudience | default "(unset)" }}
+{{- end }}
+{{- with $zg.Values.pepproxy.wellKnownBase }}
+    protected-resource: {{ . }}/.well-known/oauth-protected-resource
+{{- end }}
+  opa:                       {{ if kindIs "map" $zg.Values.opa.image }}{{ $zg.Values.opa.image.tag }}{{ else }}{{ $zg.Values.opa.image }}{{ end }}  (replicas: {{ $zg.Values.opa.replicaCount | default 1 }})
     opa-wif: {{ (and $zg.Values.opa.workloadIdentityFederation $zg.Values.opa.workloadIdentityFederation.enabled) | ternary "enabled" "disabled" }}
+{{- if and $zg.Values.opa.bundle $zg.Values.opa.bundle.enabled }}
+    policy-bundle:  {{ $zg.Values.opa.bundle.resource | default "(unset)" }}
+{{- end }}
+{{- if and $zg.Values.opa.simulation $zg.Values.opa.simulation.enabled }}
+    opa-simulation: enabled (replicas: {{ $zg.Values.opa.simulation.replicaCount | default 1 }})
+    sim-bundle:     {{ $zg.Values.opa.simulation.bundle.resource | default "(derived from active bundle → :latest-sim)" }}
+{{- end }}
   telemetry-gateway:         {{ (index $zg.Values "telemetry-gateway").image.tag | default "default" }}{{ if not $zg.Values.telemetryGatewayEnabled }} (disabled){{ end }}
     gematik-connection: {{ $zg.Values.gematikConnectionEnabled | ternary "enabled" "disabled" }}
 {{- if .Subcharts.testdriver }}
@@ -54,7 +74,15 @@ Deployed component versions:
 {{- end }}
 {{- end }}
 {{- if eq $zg.Values.databaseMode "cloudnative" }}
-  database (cloudnative-pg): {{ $zg.Values.cloudnativePg.imageName | default "default" }}
+  database (cloudnative-pg): {{ $zg.Values.cloudnativePg.imageName | default "default" }}  (instances: {{ $zg.Values.cloudnativePg.instances | default 1 }}{{ if eq (int ($zg.Values.cloudnativePg.instances | default 1)) 1 }} — ⚠ single instance, SPOF{{ end }})
+{{- else }}
+  database mode:             {{ $zg.Values.databaseMode | default "external" }}
+{{- end }}
+  ingress class:             {{ $zg.Values.ingressClassName | default "(chart default)" }}
+  route-via-tiger-proxy:     {{ $zg.Values.routeViaTigerProxy | ternary "yes" "no" }}
+{{- if $zg.Values.devMode }}
+
+  ⚠ devMode ENABLED — forces pod rollouts on every upgrade; intended for dev/test only.
 {{- end }}
 
 {{ if .Values.testMonitoringServiceEnabled -}}
