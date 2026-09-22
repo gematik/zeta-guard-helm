@@ -65,17 +65,6 @@ zeta-tls-test-tool-service:
     nodePorts:
       serviceMgmtNodePort: 32012
 
-zetaCertValidationMockEnabled: false
-
-zeta-cert-validation-mock:
-  devMode: true
-  image:
-    tag: 1.0.0
-    repository:
-  mock:
-    mode: always_good
-    enableAdminEndpoints: true
-
 issuers:
   local:
     enabled: true
@@ -394,7 +383,7 @@ zeta-guard:
       capabilities:
         drop: [ "ALL" ]
     image:
-      tag: 1.2.0
+      tag: 1.2.1
     nginxConf:
       generateConfigMap: true
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard

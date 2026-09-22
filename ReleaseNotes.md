@@ -2,6 +2,13 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.2.4
+
+### fixed:
+
+- bumped pep version to 1.2.1
+
+
 ## Release 1.2.3
 
 ### added:

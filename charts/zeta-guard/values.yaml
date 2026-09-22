@@ -195,7 +195,7 @@ pepproxy:
   replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 1.2.0
+    tag: 1.2.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.

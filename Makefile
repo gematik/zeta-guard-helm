@@ -276,7 +276,9 @@ config-init: ## Run generate-main-and-backend and initialise terraform backend
 config: ## Configure deployed authserver through terraform
 	$(MAKE) config-init
 	# apply
+	# -parallelism=1: to avoid concurrently races (Hibernate StaleObjectStateException / HTTP 500)
 	terraform -chdir=$(TF_PATH) apply \
+		-parallelism=1 \
 		-var-file=../../$(VALUES_DIR)$(STAGE).tfvars \
 		-var="keycloak_password=$(TF_VAR_keycloak_password)" \
 		-auto-approve
