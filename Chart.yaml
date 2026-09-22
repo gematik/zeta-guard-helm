@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-testenv
 description: ZETA Guard test installation
 type: application
-version: 1.3.1
+version: 1.3.3
 dependencies:
   - name: testfachdienst
     version: 0.0.1
@@ -23,7 +23,7 @@ dependencies:
     alias: testMonitoringService
     condition: testMonitoringServiceEnabled
   - name: zeta-guard
-    version: 1.3.1
+    version: 1.3.3
     tags:
       - zeta-guard
   - name: testdriver

@@ -49,7 +49,8 @@ item paths). Value for PUSH_GATEWAY_TRUSTED_CA_PATHS. Arg: same dict.
 {{/*
 Full image reference for a variant. The tag is the shared prefix with the
 variant suffix appended ("<image.tag>-<variant>"), matching the CI-published
-floating tags (e.g. main-rs / main-fdv). Registry/repository are shared; the
+floating tags (e.g. main-rs / main-fdv), unless a full per-variant tag is set
+(notificationService.<variant>.image.tag). Registry/repository are shared; the
 digest is pinned per variant (notificationService.<variant>.image.digest), since
 rs and fdv are distinct images with distinct digests.
 */}}
@@ -59,8 +60,11 @@ rs and fdv are distinct images with distinct digests.
 {{- $registry := default (printf "%s%s" .root.Values.global.registry_host .root.Values.registry_name) $ns.image.registry -}}
 {{- $tag := printf "%s-%s" $ns.image.tag .variant -}}
 {{- $digest := "" -}}
-{{- if and $variantCfg $variantCfg.image $variantCfg.image.digest -}}
+{{- if and $variantCfg $variantCfg.image -}}
+{{- $tag = default $tag $variantCfg.image.tag -}}
+{{- if $variantCfg.image.digest -}}
 {{- $digest = $variantCfg.image.digest -}}
+{{- end -}}
 {{- end -}}
 {{- printf "%s%s" $registry $ns.image.repository -}}
 {{- if $tag }}:{{ $tag }}{{ end }}
@@ -80,6 +84,9 @@ Full Deployment manifest for one variant. Arg: dict "root" $ "variant" ...
 {{- fail "notificationService.pushGateway.mtls: set both clientCert.secretName and clientKey.secretName, or neither" -}}
 {{- end -}}
 {{- $mtlsOn := and $mtlsCert $mtlsKey -}}
+{{- if and (eq $ns.db.mode "cloudnative") (ne $ns.db.kind "postgresql") -}}
+{{- fail (printf "notificationService.db.kind=%q: cloudnative mode (CNPG) is PostgreSQL — set kind: postgresql or mode: external" $ns.db.kind) -}}
+{{- end -}}
 {{- /* Datasource JDBC URL / secret default to the CNPG cluster's -rw service and
        -app secret so clusterName stays the single source of truth in cloudnative
        mode; set explicitly for an external DB. */}}
@@ -185,6 +192,8 @@ spec:
             # A_29974: when false the NS disables /history/* (404/501) and persists nothing.
             - name: NOTIFICATION_HISTORY_ENABLED
               value: {{ $ns.historyEnabled | quote }}
+            - name: NOTIFICATION_DATASOURCE_DB_KIND
+              value: {{ $ns.db.kind | quote }}
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: {{ $dbJdbcUrl | quote }}
             - name: QUARKUS_DATASOURCE_USERNAME

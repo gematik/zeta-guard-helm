@@ -71,9 +71,11 @@ settings, or run
   `cnpg-system` (keeps CRDs)
 - `make reset-cnpg-operator` – uninstall the operator from `cnpg-system` and
   delete CNPG CRDs (destructive)
-- `make generate-main-and-backend` – generates `main.tf`, `providers.tf`, and
-  backend config from templates based on `TF_VAR_use_kubernetes`; the Kubernetes
-  provider is only included when `TF_VAR_use_kubernetes=true`
+- `make generate-main-and-backend` – generates `main.tf`, `providers.tf`,
+  `mode-assert.tf`, backend config and (Kubernetes mode only)
+  `sekidp-secret.tf` from templates based on `TF_VAR_use_kubernetes`; the
+  Kubernetes provider is only required when `TF_VAR_use_kubernetes=true`, since
+  `sekidp-secret.tf` is then the only file with `kubernetes_*` blocks
 - `make config-init stage=STAGE [namespace=NAMESPACE]` – runs `generate-main-and-backend` and initializes the Terraform backend
 - `make config-plan stage=STAGE [namespace=NAMESPACE] [PLAN_OUT=<file>]` – view
   incoming changes to the authserver by make config
@@ -84,11 +86,20 @@ settings, or run
   by `config-plan` as a plain-text (no-color) diff to stdout, e.g.
   `make config-show-plan stage=dev PLAN_OUT=authserver.change.plan > authserver.change.txt`
 - `make config stage=STAGE [namespace=NAMESPACE]` – configure the authserver
+- `make config-import stage=STAGE [namespace=NAMESPACE]` – import the existing
+  `zeta-guard` realm into the Terraform state. First step when the state was
+  lost; the remaining objects need Keycloak UUIDs resolved at runtime, listed in
+  [How to upgrade ZETA Guard](../how-to_guides/How_to_upgrade_ZETA_Guard.md).
+  A realm already present in the state is reported and skipped.
 - `make status stage=STAGE [namespace=NAMESPACE]` – show release status
 - `make versions stage=STAGE [namespace=NAMESPACE]` – Show deployed component images and versions
 - `make versions-debug stage=STAGE [namespace=NAMESPACE]` – Show deployed components with all images and digests
 - `make clean` – remove rendered.yaml and local terraform files
-- `make uninstall stage=STAGE [namespace=NAMESPACE]` – uninstall and remove tf state secret
+- `make uninstall stage=STAGE [namespace=NAMESPACE]` – uninstall and remove tf
+  state secret. **Destructive and development-only:** it also deletes the CNPG
+  cluster and its PVCs, i.e. the realm's users. Never run it on a productive
+  stage — a chart upgrade needs `helm upgrade` + `make config`, see
+  [How to upgrade ZETA Guard](../how-to_guides/How_to_upgrade_ZETA_Guard.md).
 - `make kind-up [HOST_IP=<ip>] [KIND_INGRESS_HOSTS="<host1> <host2>"]` – create local kind cluster and patch CoreDNS so in-cluster clients resolve ingress hostnames to your host IP (hosts are auto-detected from local values by default)
 - `make kind-down` – delete the local kind cluster
 
@@ -119,12 +130,13 @@ All of these can be set as an environment variable or as a `make` argument (
 
 ### Terraform / authserver configuration
 
-| Variable                   | Purpose                                                                                                                                                                                                    | Default          |
-|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
-| `TF_VAR_keycloak_password` | Keycloak admin password for `config` / `config-plan` / `config-import`. May be empty in Kubernetes-backend mode (read from the cluster secret).                                                            | *(empty)*        |
-| `TF_VAR_use_kubernetes`    | Terraform operating mode. `false` = local backend without Kubernetes (also omits the `hashicorp/kubernetes` provider). See [How to configure authserver](../how-to_guides/How_to_configure_authserver.md). | `true`           |
-| `TF_VAR_config_path`       | Path to the kubeconfig used by the Kubernetes backend                                                                                                                                                      | `~/.kube/config` |
-| `PLAN_OUT`                 | Plan file written by `config-plan` and rendered by `config-show-plan`                                                                                                                                      | *(none)*         |
+| Variable                   | Purpose                                                                                                                                                                                                                                                       | Default          |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
+| `TF_VAR_keycloak_password` | Keycloak admin password for `config` / `config-plan` / `config-import`. May be empty: the targets source `terraform/authserver/scripts/kc-admin-env.sh`, which fills it from the `authserver-admin` Secret.                                                   | *(empty)*        |
+| `TF_VAR_keycloak_username` | Keycloak admin username. Same handling as the password — and it must be set for the exported password to take precedence over the Secret.                                                                                                                     | *(empty)*        |
+| `TF_VAR_use_kubernetes`    | Terraform operating mode. `false` = local backend without Kubernetes (the generated files then contain no `kubernetes_*` block, so `terraform init` skips that provider). See [How to configure authserver](../how-to_guides/How_to_configure_authserver.md). | `true`           |
+| `TF_VAR_config_path`       | Path to the kubeconfig used by the Kubernetes backend                                                                                                                                                                                                         | `~/.kube/config` |
+| `PLAN_OUT`                 | Plan file written by `config-plan` and rendered by `config-show-plan`                                                                                                                                                                                         | *(none)*         |
 
 ### Container registry (for `kind-up`, `create-secrets`, `k3s`)
 

@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-guard
 description: ZETA Guard
 type: application
-version: 1.3.1
+version: 1.3.3
 # Hard lower bound for the whole chart: Kubernetes 1.32, i.e. OpenShift 4.19 or newer. Sidecar init containers
 # (restartPolicy: Always), which the provisioning processor relies on, are GA from 1.29 — but the supported
 # platform baseline is 1.32, so that is what is declared here.

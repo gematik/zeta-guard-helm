@@ -1,4 +1,5 @@
 {{- if .Values.gematikConnectionEnabled }}
+{{- include "gematik.assertNoLegacyValues" . }}
 
 {{- /* This CronJob is based on example Job from
      * https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-kubernetes#deploy
@@ -52,11 +53,11 @@ spec:
               {{- end }}
               env:
                 - name: AUDIENCE
-                  value: "{{ .Values.gematik.tiSim.idTokenAudience | default .Values.gematik.idTokenAudience }}"
+                  value: "{{ .Values.gematik.tiSim.idTokenAudience }}"
                 - name: SECRET_NAME
                   value: ti-sim-token
                 - name: SERVICE_ACCOUNT
-                  value: "{{ .Values.gematik.tiSim.serviceAccountEmailAddress | default .Values.gematik.serviceAccountEmailAddress }}"
+                  value: "{{ .Values.gematik.tiSim.serviceAccountEmailAddress }}"
                 {{- with include "zeta-guard.proxyEnvVars" .Values.global | trim }}
                 {{- . | nindent 16 }}
                 {{- end }}

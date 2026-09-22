@@ -273,6 +273,7 @@ Render checks:
   * [How to install cert-manager](docs/how-to_guides/How_to_install_cert-manager.md)
   * [How to manage authserver DB](docs/how-to_guides/How_to_manage_authserver_DB.md)
   * [How to set up TLS](docs/how-to_guides/How_to_set_up_TLS.md)
+  * [How to upgrade ZETA Guard (chart upgrade, Terraform state, adopting an existing realm)](docs/how-to_guides/How_to_upgrade_ZETA_Guard.md)
   * [How to use a custom OCI registry (provisioning container, image mirroring, registry CA)](docs/how-to_guides/How_to_use_a_custom_OCI_registry.md)
   * [How to trigger the Tiger testsuite inside the cluster](docs/how-to_guides/How_to_run_tiger_testsuite.md)
 * Reference

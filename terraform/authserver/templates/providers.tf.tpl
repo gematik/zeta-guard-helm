@@ -6,17 +6,10 @@ provider "keycloak" {
   realm                    = "master"
   client_id                = "admin-cli"
   client_secret            = ""
-  username = var.use_kubernetes ? (
-    var.keycloak_username != "" ? var.keycloak_username : data.kubernetes_secret_v1.keycloak_admin[0].data["username"]
-  ) : var.keycloak_username
-  password = var.use_kubernetes ? (
-    var.keycloak_password != "" ? var.keycloak_password : data.kubernetes_secret_v1.keycloak_admin[0].data["password"]
-  ) : var.keycloak_password
-}
-
-check "local_credentials_provided" {
-  assert {
-    condition     = var.use_kubernetes || (var.keycloak_username != "" && var.keycloak_password != "")
-    error_message = "keycloak_username and keycloak_password must be set when use_kubernetes = false."
-  }
+  # Provider configuration is a valid context for ephemeral values, so the
+  # credentials reach Keycloak without ever being persisted. The former
+  # check "local_credentials_provided" moved to variable "keycloak_password"
+  # in variables.tf — a validation fails the run instead of only warning.
+  username = var.keycloak_username
+  password = var.keycloak_password
 }

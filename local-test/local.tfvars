@@ -2,7 +2,8 @@ insecure_tls       = true
 use_kubernetes     = true
 keycloak_namespace = "zeta-local"
 keycloak_url       = "https://zeta-kind.local/auth"
-pdp_scopes         = ["zero:read", "zero:write"]
+# pdp_scopes = ["zero:read", "zero:write"]
+audience_scope_name = "zero:audience"
 
 # Email-binding OTP delivery (F1) — MailCatcher SMTP catch-all, see
 # docs/how-to_guides/How_to_configure_mailcatcher.md

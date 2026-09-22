@@ -8,15 +8,14 @@ data "external" "manage_policies" {
     "scripts/managePolicies.sh"
   ]
 
+  # No credentials in the query — it's stored in tfstate and echoed in plans.
+  # The program re-reads admin creds at runtime (kc-admin-credentials.sh) from
+  # kc_admin_secret in kc_namespace, or from TF_VAR_keycloak_* in local mode.
   query = {
-    keycloak_url = var.keycloak_url
-    insecure_tls = tostring(var.insecure_tls)
-    username = var.use_kubernetes ? (
-      var.keycloak_username != "" ? var.keycloak_username : data.kubernetes_secret_v1.keycloak_admin[0].data["username"]
-    ) : var.keycloak_username
-    password = var.keycloak_password != "" ? var.keycloak_password : (
-      var.use_kubernetes ? data.kubernetes_secret_v1.keycloak_admin[0].data["password"] : ""
-    )
+    kc_url          = var.keycloak_url
+    kc_insecure     = tostring(var.insecure_tls)
+    kc_namespace    = var.keycloak_namespace
+    kc_admin_secret = var.keycloak_admin_secret
 
     delete_policies = jsonencode([
       "Trusted Hosts",

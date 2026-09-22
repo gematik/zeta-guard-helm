@@ -195,9 +195,125 @@ telemetry are summarized here:
 
 > The predefined filters and redactions are **not meant to be modified**.
 
-No ZETA Guard component persists telemetry — collectors only cache until export
-succeeds or the cache fills. Durable storage requires attaching an external
-observability backend.
+No ZETA Guard component stores telemetry for later querying — the gateway only
+buffers it until export succeeds or the buffer fills, and the buffer is a
+send-and-forget queue, not a datastore. Keeping telemetry available to read
+requires attaching an external observability backend. What *is* persisted is
+that queue itself, so a pod restart does not drop telemetry already accepted;
+see below.
+
+## Sending-queue persistence and platform constraints
+
+The two exporters that ship to gematik — `otlp_grpc/ti_siem` and
+`otlp_grpc/ti_sim` — write their sending queue to disk, so telemetry already
+accepted survives a pod restart instead of being lost with the pod's memory.
+Each carries `sending_queue.storage: file_storage`, pointing at the collector's
+`file_storage` extension. In the chart's default configuration they are the only
+two that do — every other exporter, `otlp_http/security_kpis` included, queues
+in
+memory only. An exporter you add yourself can opt in the same way by setting
+`sending_queue.storage: file_storage` on it. The on-disk queue is
+backed by a PersistentVolumeClaim that the chart
+creates alongside the gateway — `<release>-telemetry-gateway-file-storage`,
+rendered by
+`charts/zeta-guard/templates/telemetry-gateway/telemetry-gateway-file-storage-pvc.yaml`.
+
+The claim is rendered only while `file_storage` is listed in
+`config.service.extensions`, but removing it from that list is **not** how you
+turn the feature off:
+
+> **Removing `file_storage` from `config.service.extensions` alone crash-loops
+> the collector.** The two exporters still reference the extension through
+> `sending_queue.storage`, and the collector refuses to start on a storage
+> reference it cannot resolve. To disable the on-disk queue you have to drop
+> **every** reference: `sending_queue.storage` on `otlp_grpc/ti_siem` and
+> `otlp_grpc/ti_sim`, the `file_storage` entry in `config.service.extensions`,
+> and the `config.extensions.file_storage` block itself. Note that
+> `values-demo.yaml` deliberately leaves those exporter references in place —
+> it exists to document the value surface for linting and is not a bootable
+> collector config.
+
+Three values shape that claim:
+
+| Value                                         | Default                          | Purpose            |
+|-----------------------------------------------|----------------------------------|--------------------|
+| `telemetryGatewaySendingQueuePVCResources`    | `requests.storage: 5Gi`          | Size of the claim. |
+| `telemetryGatewaySendingQueuePVCAccessModes`  | `[ReadWriteOnce]`                | Access modes.      |
+| `telemetryGatewaySendingQueuePVCStorageClass` | `""` (omitted → cluster default) | StorageClass.      |
+
+`ReadWriteOnce` on block storage suits the single-replica deployment. Use
+`ReadWriteMany` when your storage system is a shared filesystem (Azure Files,
+CephFS, NFS) or offers nothing else:
+
+```yaml
+zeta-guard:
+  telemetryGatewaySendingQueuePVCAccessModes:
+    - ReadWriteMany
+  telemetryGatewaySendingQueuePVCStorageClass: ocs-storagecluster-cephfs
+```
+
+Set the StorageClass explicitly whenever the cluster's default class cannot be
+attached by your nodes — the gateway then hangs in `ContainerCreating` with
+`FailedAttachVolume` — or cannot serve the access modes you asked for.
+
+> A PVC spec is immutable. A claim already created with the wrong class or
+> access mode has to be deleted once; the next `helm upgrade` recreates it.
+> Deleting it discards whatever is still queued in it.
+
+`ReadWriteMany` also removes the reason for the gateway's
+`rollout.rollingUpdate.maxSurge: 0`. That default exists only because a
+`ReadWriteOnce` claim cannot be attached to the old and the new pod at the same
+time, which would leave the new pod stuck in `ContainerCreating`. On
+`ReadWriteMany` storage the two pods can share the claim, so you may widen the
+rollout to keep the gateway available across an upgrade — for example:
+
+```yaml
+zeta-guard:
+  telemetry-gateway:
+    rollout:
+      strategy: RollingUpdate
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+```
+
+### OpenShift
+
+The telemetry-gateway is the only component in this chart that pins a UID and
+GID: it needs a known non-root identity that can write the file-storage volume,
+so `charts/zeta-guard/values.yaml` sets `securityContext.runAsUser: 1000` and
+`podSecurityContext.fsGroup: 1000`. OpenShift rejects both — its Security
+Context Constraints assign UID and GID from the range allocated to the
+namespace. Hand both over to the SCC:
+
+```yaml
+zeta-guard:
+  telemetry-gateway:
+    podSecurityContext:
+      fsGroup: null      # SCC assigns the GID
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: null    # SCC assigns the UID
+```
+
+> Use an explicit `null`, not omission. Helm **merges** maps, so a values file
+> that simply leaves `runAsUser` out still inherits the `1000` from the chart
+> defaults — the pod is then rejected exactly as before. An explicit `null`
+> does not delete the key either (only `--set key=null` does that); it leaves
+> the key with a nil value, the manifest renders `runAsUser: null`, and
+> Kubernetes decodes that as "not set" — which is what lets the SCC assign the
+> UID. This is specific to the telemetry-gateway; for the other components the
+> chart never sets `runAsUser`, so there is nothing to clear.
+
+`fsGroup: null` is safe on OpenShift because the SCC supplies an `fsGroup` of
+its own, so the file-storage volume is still group-writable by the assigned
+UID. On a cluster with no such admission controller, leave `fsGroup` set —
+without it the volume mounts `root:root` and the collector cannot write its
+queue.
+
+On OpenShift Data Foundation, `ReadWriteMany` means the CephFS class
+(`ocs-storagecluster-cephfs`); the default RBD class is block storage and
+serves `ReadWriteOnce` only.
 
 ## Testing telemetry locally
 

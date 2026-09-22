@@ -6,4 +6,5 @@
 ###############################################
 
 # affected, medium(tech@spree): go:stdlib - crypto/tls: golang: Golang crypto/tls: Denial of Service via indefinite KeyUpdate messages
-CVE-2026-56862 exp:2026-09-15
+# fixed with opa 1.19.1-static, this entry needs to stay until ZETA Guard 1.3.1 is not supported anymore
+CVE-2026-56862

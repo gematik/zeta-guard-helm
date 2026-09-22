@@ -5,8 +5,6 @@ metadata:
   labels:
     {{- include "pep-proxy.labels" . | nindent 4 }}
 data:
-  # TODO: brauchen wir das?
-  # {{ .Values.authserver.hostname }}
 {{- range $path, $file := .Files.Glob "files/well-known/*" }}
   {{ base $path }}: |-
 {{ tpl ($file | toString) $ | indent 4 }}

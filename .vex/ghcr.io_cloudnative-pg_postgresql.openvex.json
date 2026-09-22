@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
   "author": "Unknown Author",
-  "version": 3,
+  "version": 5,
   "statements": [
     {
       "vulnerability": {
@@ -1137,8 +1137,395 @@
       "status_notes": "Tar wird von keinem im PostgreSQL-Image ausgeführten Prozess verwendet. Es wird nur für das dpkg und für pg_backupcluster genutzt. Für das Ausnutzen der Schwachstelle bräuchte ein Angreifer Zugriff auf eine Shell/Terminal.",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "timestamp": "2026-08-15T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6464"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        },
+        {
+          "@id": "pkg:deb/debian/postgresql-client-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Schwachstelle im Client psql: Schlägt ein 'COPY ... FROM STDIN' bzw. '\\copy ... FROM STDIN' fehl, bevor der Server seine Bereitschaft für Datenzeilen signalisiert, interpretiert psql die nachfolgenden Datenzeilen als psql-Metakommandos. Die Ausnutzung setzt kumulativ voraus, dass der Angreifer den frühen Serverfehler auslöst (Rolle Serveradministrator) und zugleich die Datenzeilen kontrolliert; 'COPY FROM <Datei>' ist nicht betroffen. Betroffen ist ein Client-Programm aus postgresql-client-17. Im Betrieb wird kein psql, pg_dump, pg_dumpall oder pg_restore ausgeführt: Authserver und Notification-Service verbinden sich über JDBC/libpq, und die Sicherung des CNPG-Operators arbeitet mit pg_basebackup und WAL-Archivierung (Barman) - cloudnativePg.backup.enabled ist zudem standardmäßig false. Ein Aufruf wäre nur mit einer Shell im Container möglich (kubectl exec im Namespace zeta-<stage>).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6471"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Fehlende Autorisierungsprüfung beim Logical Decoding: Eine Rolle mit dem Attribut REPLICATION kann über einen frei gewählten Output-Plugin-Namen eine beliebige, für den Postgres-Prozess sichtbare Datei per dlopen() laden und damit Code als Betriebssystembenutzer postgres (uid 26) ausführen. Beide Vorbedingungen fehlen: Den Anwendungsrollen zeta-guard und notification ist das Attribut REPLICATION nicht zugewiesen - es besitzt allein die vom CNPG-Operator verwaltete Rolle streaming_replica, die sich per Client-Zertifikat authentifiziert (Schlüssel nur im operatorverwalteten Secret); und der Angreifer müsste zusätzlich eine ladbare Bibliothek in das Container-Dateisystem bringen. Logische Replikation wird nicht genutzt, die CNPG-Cluster replizieren physisch (Streaming). Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6473"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        },
+        {
+          "@id": "pkg:deb/debian/postgresql-client-17"
+        }
+      ],
+      "status": "fixed",
+      "status_notes": "Integer-Wraparound in mehreren Serverfunktionen, der zu unterdimensionierten Allokationen und Schreibzugriffen außerhalb des Puffers führt. Der Fix ist bereits in PostgreSQL 17.10 enthalten (Release vom 14.05.2026, gemeinsam mit 18.4, 16.14, 15.18 und 14.23) - nicht erst in 17.11. Das eingesetzte Image ghcr.io/cloudnative-pg/postgresql:17.10-standard-trixie enthält postgresql-17 in Version 17.10-1.pgdg13+1 (verifiziert mit 'postgres --version' und 'dpkg -l'), trägt den Fix also. Das Finding ist ein Fehlalarm des Scanners.",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14662"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Integer-Wraparound in Funktionen der Datentypen tsvector und tsquery: Sehr große, präparierte Eingaben führen zu einer unterdimensionierten Allokation und einem Schreibzugriff außerhalb des Puffers. Das Keycloak-Schema verwendet weder tsvector- noch tsquery-Spalten und keine Volltextsuche; die betroffenen Funktionen werden im Betrieb nie aufgerufen. Der PostgreSQL-Hinweis, dass diese Typen typischerweise aus der Anwendungslogik und nicht aus Benutzereingaben gespeist werden, trifft hier verstärkt zu, da gar keine Nutzung vorliegt. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14664"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Heap Buffer Overflow in der Regexp-Engine: Der Verfasser einer Query kann Text einspeisen, der die Encoding-Validierung nicht bestehen würde und beim Round-Trip durch pg_wchar unerwartet wächst, und so Code als Betriebssystembenutzer postgres ausführen. Die Ausnutzung erfordert, dass der Angreifer selbst SQL mit Regexp-Operatoren formuliert - Keycloak setzt ausschließlich parametrisierte Statements ab, über die kein Nutzer Regexp-Ausdrücke einbringen kann. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14668"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Typenverwechslung im Selektivitätsschätzer des Typs ctid: Wer Datenbankobjekte anlegen darf, kann dem Schätzer Nicht-ctid-Eingaben unterschieben und aus dem Ergebnis Ableitungen beliebiger 4-Byte-Speicherbereiche gewinnen. Die Ausnutzung setzt die Rolle 'object creator' voraus, also einen eigenen DB-Login mit CREATE-Recht. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14669"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Heap Buffer Overflow in to_char(timestamptz, ...) über eine überlange POSIX-Zeitzonenabkürzung; ausnutzbar durch eine authentifizierte Partei, die die Zeitzone der Sitzung wählen kann. Keycloak setzt die Zeitzone der JDBC-Verbindung selbst; Endnutzer können weder den GUC TimeZone noch den Aufruf von to_char beeinflussen, da sie kein eigenes SQL absetzen. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14670"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Heap Buffer Overflow bei 'tied objects' in der Prozedursprache plperl. Die Sprache ist im Image nicht vorhanden: Das Paket postgresql-plperl-17 ist nicht installiert, und eine Suche über das gesamte Rootfs (find / -xdev -name '*plperl*' -o -name '*pltcl*' -o -name '*plpython*') liefert keinen Treffer - plperl.so existiert nicht im pkglibdir, es gibt keine plperl-Control-Datei. Installiert sind neben postgresql-17 nur pgaudit, pgvector und pg-failover-slots; als Prozedursprache steht ausschließlich plpgsql zur Verfügung. Ein CREATE EXTENSION plperl ist daher technisch unmöglich.",
+      "justification": "component_not_present",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14671"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Typenverwechslung im Plan-Cache des Contrib-Moduls refint, ausnutzbar durch Anlegen eines entsprechenden Triggers. Die Erweiterung ist in der Datenbank nicht angelegt: Das Chart setzt cloudnativePg.sharedPreloadLibraries auf eine leere Liste, cloudnativePg.extraParameters enthält nur wal_compression, und weder das Chart noch die Flyway-Migrationen führen ein CREATE EXTENSION aus (bootstrap.initdb legt lediglich die Datenbank keycloak mit Eigentümerin zeta-guard an). Das Modul liegt zwar als Shared Object im pkglibdir des Images, wird ohne CREATE EXTENSION aber nie geladen; das Anlegen erforderte Eigentümer-/Superuser-Rechte. Zusätzlich fehlt jede Verwendung: Keycloak setzt referenzielle Integrität über native FOREIGN-KEY-Constraints um, nicht über die veralteten refint-Trigger. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14677"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Integer-Wraparound mit unterdimensionierten Allokationen in pltcl und plperl - ausschließlich auf 32-Bit-Plattformen. Beide Vorbedingungen fehlen doppelt: Das Image ist eine 64-Bit-Variante (dpkg --print-architecture: amd64, uname -m: x86_64), und weder plperl noch pltcl sind installiert (find / -xdev nach '*plperl*' und '*pltcl*' ohne Treffer; nur plpgsql steht als Prozedursprache bereit).",
+      "justification": "component_not_present",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14679"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Stack Buffer Overflow beim Abgleich von Argumentnamen, ausgelöst über die Anzahl der OUT-Parameter; es werden ausschließlich die Bytes 0x0 und 0x1 in den Serverspeicher geschrieben. Die Ausnutzung erfordert einen 'object creator', der eine Funktion mit entsprechender OUT-Parameterliste anlegt - also CREATE-Recht über einen eigenen DB-Login. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14680"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Typenverwechslung durch Aufruf von Funktionen mit Argumenten des Typs 'internal': Die Absicherung gegen solche Aufrufe aus SQL hatte Lücken, wodurch ein angemeldeter Benutzer Code als Betriebssystembenutzer postgres ausführen kann. Voraussetzung ist die Fähigkeit, beliebiges SQL abzusetzen. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-15741"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        },
+        {
+          "@id": "pkg:deb/debian/postgresql-client-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "SQL-Injection beim Deparsen von Ausdrücken über das Argument von EXTRACT: Der Eigentümer eines Objekts hinterlegt eine bösartige Definition; führt später ein anderer Benutzer (typischerweise ein Superuser) pg_dump, psql \\sf oder ein anderes deparsendes Werkzeug darauf aus, wird das injizierte SQL mit dessen Rechten ausgeführt. Beide Glieder der Kette fehlen. Erstens gibt es keine nicht vertrauenswürdigen Objekteigentümer: Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Zweitens findet der auslösende Schritt nicht statt: Betroffen ist ein Client-Programm aus postgresql-client-17. Im Betrieb wird kein psql, pg_dump, pg_dumpall oder pg_restore ausgeführt: Authserver und Notification-Service verbinden sich über JDBC/libpq, und die Sicherung des CNPG-Operators arbeitet mit pg_basebackup und WAL-Archivierung (Barman) - cloudnativePg.backup.enabled ist zudem standardmäßig false. Ein Aufruf wäre nur mit einer Shell im Container möglich (kubectl exec im Namespace zeta-<stage>).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-15742"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Integer-Wraparound in levenshtein() und levenshtein_less_equal() des Contrib-Moduls fuzzystrmatch: Extreme Eingaben erlauben Schreibzugriffe auf einen sehr weiten Adressbereich. Die Erweiterung ist in der Datenbank nicht angelegt: Das Chart setzt cloudnativePg.sharedPreloadLibraries auf eine leere Liste, cloudnativePg.extraParameters enthält nur wal_compression, und weder das Chart noch die Flyway-Migrationen führen ein CREATE EXTENSION aus (bootstrap.initdb legt lediglich die Datenbank keycloak mit Eigentümerin zeta-guard an). Das Modul liegt zwar als Shared Object im pkglibdir des Images, wird ohne CREATE EXTENSION aber nie geladen; das Anlegen erforderte Eigentümer-/Superuser-Rechte. Keycloak nutzt keine Ähnlichkeitssuche; die Funktionen existieren in der Datenbank nicht. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-16239"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Typenverwechslung im Lebenszyklus von Portalen: Wird ein Cursor bzw. Portal per CLOSE und erneutem DECLARE mit abweichenden Typen neu erzeugt, kann ein angemeldeter Benutzer Code als Betriebssystembenutzer postgres ausführen. Voraussetzung ist die Fähigkeit, eigene DECLARE/CLOSE-Sequenzen abzusetzen. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-18408"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        },
+        {
+          "@id": "pkg:deb/debian/postgresql-client-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Regression des Fixes zu CVE-2025-8714: Das psql-Metakommando \\unrestrict hebt den Schutz gegen Eingabeexpansion auf, sodass ein bösartiger Superuser des Ursprungsservers über einen von pg_dump, pg_dumpall oder pg_restore erzeugten Plain-Format-Dump Code mit den Rechten des psql-ausführenden Betriebssystemkontos ausführen kann. Vorbedingung ist das Einspielen eines Dumps aus einer nicht vertrauenswürdigen Quelle - ein solcher Ablauf existiert hier nicht. Betroffen ist ein Client-Programm aus postgresql-client-17. Im Betrieb wird kein psql, pg_dump, pg_dumpall oder pg_restore ausgeführt: Authserver und Notification-Service verbinden sich über JDBC/libpq, und die Sicherung des CNPG-Operators arbeitet mit pg_basebackup und WAL-Archivierung (Barman) - cloudnativePg.backup.enabled ist zudem standardmäßig false. Ein Aufruf wäre nur mit einer Shell im Container möglich (kubectl exec im Namespace zeta-<stage>).",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-19385"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        },
+        {
+          "@id": "pkg:deb/debian/postgresql-client-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Heap Buffer Overflow in pg_dump beim Verarbeiten einer präparierten TRANSFORM-Liste einer Funktion: Wer Objekte anlegen darf, kann so Code mit den Rechten des pg_dump-ausführenden Betriebssystemkontos ausführen. Es gibt weder nicht vertrauenswürdige Objekteigentümer noch einen pg_dump-Lauf. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Betroffen ist ein Client-Programm aus postgresql-client-17. Im Betrieb wird kein psql, pg_dump, pg_dumpall oder pg_restore ausgeführt: Authserver und Notification-Service verbinden sich über JDBC/libpq, und die Sicherung des CNPG-Operators arbeitet mit pg_basebackup und WAL-Archivierung (Barman) - cloudnativePg.backup.enabled ist zudem standardmäßig false. Ein Aufruf wäre nur mit einer Shell im Container möglich (kubectl exec im Namespace zeta-<stage>). Zusätzlich müsste ein Administrator pg_dump aktiv starten.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6470"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Fehlende Prüfung des USAGE-Privilegs auf Typen in zwei DDL-Pfaden (Zuweisung eines Range-Subtyps und Referenzierung eines Typs aus SQL-Ausdrücken). Ein angemeldeter Benutzer kann damit eine Abhängigkeit auf einen Typ erzeugen, den er nicht nutzen darf, und so ALTER/DROP dieses Typs für den Berechtigten blockieren (reiner Verfügbarkeitseffekt). Die Schwachstelle setzt eine Privilegiengrenze zwischen mindestens zwei Rollen voraus. Diese existiert nicht: Jede Datenbank hat genau eine Anwendungsrolle, die zugleich ihre Eigentümerin ist; benutzerdefinierte Typen oder Range-Typen werden vom Keycloak-Schema nicht angelegt. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14663"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "In pgcrypto verschlüsseln und entschlüsseln die PGP-Funktionen (pgp_sym_encrypt, pgp_pub_encrypt, pgp_sym_decrypt, pgp_pub_decrypt sowie deren bytea-Varianten) bei in OpenSSL deaktivierten Chiffren still gegen Klartext: Die Daten liegen unverschlüsselt vor, der MDC-Schutz entfällt, und die Entschlüsselung gelingt auch mit falschem Schlüssel. Die Erweiterung ist in der Datenbank nicht angelegt: Das Chart setzt cloudnativePg.sharedPreloadLibraries auf eine leere Liste, cloudnativePg.extraParameters enthält nur wal_compression, und weder das Chart noch die Flyway-Migrationen führen ein CREATE EXTENSION aus (bootstrap.initdb legt lediglich die Datenbank keycloak mit Eigentümerin zeta-guard an). Das Modul liegt zwar als Shared Object im pkglibdir des Images, wird ohne CREATE EXTENSION aber nie geladen; das Anlegen erforderte Eigentümer-/Superuser-Rechte. Zudem wird pgcrypto nicht benötigt: Die Datenbankverschlüsselung des Authservers erfolgt in der Anwendungsschicht (authserver.dbEnc mit dem Keychain-Generator), nicht über PGP-Funktionen der Datenbank. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14666"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Unvollständige Cache-Invalidierung bei Row-Level-Security: Nach Änderungen an Rollenmitgliedschaften, Rollenattributen oder der Datenbank-Eigentümerschaft verwenden bestehende Sitzungen weiter zwischengespeicherte, rollenspezifische RLS-Policies und können dadurch unberechtigt lesen oder schreiben. Vorbedingung sind definierte RLS-Policies - das Keycloak-Schema verwendet keine: Es gibt kein CREATE POLICY und kein ALTER TABLE ... ENABLE ROW LEVEL SECURITY, die Zugriffskontrolle findet vollständig in der Anwendungsschicht statt. Ebenso fehlt der Auslöser, da zur Laufzeit keine Rollenmitgliedschaften geändert werden. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14672"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Unterscheidbare Antworten im SCRAM-Handshake: Hat eine Rolle einen von der Voreinstellung abweichenden Wert für scram_iterations, so liefert der Server für nicht existierende Benutzer die Standard-Iterationszahl - ein unauthentifizierter Angreifer kann daraus die Existenz eines Benutzernamens ableiten. Die Vorbedingung fehlt: scram_iterations wird nicht gesetzt (cloudnativePg.extraParameters enthält ausschließlich wal_compression), alle Rollen nutzen den Standardwert, es entsteht kein unterscheidbares Verhalten. Selbst bei abweichender Konfiguration blieben nur die beiden bekannten Anwendungsrollen zeta-guard und notification als Erkenntnis. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14678"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Lesezugriff über das Pufferende hinaus in der picksplit-Funktion von pg_trgm: Wer eine Tabelle pflegt, kann aus den Aufteilungsentscheidungen eines GiST-/GIN-Trigramm-Index begrenzt auf Speicherinhalte schließen. Die Erweiterung ist in der Datenbank nicht angelegt: Das Chart setzt cloudnativePg.sharedPreloadLibraries auf eine leere Liste, cloudnativePg.extraParameters enthält nur wal_compression, und weder das Chart noch die Flyway-Migrationen führen ein CREATE EXTENSION aus (bootstrap.initdb legt lediglich die Datenbank keycloak mit Eigentümerin zeta-guard an). Das Modul liegt zwar als Shared Object im pkglibdir des Images, wird ohne CREATE EXTENSION aber nie geladen; das Anlegen erforderte Eigentümer-/Superuser-Rechte. Es existiert folglich auch kein Trigramm-Index; Keycloak indiziert ausschließlich mit B-Tree. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14681"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Unzureichende Durchsetzung der GSSAPI-Verschlüsselung in Kombination mit SSL: Verlangt pg_hba.conf GSSAPI, sind die TLS-Einstellungen aber permissiver, kann ein Client über eine direkte TLS-Verbindung die GSSAPI-Anforderung umgehen und nur mit TLS-Verschlüsselung weiterarbeiten. Die Vorbedingung fehlt: Die vom CNPG-Operator erzeugte pg_hba.conf authentifiziert mit scram-sha-256; GSSAPI/Kerberos ist nicht konfiguriert (kein gss-Eintrag in der HBA, kein krb5.conf, kein Keytab im Image, keine SPN-Konfiguration). Der Authserver verbindet sich mit Benutzer/Passwort über die CNPG-TLS-Verbindung. Dass libgssapi_krb5.so.2 in das postgres-Binary eingebunden ist (--with-gssapi zur Bauzeit), genügt für die Ausnutzung nicht, da ohne GSSAPI-HBA-Regel keine Durchsetzung existiert, die umgangen werden könnte. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-18024"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/postgresql-17"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Lesezugriff über das Pufferende hinaus in der SQL-Funktion ascii(): Offengelegt werden bis zu drei Bytes hinter einer bestimmten Allokation (reine Informationsoffenlegung, kein Absturz). Die Ausnutzung erfordert, dass der Angreifer selbst ascii() mit präparierter Eingabe aufruft; Keycloak verwendet die Funktion nicht, und Endnutzer können kein eigenes SQL absetzen. Die einzigen Datenbank-Logins sind die Anwendungsrollen zeta-guard (Eigentümerin der Datenbank keycloak) und notification; ihre Passwörter liegen ausschließlich in den Kubernetes-Secrets keycloak-db-app bzw. notification-db-app. Ein Superuser-Login existiert nicht, da die CNPG-Option enableSuperuserAccess nicht gesetzt ist (CNPG-Default: deaktiviert). Es gibt keinen unprivilegierten oder nicht vertrauenswürdigen Datenbankbenutzer, dem die Ausnutzung offenstünde; das gesamte SQL wird von Keycloak (parametrisierte JDBC-Statements) und den Flyway-Migrationen erzeugt, Endnutzer können keine eigenen Queries, Funktionen oder Objekte anlegen. Der Postgres-Container lauscht ausschließlich auf dem Pod-Netz und ist nur über die ClusterIP-Services keycloak-db-rw bzw. notification-db-rw erreichbar; für Port 5432 existiert kein Ingress, kein NodePort und kein LoadBalancer, und die Egress-NetworkPolicies (charts/zeta-guard/templates/netpol/) erlauben 5432 ausschließlich aus dem Authserver- und dem Notification-Service-Pod.",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "timestamp": "2026-08-20T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-16742"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsystemd0"
+        },
+        {
+          "@id": "pkg:deb/debian/libudev1"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft systemd-homed — konkret den systemd-homed.service-Daemon und den systemd-homework-Helper. Keine der betroffenen Binaries ist im Image installiert. Verifiziert mit 'dpkg' und 'grep'.",
+      "justification": "component_not_present",
+      "timestamp": "2026-09-03T13:37:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14456"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Laut https://nvd.nist.gov/vuln/detail/CVE-2026-14456 kann ein entfernter Angreifer einen OpenSSL-QUIC-Server durch massenhaft gesendete QUIC-Initial-Pakete mit unbekannten Connection IDs dazu bringen, unbegrenzt neue Kanäle anzulegen und einzureihen, wodurch der Speicherverbrauch unbegrenzt wächst und ein Denial of Service entsteht. Das QUIC-Protokoll wird in der PostgreSQL nicht verwendet. Der einzige offene Port im Container ist 5432, welcher von der PostgreSQL-Datenbank genutzt wird. PostgreSQL nutzt TCP und nicht QUIC.",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-09-03T13:37:00Z"
     }
   ],
   "timestamp": "2026-02-27T15:41:26Z",
-  "last_updated": "2026-08-15T00:00:00Z"
+  "last_updated": "2026-09-03T13:37:00Z"
 }

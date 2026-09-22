@@ -47,36 +47,6 @@ data "external" "entity_statement_pubkey" {
   }
 }
 
-resource "kubernetes_secret_v1" "sekidp_rp01_pubkey" {
-  count = var.enable_sekidp ? 1 : 0
-
-  metadata {
-    name      = "sekidp-rp01-pubkey"
-    namespace = var.keycloak_namespace
-  }
-
-  data = {
-    "pubkey.pem" = data.external.entity_statement_pubkey[0].result.pubkey_pem
-    "keyid"      = data.external.entity_statement_pubkey[0].result.kid
-  }
-}
-
-# Restart gsi-fedmaster only when the kid changed — the standard way to pick up
-# a changed Secret (kubelet doesn't do it automatically).
-resource "terraform_data" "sekidp_fedmaster_rollout" {
-  count = var.enable_sekidp ? 1 : 0
-
-  triggers_replace = {
-    keyid = data.external.entity_statement_pubkey[0].result.kid
-  }
-
-  provisioner "local-exec" {
-    command = "kubectl -n ${var.keycloak_namespace} rollout restart deployment/sekidp-fedmaster"
-  }
-
-  depends_on = [kubernetes_secret_v1.sekidp_rp01_pubkey]
-}
-
 # ── Entity-statement encryption key (ecdh-generated, ECDH-ES) ────────────────
 # No typed Terraform resource for this key-provider type (provider v5.8.0), so
 # use the script-based Admin REST API workaround (terraform_data + local-exec),
@@ -105,12 +75,10 @@ resource "terraform_data" "entity_statement_enc_key" {
     command = "${path.module}/scripts/configure-entity-statement-encryption-key.sh"
 
     environment = {
-      KC_URL   = var.keycloak_url
-      KC_REALM = keycloak_realm.zeta_realm.realm
-      KC_USERNAME = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username :
-      data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
-      KC_PASSWORD = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password :
-      data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
+      KC_URL      = var.keycloak_url
+      KC_REALM    = keycloak_realm.zeta_realm.realm
+      KC_USERNAME = var.keycloak_username
+      KC_PASSWORD = var.keycloak_password
       KC_INSECURE = var.insecure_tls ? "true" : "false"
     }
   }

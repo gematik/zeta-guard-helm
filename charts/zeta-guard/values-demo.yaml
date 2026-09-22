@@ -14,6 +14,14 @@ global:
   registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
   # infinispanExternal: see umbrella chart values for full Infinispan config
 
+  # Cluster's public fully qualified domain name. Stamped into the telemetry
+  # streams as the `server.address` resource attribute for TI-SIEM / TI-SIM.
+  clusterFQDN: "zeta-demo.example"
+
+  # Istio PeerAuthentication resources
+  istio:
+    enabled: false
+
   # HTTP forward proxy for outbound requests from all ZETA Guard components.
   # Applies to: pepproxy (nginx), authserver (Keycloak), opa, opa-simulation,
   #             provisioning-processor (init container), opa-token-renewer (CronJob).
@@ -56,7 +64,7 @@ authserver:
   # --- Image ---
   image:
     repository: keycloak-zeta
-    tag: 1.0.0
+    tag: 1.3.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
 
@@ -73,6 +81,10 @@ authserver:
   # IP-based access restriction must be configured at the infrastructure layer
   # (e.g. Cloud Armor, NetworkPolicy, firewall rules).
   adminHostname: "admin.zeta-demo.example"
+  # TLS Secret for the admin ingress. Empty defaults to "zeta-guard-admin-tls".
+  # For local/KIND reuse the main cert: set "zeta-guard-tls" and add adminHostname
+  # to issuers.local.dnsNames.
+  adminTlsSecretName: ""
 
   # --- Admin credentials ---
   # Must be set on first deployment; existing Secrets are retained on upgrade.
@@ -105,11 +117,75 @@ authserver:
       # an OCSP outage. Set true to also deny when the status cannot be determined.
       ocspFailClosed: false
 
-  # --- Client registration ---
+  # --- Client registration / session TTLs ---
   config:
     maxClients: "256"
     clientRegistrationTTL: "PT5M"
     clientRegistrationSchedulerInterval: "PT2M"
+    # Idle timeouts of the Keycloak SSO sessions (ISO-8601 durations).
+    userIdleTTL: "P1Y"
+    clientIdleTTL: "P1Y"
+    # ZETA Stufe 2: OIDC client flow via a federated sectoral IDP (SE-KIDP),
+    # instead of the SMC-B token exchange (env ZETA_OIDC_FLOW_ENABLED).
+    # Required for authserver.sekidp.mtls below.
+    oidcFlowEnabled: false
+
+  # --- Truststore hot reload ---
+  # Picks up refreshed SMC-B, TPM and OCSP trust anchors while the server runs, so a
+  # provisioning run takes effect without restarting the pod. Only has an effect if
+  # something rewrites the files at runtime — see provisioningProcessor.schedule.
+  truststoreReload:
+    enabled: true
+    # ISO-8601 duration between two checks, hours or less. First check runs one interval after startup.
+    interval: PT1H
+
+  # --- SE-KIDP client mTLS (ZETA Stufe 2) ---
+  # Client identity the authserver presents to the sectoral IDP. Active as soon as
+  # keystore.secretName is set — which requires config.oidcFlowEnabled: true,
+  # otherwise the render fails (the keystore would be silently ignored).
+  sekidp:
+    mtls:
+      keystore:
+        secretName: ""                 # Secret holding the PKCS12 keystore
+        secretKey: sekidp-client.p12   # key within that Secret
+      keystorePassword:
+        secretName: ""                 # Secret holding the keystore password
+        secretKey: ""
+
+  # --- Database encryption / integrity (VAU, spree integrity provider) ---
+  # Off by default. See the "known issues" section of the release notes before
+  # enabling: the readiness endpoint reports ready prematurely, so raise
+  # probes.readiness.initialDelaySeconds (e.g. 240) alongside.
+  dbEnc:
+    enabled: false
+    columnEncryptionEnabled: false
+    integrityChecksEnabled: false
+    integrityRowChecksEnabled: false
+    integrityTableChecksEnabled: false
+    periodicRowChecksEnabled: false
+    # Behaviour on an integrity violation: lockdown (reject requests) / shutdown (exit).
+    lockdownOnError: false
+    shutdownOnError: false
+    # Retry budget while waiting for the keychain at startup.
+    bootstrapInterval: "PT30S"
+    bootstrapAttempts: 15
+    keychainGenerator:
+      image:
+        repository: keychain-generator
+        tag: 2.0.4
+      imagePullPolicy: IfNotPresent
+
+  # --- Additional trusted CAs ---
+  # CAs Keycloak trusts for its own outbound HTTPS calls; each is mounted under
+  # conf/truststores and auto-imported. Empty -> JVM defaults.
+  # Per entry set exactly one: secretName+secretKey, or an inline PEM cert.
+  additionalTrustedCAs: []
+  # - secretName: zeta-guard-tls
+  #   secretKey: ca.crt
+  # - cert: |
+  #     -----BEGIN CERTIFICATE-----
+  #     ...
+  #     -----END CERTIFICATE-----
 
   # --- HSM integration ---
   hsm:
@@ -117,6 +193,11 @@ authserver:
     # When false, the HsmProxyKeycloakFactory SPI is a no-op.
     enabled: false
     endpoint: ""   # gRPC address of the HSM Proxy, e.g. "hsm-sim:50051"
+    # Key-encryption key for the database encryption keychain (HSM_PROXY_KEK_ID).
+    # Only relevant with authserver.dbEnc.enabled: true.
+    dbEnc: {}
+    # dbEnc:
+    #   keyId: "zeta-guard-keycloak-kek-v1"
     tls:
       # Pod-level HTTPS on port 8443 using the HSM-backed key.
       # Requires authserver.hsm.enabled: true and a running HSM Proxy.
@@ -166,6 +247,11 @@ authserver:
       requests:
         cpu: "4"
         memory: "4Gi"
+    extraVolumeMounts: []
+
+  # --- Extra volumes injected into the Deployment ---
+  # Mounted via container.extraVolumeMounts above.
+  extraVolumes: []
 
   # --- Database connection pool ---
   # replicaCount × maxSize (+ ~25 reserve) must stay ≤ cloudnativePg.parameters.maxConnections (100 here).
@@ -187,6 +273,10 @@ authserver:
   # --- Startup verbosity ---
   # true adds --verbose to the start command (full stacktraces on startup errors).
   verbose: false
+
+  # --- Test mode ---
+  # Disables Keycloak's outbound TLS trust manager. Test environments only.
+  testmode: false
 
   # --- Probe thresholds ---
   probes:
@@ -225,10 +315,6 @@ authServerMetricsEnabled: true
 # Enable OpenTelemetry tracing for authserver
 authServerTracingEnabled: true
 
-# Istio PeerAuthentication resources
-istio:
-  enabled: false
-
 # ---------------------------------------------------------------------------
 # PEP-Proxy (nginx-based Policy Enforcement Point)
 # ---------------------------------------------------------------------------
@@ -246,12 +332,20 @@ pepproxy:
   # --- Image ---
   image:
     repository: ngx_pep
-    tag: 1.0.0
+    tag: 1.3.0
   imagePullPolicy: Always
   imagePullSecrets: [ ]
 
   # --- Scaling ---
   replicaCount: 1
+
+  # --- nginx worker tuning ---
+  # workerProcesses: "auto" = one per CPU.
+  workerProcesses: auto
+  workerConnections: 16384
+  # Per worker process; must cover ~2x workerConnections (client + upstream side of
+  # each proxied connection), otherwise nginx clamps below workerConnections.
+  workerRlimitNofile: 40960
 
   # --- Resources ---
   resources:
@@ -282,6 +376,9 @@ pepproxy:
   # aslOcsp: "http://example.org/ocsp"
   # Change maximum validity of cached OCSP responses (default 24h per A_24624-01):
   # alsOcspTtl: 5m
+  # HSM-backed ASL signer key as store URI, e.g. "store:hsm:asl-signer.p256".
+  # Replaces the signer-key file from the asl-identity secret; requires hsmProxyAddr.
+  asl_hsm_key: null
 
   # --- nginx configuration ---
   nginxConf:
@@ -307,6 +404,12 @@ pepproxy:
     # Set to null to disable PoPP.
     poppIssuer: "http://localhost"
 
+    # Accepted validity of a PoPP token:
+    #   "quarter"        — within the current quarter (gemSpec_ZETA, A_26477)
+    #   duration string  — fixed period since iat, with optional unit (d,h,m,s);
+    #                      defaults to seconds when no unit is given, e.g. "1d"
+    poppValidity: quarter
+
     # OIDC issuer (iss) of the authorization server
     pepIssuer: "http://authserver/auth/realms/zeta-guard"
 
@@ -316,19 +419,49 @@ pepproxy:
     # Scopes required for a valid access token
     requiredScopes: [ ]
 
-    # Custom nginx `location` blocks (with `proxy_pass`) for the resource server (Go template string).
+    # Structured configuration of the proxied resource-server paths — prefer this.
+    # Each entry renders an http-level `upstream` block (with connection keepalive)
+    # plus an exact + trailing-slash location pair, always including
+    # proxy_headers.conf. `websocket: true` entries are additionally routed via a
+    # dedicated ingress WebSocket minion, which keeps upstream keepalive intact on
+    # all other locations.
+    proxyLocations: []
+    # - path: /pep                        # public path; no trailing slash
+    #   upstream: http://fachdienst:8080  # scheme://host[:port] — no path here; port defaults per scheme
+    #   upstreamPath: /                   # optional URI prefix on the upstream (default /)
+    #   websocket: false                  # WebSocket upgrade handling (+ ingress ws routing)
+    #   bypassAsl: false                  # public without ASL — mind your spec!
+    #   keepalive: 32                     # optional; idle upstream conns kept per worker
+    #   extraConfig: |                    # optional; tpl-rendered, appended inside both blocks
+    #     proxy_ssl_verify on;
+
+    # DEPRECATED in favor of `proxyLocations` above — raw nginx `location` blocks
+    # (with `proxy_pass`) as a Go template string. Scheduled for removal; setting
+    # both at once fails the render, so migrate entirely rather than mixing.
     # The PEP header handling (`include proxy_headers.conf;` — strips client-supplied
     # credentials and ZETA-* headers, sets the PEP's own headers + Forwarded) is included
     # once at the `server` level, so plain `proxy_pass` locations inherit it automatically.
     # nginx `proxy_set_header` inheritance is non-additive: a location that declares its own
     # `proxy_set_header` (e.g. a WebSocket upgrade) does NOT inherit it and must repeat
     # `include proxy_headers.conf;` itself — otherwise a `pep on;` location returns HTTP 500
-    # (ProxyHeadersMissing).
+    # (ProxyHeadersMissing). `proxyLocations` generates all of this correctly.
     locations: ""
 
   # --- HSM integration for PEP ---
   # Set to gRPC URL of HSM Proxy to enable ossl_hsm integration
   hsmProxyAddr: null
+  # HSM key ID for the TLS listener ("store:hsm:<hsmTlsKeyId>")
+  hsmTlsKeyId: tls.p256
+  # Certificate matching the HSM TLS key, relative to /etc/nginx. The default is
+  # baked into the PEP image — mount your own via extraVolumeMounts.
+  hsmTlsCert: tls.p256.pem
+
+  # --- TLS parameters of the PEP listener ---
+  # nginx snippet (ssl_protocols, ciphers, curves) implementing the gematik TLS AFOs.
+  # See chart values.yaml for the full default block; keep in sync with
+  # nginx-ingress' http-snippets when overriding.
+  # tlsConfig: |
+  #   ssl_protocols TLSv1.3 TLSv1.2;
 
   # --- Pod metadata ---
   podLabels: {}
@@ -389,11 +522,33 @@ cloudnativePg:
   # enablePDB: leave unset for the CNPG default; set false on single-instance stages
   storage:
     size: 10Gi
+    # storageClass shortcut; empty → cluster default StorageClass
+    storageClass: ""
     # Per-env PVC template (e.g. a specific storageClassName); empty → CNPG default
     pvcTemplate: {}
+  # Optional dedicated volume for the write-ahead log (pg_wal). Empty → WAL lives on
+  # the data volume above (CNPG default). Split it off for write-heavy stages so WAL
+  # fsync does not contend with checkpoint flushes.
+  walStorage: {}
+  # walStorage:
+  #   size: 16Gi
+  #   storageClass: managed-csi-premium
   parameters:
     sharedBuffers: 24MB
     maxConnections: 100
+  # Additional reloadable postgresql.conf parameters (snake_case keys, string values).
+  extraParameters:
+    # full_page_writes after each checkpoint balloon WAL (~3x observed); compression
+    # costs spare CPU and cuts checkpoint frequency and write volume alike.
+    wal_compression: "on"
+    # Further examples:
+    # max_wal_size: "2GB"                 # SOFT cap; WAL shares the data volume by
+    # min_wal_size: "1GB"                 # default — raise only with more disk or walStorage
+    # log_min_duration_statement: "200"   # log statements slower than 200ms
+    # track_io_timing: "on"
+  # Preloaded libraries; extensions (e.g. pg_stat_statements) are auto-CREATEd by the
+  # operator. NOTE: changes here trigger a postgres restart.
+  sharedPreloadLibraries: []
   pooler:
     enabled: false
   backup:
@@ -440,6 +595,17 @@ nginxIngressEnabled: true
 # Needs the NIC to provide the $zeta_route http-snippets (the bundled subchart ships
 # them; external NICs must add them). Disable where the NIC lacks them.
 nginxIngressLbMethod: true
+
+# When true, drop spec.tls from the master ingress so TLS can be configured via
+# ingressMasterAnnotations."nginx.org/server-snippets" — required for ossl_hsm support.
+nginxIngressHsm: false
+
+# One-shot pre-upgrade hook that adopts foreign, ingress-shim-created Certificates
+# (zeta-guard-tls / zeta-guard-admin-tls) into the helm release. Only rendered while
+# such a Certificate exists; afterwards the chart manages it normally.
+certificateAdoption:
+  # Needs kubectl + bash; same default as the token-renewer worker image.
+  image: google/cloud-sdk:549.0.0
 
 nginx-ingress:
   controller:
@@ -496,11 +662,20 @@ devMode: false
 # ---------------------------------------------------------------------------
 opa:
   replicaCount: 1
+  image:
+    repository: opa
+    tag: 1.19.1-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
 
   # OPA server log level: debug|info|warn|error
   logLevel: info
+
+  # If enabled, OPA will log decision logs to console.
+  logDecisions: false
+
+  # Log OPA plugin status updates to the console.
+  logStatusUpdates: false
 
   # Kubernetes ServiceAccount name for OPA pods (blank = default)
   serviceAccountName: ""
@@ -509,10 +684,19 @@ opa:
   # on, so a failed bundle download surfaces as NotReady instead of staying silent.
   bundleHealthCheck: false
 
+  # Periodically restart the opa (and opa-simulation) Deployment via
+  # `kubectl rollout restart`.
   # Enabled here so `make template-demo` also renders and lints the rollout-restart CronJob;
   # the chart default is off (opt-in per stage).
   rolloutRestart:
     enabled: true
+    # Daily at 03:00, fixed Europe/Berlin timezone.
+    schedule: "0 3 * * *"
+    backoffLimit: 5
+    # Empty → the chart creates its own ServiceAccount plus minimal RBAC (get/patch on
+    # just the opa Deployments). Set to use a pre-provisioned ServiceAccount instead;
+    # the chart then creates no RBAC and expects equivalent rights to exist.
+    serviceAccountName: ""
 
   # --- Container security context ---
   containerSecurityContext:
@@ -566,7 +750,8 @@ opa:
       enabled: true
       keyId: ""
       algorithm: ""
-      publicKey: ""
+      # Optional: must match the scope embedded in the bundle signature.
+      # Omit if the bundle was signed without a scope.
       scope: ""
 
   # --- OPA Simulation ---
@@ -576,6 +761,9 @@ opa:
     bundle:
       # Optional explicit simulation bundle resource. If empty, the chart derives from active resource.
       resource: ""
+      # Optional signature-verification override for the simulation bundle only
+      # (same keys as opa.bundle.verification). Empty → the shared one applies.
+      verification: {}
 
   # --- Workload Identity Federation (AKS → GCP STS) for GAR access ---
   workloadIdentityFederation:
@@ -632,17 +820,117 @@ opaPolicy:
     }
 
 # ---------------------------------------------------------------------------
+# Notification Service (ZETA Stufe 2, opt-in)
+# ---------------------------------------------------------------------------
+# Push notification management and forwarding service. Two variants are deployed
+# from one image repo — "-rs" (resource-server facing) and "-fdv" (FdV facing) —
+# sharing a single Postgres database. Brings its own PEP location block and
+# discovery document. Off by default; enable per stage.
+notificationService:
+  enabled: false
+  replicaCount: 1
+  serviceAccountName: ""
+  image:
+    repository: notification-service
+    # Tag prefix only; the chart appends "-rs" / "-fdv" per variant.
+    tag: 1.3.0
+  # Optional per-variant digest pins (the two variants differ). Empty → tag only.
+  # A per-variant *tag* is not supported and would be ignored.
+  rs:
+    image:
+      digest: ""
+  fdv:
+    image:
+      digest: ""
+  imagePullPolicy: Always
+  imagePullSecrets: []
+
+  # --- Persistence (both variants share one database) ---
+  db:
+    # cloudnative → provision a dedicated CNPG Cluster; external → point
+    # jdbcUrl/secretName at an out-of-band Postgres.
+    mode: cloudnative
+    # CNPG Cluster name and single source of truth: the -rw/-app resources,
+    # NetworkPolicy selectors and the derived jdbcUrl/secretName all follow it.
+    clusterName: "notification-db"
+    # Empty in cloudnative mode → "jdbc:postgresql://<clusterName>-rw:5432/notification".
+    jdbcUrl: ""
+    # Empty in cloudnative mode → "<clusterName>-app".
+    secretName: ""
+    # Init container that blocks startup until Postgres accepts TCP, so Flyway does
+    # not crash-loop while the database comes up.
+    waitForDb:
+      enabled: true
+    # CNPG Cluster settings for mode=cloudnative — plain Postgres, no pg_cron
+    # (record purging happens in-app). See chart values.yaml for the full surface
+    # (resources, parameters, walStorage, monitoring, backup).
+    cloudnativePg:
+      instances: 1
+      storage:
+        size: 2Gi
+
+  # --- Application configuration ---
+  env:
+    # Allowlist of Push Gateway base URLs. Empty fails startup validation —
+    # set at least one when enabling the service.
+    pushGatewayAllowedBaseUrls: []
+    # Allowed notification channels, comma-separated. No default.
+    channelsAllowed: ""
+    # HSM-backed at-rest sealing of stored notification data.
+    persistenceSealingEnabled: false
+
+  # --- Outbound connection to the Push Gateway ---
+  pushGateway:
+    # Extra CAs trusted for the outbound HTTPS calls, in addition to the system
+    # defaults. Per entry set exactly one: secretName+secretKey, or an inline cert.
+    trustedCAs: []
+    # Client certificate for outbound mTLS. Active once both clientCert.secretName
+    # and clientKey.secretName are set.
+    mtls:
+      clientCert:
+        secretName: ""
+        secretKey: tls.crt
+      clientKey:
+        secretName: ""
+        secretKey: tls.key
+      # Optional password for an encrypted private key.
+      keyPassword:
+        secretName: ""
+        secretKey: ""
+
+  # --- Quarkus HTTP access log ---
+  accessLog:
+    enabled: false
+    # Empty → Quarkus "common" pattern. %{i,Header-Name} captures a request header.
+    pattern: ""
+
+  # --- Optional history feature (A_29974) ---
+  # Single knob driving the service's NOTIFICATION_HISTORY_ENABLED env, the
+  # discovery scopes_supported, and (via terraform) the Keycloak scope.
+  historyEnabled: false
+
+  # RFC 9728 resource identifier, combined with pepproxy.wellKnownBase to form the
+  # audience. Single leading-slash segment, decoupled from the /push/v1 API prefix.
+  wellKnownResourceSuffix: /notification-service
+
+# ---------------------------------------------------------------------------
 # Provisioning Processor (shared init container for trust-anchor provisioning)
 # ---------------------------------------------------------------------------
 # Used by authserver, OPA, OPA-simulation, and PEP-Proxy as init container.
 provisioningProcessor:
   provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
-  # Daily re-run of the provisioning processor as a resident sidecar. On here so `make template-demo` also renders and
-  # lints the sidecar branch; the chart default is off until a processor release ships SCHEDULE_TIME support.
-  # Needs Kubernetes >= 1.32 (OpenShift 4.19).
+  # OCSP validation of the SMC-B / TSL certificates (env PROCESSORS_TSL_OCSP_ENABLED).
+  # Default true per A_24624-01; false skips the live OCSP checks (test envs only).
+  tslOcspEnabled: true
+  # Daily re-run of the provisioning processor as a resident native sidecar, so refreshed
+  # trust anchors take effect without restarting the pod (see authserver.truststoreReload).
+  # enabled: false runs it as a one-shot init container instead.
+  # Needs Kubernetes >= 1.32 (OpenShift 4.19) and a processor image supporting SCHEDULE_TIME.
   schedule:
     enabled: true
+    # Local time of the daily re-run, format HH:MM — not a cron expression.
     time: "03:00"
+    # IANA timezone the time above is read in.
     timezone: "Europe/Berlin"
   # --- CA for the provisioning container registry (Option A and B are mutually exclusive) ---
   # Option A (existing default): mount the CA from a Secret. Auto-wires env var
@@ -681,7 +969,7 @@ provisioningProcessor:
   #   tokenKey: token         # default: token
   image:
     repository: provisioning-processor
-    tag: 1.0.0
+    tag: 1.3.0
   imagePullPolicy: Always
   resources:
     limits:
@@ -731,6 +1019,18 @@ telemetryGatewayEnabled: true
 # ti_sim/ti_siem filters are not bypassable).
 telemetryGatewayHost: ""
 
+# Sizes the PersistentVolumeClaim backing the collector's sending queue.
+telemetryGatewaySendingQueuePVCResources:
+  requests:
+    storage: 5Gi
+
+# Access modes of that PVC. ReadWriteMany for shared-filesystem storage.
+telemetryGatewaySendingQueuePVCAccessModes:
+  - ReadWriteOnce
+
+# StorageClass of that PVC. Empty omits the field -> cluster default class.
+telemetryGatewaySendingQueuePVCStorageClass: ""
+
 telemetry-gateway:
   mode: deployment
   image:
@@ -744,6 +1044,20 @@ telemetry-gateway:
     requests:
       cpu: "100m"
       memory: "200Mi"
+  # No securityContext here on purpose — this inherits values.yaml, which is
+  # the only place in this chart that pins a UID/GID: the collector needs a
+  # known non-root identity that can write the file-storage PVC. OpenShift
+  # rejects both, because its SCC assigns UID and GID from the namespace's
+  # allocated range — hand them over there with an explicit `fsGroup: null` /
+  # `runAsUser: null`. Explicit `null`, not omission: Helm merges maps, so a
+  # values file that simply leaves these keys out still inherits the 1000 from
+  # values.yaml. See docs/explanations/Telemetry.md#openshift.
+  #
+  # podSecurityContext:
+  #   fsGroup: null
+  # securityContext:
+  #   runAsNonRoot: true
+  #   runAsUser: null
   extraVolumeMounts: [ ]
   extraVolumes: [ ]
   ports:
@@ -791,6 +1105,12 @@ telemetry-gateway:
     service:
       extensions:
         - health_check
+      # Setting a pipeline to null switches it off — this demo keeps only the
+      # dienst_hersteller streams and drops the gematik TI-SIM / TI-SIEM ones,
+      # which need the gematik OTLP endpoints plus the bearertokenauth extensions
+      # (see gematikConnectionEnabled and the exporters above).
+      # NOTE: these nulls reach the collector config verbatim, so this demo config
+      # documents the value surface — it is not a bootable collector config.
       pipelines:
         logs/ti_sim: null
         logs/ti_siem: null

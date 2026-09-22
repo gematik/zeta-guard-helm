@@ -123,7 +123,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 1.3.1
+    tag: 1.3.2
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
@@ -262,7 +262,7 @@ pepproxy:
   replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 1.3.0
+    tag: 1.3.3
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
@@ -778,7 +778,7 @@ opa:
   serviceAccountName: ""
   image:
     repository: opa
-    tag: 1.19.0-static
+    tag: 1.19.1-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
   # --- Container security context (opa / opa-simulation main container) ---
@@ -792,7 +792,7 @@ opa:
   # ti-siem-token-renewer) ---
   # No runAsUser here — stages that use workloadIdentityFederation.worker.image
   # (google/cloud-sdk, runs as root by default) need an explicit runAsUser
-  # override in their own stage values, see private/values.jza.yaml.
+  # override in their own stage values file.
   cronjobSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
@@ -802,7 +802,7 @@ opa:
   # Set OPA server log level: debug|info|warn|error (default: info)
   logLevel: info
   # If enabled, OPA will log decision logs to console.
-  logDecisions: true
+  logDecisions: false
   # If enabled, OPA will log status updates to console.
   logStatusUpdates: false
   # If enabled (and bundle mode is on), the readiness probe uses /health?bundles=true, so
@@ -961,11 +961,10 @@ notificationService:
   image:
     repository: notification-service
     # Tag prefix; "-rs"/"-fdv" appended per variant (e.g. main -> main-rs/main-fdv).
-    tag: 1.3.0
-  # Optional per-variant digest pins (rs/fdv differ). Empty -> tag only; else
-  # "<repo>:<tag>-<variant>@<digest>". Only digest is per-variant; the tag is
-  # always the shared image.tag + "-<variant>". A per-variant tag is not
-  # supported and would be ignored.
+    tag: 1.3.2
+  # Optional per-variant pins (rs/fdv differ). A per-variant image.tag replaces
+  # the shared tag verbatim (no "-<variant>" appended); a digest is appended as
+  # "@<digest>". Empty -> shared image.tag + "-<variant>".
   rs:
     image:
       digest: ""
@@ -985,8 +984,11 @@ notificationService:
   # Postgres persistence (both variants connect to the same database).
   db:
     # mode: cloudnative -> provision a dedicated CNPG Cluster (see cloudnativePg
-    # below); external -> point jdbcUrl/secretName at an out-of-band Postgres.
+    # below); external -> point jdbcUrl/secretName at an out-of-band database.
     mode: cloudnative
+    # Database kind (notification.datasource.db-kind): postgresql, mariadb, mysql,
+    # mssql or oracle. cloudnative mode (CNPG) requires postgresql.
+    kind: postgresql
     # CNPG Cluster name (cloudnative mode). Single source of truth: -rw/-app
     # resources, NetworkPolicy/PeerAuthentication selectors, and the derived
     # jdbcUrl/secretName/waitForDb.host all follow it.
@@ -1161,7 +1163,7 @@ provisioningProcessor:
       drop: [ "ALL" ]
   image:
     repository: provisioning-processor
-    tag: 1.3.0
+    tag: 1.3.2
   imagePullPolicy: Always
   provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning@sha256:72d1ae7329c95346a9ef82cf5baf28ec31a78ecbc761a36884a2a1056b5d6665" # "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
   # --- CA for the provisioning container registry (Option A and B are mutually exclusive) ---
@@ -1236,20 +1238,51 @@ telemetryGatewaySendingQueuePVCResources:
   requests:
     storage: 5Gi
 
+# telemetryGatewaySendingQueuePVCAccessModes sets the access modes of that PVC.
+# ReadWriteOnce fits the single-replica deployment on block storage. Use
+# ReadWriteMany on a shared filesystem (Azure Files, CephFS, NFS) — required when
+# the storage system offers nothing else, and it also lifts the single-writer
+# constraint that the telemetry-gateway rollout below works around with
+# maxSurge: 0.
+telemetryGatewaySendingQueuePVCAccessModes:
+  - ReadWriteOnce
+
+# telemetryGatewaySendingQueuePVCStorageClass pins the StorageClass of that PVC.
+# Empty omits the field, so the cluster's default StorageClass applies. Set it
+# when that default cannot be attached by your nodes — the gateway then hangs in
+# ContainerCreating with FailedAttachVolume — or cannot serve the access modes
+# above. A PVC spec is immutable: a claim already created with the wrong class
+# has to be deleted once before the next upgrade recreates it.
+telemetryGatewaySendingQueuePVCStorageClass: ""
+
 telemetry-gateway:
   mode: deployment
+  # Off because the upstream auto-rewrite crashes the render on a disabled pipeline:
+  # `opentelemetry-collector.rewriteDeprecatedComponentNames` does `index $pipeline $kind`
+  # without a nil guard (_config.tpl), so any `pipelines.<name>: null` — the documented way
+  # to switch a pipeline off, used by values-demo.yaml and the stage values — aborts with
+  # "index of untyped nil". The sibling `opentelemetry-collector.deprecations` helper guards
+  # the same loop correctly, so this is an upstream oversight, not our config.
+  # The rewrite only renames deprecated components (processor `k8sattributes` -> `k8s_attributes`,
+  # detector `k8snode` -> `k8s_api`); we use neither name, so disabling it is a no-op.
+  # Re-check when bumping the opentelemetry-collector dependency.
+  rewriteDeprecatedComponentNames: false
   # Plain RollingUpdate defaults (maxSurge: 25%, maxUnavailable: 25%) would
   # start the new pod before the old one releases the ReadWriteOnce
-  # file-storage PVC (see fileStoragePvc below), leaving it stuck in
-  # ContainerCreating. maxSurge: 0 forbids creating the new pod while the
-  # old one still counts toward capacity, and maxUnavailable: 1 lets the
-  # old one scale to zero first — so at replicaCount: 1 the old pod is
-  # always fully gone (and the PVC released) before the new one is
-  # created, the same guarantee `Recreate` would give, without switching
-  # `strategy.type` on a live Deployment (which hits a Kubernetes
-  # field-defaulting quirk: `rollingUpdate: Forbidden when type is
+  # file-storage PVC (access modes in
+  # telemetryGatewaySendingQueuePVCAccessModes above, claim rendered by
+  # templates/telemetry-gateway/telemetry-gateway-file-storage-pvc.yaml),
+  # leaving it stuck in ContainerCreating. maxSurge: 0 forbids creating the
+  # new pod while the old one still counts toward capacity, and
+  # maxUnavailable: 1 lets the old one scale to zero first — so at
+  # replicaCount: 1 the old pod is always fully gone (and the PVC released)
+  # before the new one is created, the same guarantee `Recreate` would give,
+  # without switching `strategy.type` on a live Deployment (which hits a
+  # Kubernetes field-defaulting quirk: `rollingUpdate: Forbidden when type is
   # Recreate`, since Kubernetes silently defaults that field on the live
   # object whenever type is RollingUpdate, and nothing ever prunes it).
+  # Only the single-writer PVC forces this; on ReadWriteMany storage the
+  # plain RollingUpdate defaults are fine again.
   rollout:
     strategy: RollingUpdate
     rollingUpdate:
@@ -1257,8 +1290,8 @@ telemetry-gateway:
       maxUnavailable: 1
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
-    tag: "v0.155.0"
-    digest: "sha256:281b10b113e43f80b798319a11ef921448c68e7428cb77e41c0bceeef7f2a852"
+    # tag: "v0.156.0"
+    digest: "sha256:697c781f9d778c0a29ed051fb5c92fe37e1b97cdbec1a51a2fb9f4a5094ef8e5"
     pullPolicy: Always
   command:
     name: /otelcol/zeta-telemetry-gateway
@@ -1268,6 +1301,13 @@ telemetry-gateway:
     requests:
       cpu: "1"
       memory: "1Gi"
+  # This is the only component in this chart that pins a UID/GID: the collector
+  # needs a known non-root identity that can write the file-storage PVC below.
+  # OpenShift rejects both, because its SCC assigns UID and GID from the
+  # namespace's allocated range — hand them over there with an explicit
+  # `fsGroup: null` / `runAsUser: null`. Explicit `null`, not omission: Helm
+  # merges maps, so a values file that simply leaves these keys out still
+  # inherits the 1000 set here. See docs/explanations/Telemetry.md.
   podSecurityContext:
     seccompProfile:
       type: RuntimeDefault
@@ -1509,6 +1549,13 @@ telemetry-gateway:
               - set(span.attributes["zeta-client.date"],
                 FormatTime(span.start_time, "%F"))
 
+      transform/dienst_hersteller:
+        error_mode: ignore
+        trace_statements:
+          # A_28960 - Security Monitoring - Keine Weitergabe sicherheitsrelevanter Telemetriedaten
+          - delete_key(span.attributes, "app.installation.id")
+            where span.attributes["app.installation.id"] != nil
+
       # sets `server.address` attribute for TI-SIEM and TI-SIM
       transform/siem_and_sim:
         log_statements:
@@ -1582,6 +1629,29 @@ telemetry-gateway:
           match_type: strict
           services:
             - "ZETA Guard PEP HTTP proxy"
+
+      filter/dienst_hersteller:
+        # removes attack detection, authn_*, and policy decision logs
+        # removes security event metrics
+        error_mode: ignore
+        log_conditions:
+          - >-
+            HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+            (
+              log.attributes["attackDetection.capecId"] != nil or
+              log.attributes["event_type"] == "authn_client_deleted" or
+              log.attributes["event_type"] == "authn_client_registered" or
+              log.attributes["event_type"] == "authn_client_registration_fail" or
+              log.attributes["event_type"] == "authn_token_created" or
+              log.attributes["opa.event_type"] == "decision_log"
+            )
+        metric_conditions:
+          - >-
+            HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
+            (
+              HasPrefix(metric.name, "attack.detection.") or
+              HasPrefix(metric.name, "zeta_guard_kpi.")
+            )
 
       filter/ti_sim:
         # removes all logs and metrics except those created by the resource server, and error/fatal logs created by ZETA guard
@@ -1834,11 +1904,14 @@ telemetry-gateway:
             - syslog/http_proxy
           processors:
             - memory_limiter
+            - filter/dienst_hersteller
+            - transform/dienst_hersteller
             - transform/error_body
             - redaction/zeta_guard
             - batch
           exporters:
-            # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
+            # Diensthersteller: replace `debug` with your own exporter during setup — the
+            # dienst_hersteller streams belong to you, the chart only ships a placeholder.
             - debug
 
         logs/ti_sim:
@@ -1886,10 +1959,13 @@ telemetry-gateway:
             - spanmetrics
           processors:
             - memory_limiter
+            - filter/dienst_hersteller
+            - transform/dienst_hersteller
             - redaction/zeta_guard
             - batch
           exporters:
-            # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
+            # Diensthersteller: replace `debug` with your own exporter during setup — the
+            # dienst_hersteller streams belong to you, the chart only ships a placeholder.
             - debug
 
         metrics/ti_sim:
@@ -1925,11 +2001,14 @@ telemetry-gateway:
             - otlp
           processors:
             - memory_limiter
+            - filter/dienst_hersteller
+            - transform/dienst_hersteller
             - transform/keycloak_oauth_grant
             - redaction/zeta_guard
             - batch
           exporters:
-            # ToDo muss bei der Einrichtung vom Diensthersteller ersetzt werden
+            # Diensthersteller: replace `debug` with your own exporter during setup — the
+            # dienst_hersteller streams belong to you, the chart only ships a placeholder.
             - debug
             # also feed the (unsampled) trace stream into the spanmetrics connector
             - spanmetrics

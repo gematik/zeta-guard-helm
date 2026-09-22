@@ -60,7 +60,8 @@ spec:
           {{- end }}
           image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          # TODO - review necessity of this section or rework
+          # Required: service.yaml resolves both ports by name (targetPort: proxy-port /
+          # admin-port), so dropping these declarations breaks the Service.
           ports:
             - name: proxy-port
               containerPort: {{ .Values.proxyConfig.proxyPort }}
