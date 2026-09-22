@@ -263,7 +263,7 @@ the ES256 HSM KeyProvider is registered. See
 | Authserver `No valid data file found ... ocsp-signers.p12`                      | OCSP disabled on the init container but the OCSP keystore env is still set. Ensure `provisioningProcessor.tslOcspEnabled: false` gates both the init flag and the authserver `OCSP_KEYSTORE_*` env. |
 | PEP `Pending`, `secret "asl-identity" not found`                                | Create the `asl-identity` secret (step 3) before deploying with `asl_enabled: true`.                                                                                                                |
 | PEP `SSL_CTX_use_PrivateKey("store:hsm:…") failed`, connecting to `[::1]:50051` | `HSM_PROXY_ADDR` not set on the PEP pod → set `pepproxy.hsmProxyAddr`.                                                                                                                              |
-| Token exchange 500, `NumberFormatException` on a realm attribute                | Known interaction between column encryption and the clusterless/remote realm cache — see ZETAP-1364 context / raise with the keycloak-zeta owners.                                                  |
+| Token exchange 500, `NumberFormatException` on a realm attribute                | Known interaction between column encryption and the clusterless/remote realm cache / raise with the keycloak-zeta owners.                                                                           |
 
 ## Related guides
 

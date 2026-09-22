@@ -24,12 +24,10 @@ resource "terraform_data" "vau_db_enc" {
     command = "${path.module}/scripts/set-vau-db-enc.sh"
 
     environment = {
-      KC_URL   = var.keycloak_url
-      KC_REALM = keycloak_realm.zeta_realm.realm
-      KC_USERNAME = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username :
-      data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
-      KC_PASSWORD = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password :
-      data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
+      KC_URL         = var.keycloak_url
+      KC_REALM       = keycloak_realm.zeta_realm.realm
+      KC_USERNAME    = var.keycloak_username
+      KC_PASSWORD    = var.keycloak_password
       KC_INSECURE    = var.insecure_tls ? "true" : "false"
       VAU_DB_ENABLED = tostring(var.use_vau_db_enc)
     }
@@ -46,8 +44,6 @@ resource "terraform_data" "vau_db_enc" {
     keycloak_realm_client_policy_profile_policy.zeta_client_policy_testonly,
     # scopes.tf
     keycloak_openid_client_scope.zero_audience,
-    keycloak_openid_client_scope.zero_register,
-    keycloak_openid_client_scope.zero_manage,
     keycloak_openid_client_scope.pdp_scopes,
     keycloak_openid_audience_protocol_mapper.pdp_audience_mapper,
     keycloak_generic_protocol_mapper.zeta_guard_mapper,

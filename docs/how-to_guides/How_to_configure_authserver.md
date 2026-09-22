@@ -18,12 +18,11 @@ authserver without the need to deploy it from scratch.
 > - Kubernetes namespace
 > - TLS configuration (self-signed certificates are supported)
 > - Additional PDP scopes
-> - Audience scope name (default: `zero:audience`) — the scope that carries the
+> - Audience scope name (**required**, no default) — the scope that carries the
 >   access-token claims the PEP requires (see the note under "Terraform
     Variables")
 >
 > Predefined settings:
-> - PDP scopes `zero:manage` and `zero:register` are automatically created
 > - Realm token encryption is set to ES256
 > - All RSA key providers are removed; only ECC keys (ES256/P-256) appear in the
     JWKS endpoint
@@ -39,12 +38,12 @@ authserver without the need to deploy it from scratch.
 Terraform can run in two modes, controlled by the `TF_VAR_use_kubernetes`
 variable:
 
-|                   | **Kubernetes mode** (default)             | **Local mode**                                |
-|-------------------|-------------------------------------------|-----------------------------------------------|
-| **State backend** | Kubernetes Secret in the cluster          | Local `terraform.tfstate` file                |
-| **Credentials**   | Read from K8s Secret `authserver-admin`   | Must be provided explicitly                   |
-| **Typical use**   | CI/CD pipelines, cluster-connected admins | Local development, no cluster access required |
-| **Set via**       | `TF_VAR_use_kubernetes=true` (default)    | `TF_VAR_use_kubernetes=false`                 |
+|                   | **Kubernetes mode** (default)                                                    | **Local mode**                                   |
+|-------------------|----------------------------------------------------------------------------------|--------------------------------------------------|
+| **State backend** | Kubernetes Secret in the cluster                                                 | Local `terraform.tfstate` file                   |
+| **Credentials**   | `TF_VAR_keycloak_*`, filled from `authserver-admin` by `scripts/kc-admin-env.sh` | `TF_VAR_keycloak_*`, from wherever you keep them |
+| **Typical use**   | CI/CD pipelines, cluster-connected admins                                        | Local development, no cluster access required    |
+| **Set via**       | `TF_VAR_use_kubernetes=true` (default)                                           | `TF_VAR_use_kubernetes=false`                    |
 
 ---
 
@@ -52,7 +51,9 @@ variable:
 
 ### Common (both modes)
 
-- Terraform installed (version compatible with the providers)
+- Terraform **1.11 or newer** installed (1.10 for ephemeral input variables,
+  1.11 for the write-only argument used by the SMC-B identity provider — see
+  [Admin credentials](#admin-credentials))
 - Make installed
 - `curl` and `jq` available in PATH
 - Network access to the Keycloak instance from the machine running Terraform
@@ -62,16 +63,23 @@ variable:
 - A running ZETA Guard Kubernetes cluster
 - `kubectl` configured to access the cluster
 - Keycloak admin credentials stored in K8s Secret `authserver-admin` (created by
-  the Helm chart)
+  the Helm chart). Terraform does not read it — export
+  `TF_VAR_keycloak_username` / `TF_VAR_keycloak_password` from it first, e.g.
+  with `scripts/kc-admin-env.sh`; see
+  [Admin credentials](#admin-credentials).
 
 ### Local mode
 
 - `TF_VAR_use_kubernetes=false` set in the Makefile invocation or as environment
   variable
 - Keycloak admin credentials are provided explicitly:
+    - `TF_VAR_keycloak_username` (required)
     - `TF_VAR_keycloak_password` (required)
-    - `TF_VAR_keycloak_username` (defaults to `admin`)
 - Terraform state is stored locally in `terraform.tfstate` (not in the cluster)
+
+Both variables are required in **both** modes and are *ephemeral*, so they must
+be supplied on **every** Terraform invocation — see
+[Admin credentials](#admin-credentials).
 
 > When using self-signed certificates (e.g. local KIND cluster), set
 > `insecure_tls = true`
@@ -81,25 +89,188 @@ variable:
 
 ---
 
+## Admin credentials
+
+The admin credentials reach Terraform **only** through
+`TF_VAR_keycloak_username` / `TF_VAR_keycloak_password`. Terraform does not read
+the `authserver-admin` Secret itself: a `data "kubernetes_secret_v1"` result is
+persisted, so that read wrote the admin password in cleartext into
+`tfstate-<workspace>-state`.
+
+Both variables are declared `ephemeral` and are required in both operating
+modes. Two consequences:
+
+- **They never reach the state or a saved plan.** Terraform enforces it:
+  referencing them from a persisted context — a data source `query`, a
+  `terraform_data` `input` — fails the run with `Invalid use of ephemeral
+  value`. Only provider configuration and provisioner environments may consume
+  them.
+- **A `-out` plan file does not carry them.** `terraform plan -out=…` followed
+  by `terraform apply <planfile>` needs them exported again for the apply.
+
+### Filling them from the cluster Secret
+
+`terraform/authserver/scripts/kc-admin-env.sh` resolves the credentials and
+exports them. It writes nothing to stdout when sourced, so the values never
+appear in the process list, in shell history or in a CI log:
+
+```bash
+cd terraform/authserver
+. scripts/kc-admin-env.sh <namespace> [admin-secret-name]   # bash
+terraform apply -var-file=../../<values-dir>/<stage>.tfvars
+```
+
+For a POSIX shell, the same script emits shell-quoted `export` lines instead:
+
+```sh
+eval "$(bash scripts/kc-admin-env.sh <namespace>)"
+```
+
+`make config` and `make config-plan` call the same script — the Makefile is one
+consumer of it, not a prerequisite.
+
+Resolution order (implemented in `scripts/kc-admin-credentials.sh`, which the
+`data "external"` programs and the destroy-time provisioners also use):
+
+1. `KC_USERNAME` / `KC_PASSWORD` already present in the environment
+2. `TF_VAR_keycloak_username` / `TF_VAR_keycloak_password` — **both** must be
+   set, otherwise this step is skipped
+3. The Kubernetes Secret named by `keycloak_admin_secret` in
+   `keycloak_namespace` (requires `kubectl` access)
+
+Step 2 needing both variables matters in CI: exporting only the password falls
+through to the cluster Secret. Where the pipeline value must win, export
+`TF_VAR_keycloak_username` alongside it.
+
+### What still reaches the state
+
+The admin credentials no longer do. These do, and all of them are gated behind
+`use_fake_sekidp_testrealm` (a test realm — never enable it in production);
+their values are also kept in the stage tfvars, so the state adds no exposure:
+
+- `keycloak_openid_client.fake_sekidp_client.client_secret` (generated by
+  Keycloak and read back)
+- `keycloak_oidc_identity_provider.fake_sekidp_identity_provider.client_secret`
+- `keycloak_openid_client.dummy_client_for_sekidp_testing.client_secret`
+- `keycloak_user.sekidp_dummy_user.initial_password` — the provider offers no
+  write-only equivalent for this attribute
+
+The production-relevant SMC-B identity provider secret uses the provider's
+write-only argument (`client_secret_wo`) and is not persisted. Because a
+write-only argument is invisible to Terraform after the apply, a changed secret
+alone produces no diff — increment `smc_b_client_secret_version` to push a
+rotated value.
+
 ## Terraform Variables
 
-Set environment-specific variables in `environments/STAGE.tfvars` (or
-`private/STAGE.tfvars` for local development). Key variables include:
+Set environment-specific variables in `<values-dir>/<stage>.tfvars`. The
+directory is the Makefile's `VALUES_DIR` (default `local-test/`, so
+`local-test/local.tfvars` for local development) — see the
+[Makefile reference](../reference/Makefile_reference.md).
+`terraform/authserver/environments/demo.tfvars` lists every accepted variable
+with its default — copy it as a starting point. Key variables include:
 
 ```hcl
-insecure_tls = true                                     # Set to true if using self-signed certificates
-use_kubernetes = true                                   # Set to false for local mode (no K8s backend)
-keycloak_url = "https://.../auth"                       # URL of the Keycloak instance
-keycloak_namespace = "zeta-demo"                        # Kubernetes namespace where Keycloak runs
-pdp_scopes = [
-  "zero:read", "practitionerAccount.crud"
-]  # Optional additional scope list
-# audience_scope_name = "zero:audience"                 # Optional: rename the audience scope (default: "zero:audience")
-# audience            = "https://..."                   # Optional: explicit audience value (default: derived from keycloak_url)
+# Required — no defaults
+keycloak_url        = "https://.../auth"  # URL of the Keycloak instance
+keycloak_namespace  = "zeta-demo"         # Kubernetes namespace where Keycloak runs
+audience_scope_name = "zero:audience"     # Name of the audience scope (see the note below)
+
+# Optional — shown with their defaults
+# insecure_tls   = false  # Set to true if using self-signed certificates
+# use_kubernetes = true   # Set to false for local mode (no K8s backend)
+# audience       = ""     # Explicit audience value; empty derives it from keycloak_url
+# pdp_scopes     = []     # Additional PDP scopes, e.g. ["zero:read", "practitionerAccount.crud"]
 ```
+
+### Complete variable reference
+
+Variables marked **required** have no default; an apply without them fails.
+
+#### Connection and state
+
+| Variable                  | Type   | Default              | Description                                                                                                                                                          |
+|---------------------------|--------|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `keycloak_url`            | string | **required**         | External URL of the Keycloak instance, including the `/auth` path. With Admin API protection, point this at the admin hostname and set `audience` to the public one. |
+| `keycloak_namespace`      | string | **required**         | Kubernetes namespace the authserver is deployed in                                                                                                                   |
+| `use_kubernetes`          | bool   | `true`               | Store state in a Kubernetes Secret and read admin credentials from the cluster. `false` = local state file, credentials must be passed explicitly.                   |
+| `config_path`             | string | `"~/.kube/config"`   | Path to the kubeconfig; only used when `use_kubernetes = true`                                                                                                       |
+| `keycloak_admin_secret`   | string | `"authserver-admin"` | Name of the Secret holding the Keycloak admin credentials                                                                                                            |
+| `keycloak_username`       | string | `""`                 | Keycloak admin username. Ephemeral, required in both modes. Set via `TF_VAR_keycloak_username` — never in a tfvars file.                                             |
+| `keycloak_password`       | string | `""`                 | Keycloak admin password. Ephemeral, required in both modes. Set via `TF_VAR_keycloak_password` — never in a tfvars file.                                             |
+| `insecure_tls`            | bool   | `false`              | Skip TLS verification — enable for self-signed certificates (e.g. local KIND)                                                                                        |
+| `skip_external_resources` | bool   | `false`              | Skip the external scripts that would otherwise run on `terraform plan`                                                                                               |
+
+#### Scopes and audience
+
+| Variable              | Type         | Default      | Description                                                                                                                                              |
+|-----------------------|--------------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `audience_scope_name` | string       | **required** | Name of the audience scope. It carries the protocol mappers that inject the claims the PEP validates — see the note below.                               |
+| `audience`            | string       | `""`         | Explicit audience value for the mappers. Empty derives it from `keycloak_url` (minus `/auth`). Required when `keycloak_url` points at an admin hostname. |
+| `pdp_scopes`          | list(string) | `[]`         | Additional PDP scopes, created as realm optional scopes. They carry **no** claim mapper, so they cannot replace the audience scope.                      |
+
+#### Identity providers
+
+| Variable                      | Type   | Default        | Description                                                                                                                                                                                                                                                    |
+|-------------------------------|--------|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `smc_b_client_secret`         | string | `"**********"` | Client secret of the SMC-B identity provider. Ephemeral, written through the provider's write-only argument — not persisted in the state.                                                                                                                      |
+| `smc_b_client_secret_version` | number | `1`            | Increment whenever `smc_b_client_secret` changes. A write-only argument is invisible to Terraform after the apply, so a changed secret alone produces no diff.                                                                                                 |
+| `enable_sekidp`               | bool   | `false`        | Register the `zeta-sekidp-oidc` IdP, the mobile browser/first-login flows, the entity-statement keys and the email-binding scopes                                                                                                                              |
+| `sekidp_fedmaster_url`        | string | `""`           | Fedmaster URL the IdP uses to resolve federation trust. Must be the externally reachable Ingress URL (e.g. `https://<host>/sekidp-fedmaster`) matching `sekidp.fedmaster.env.serverUrl` and Fedmaster's own published issuer — not the in-cluster Service URL. |
+
+#### Fake sekIdP test realm
+
+> **NEVER USE IN PRODUCTION.** These create a minimal fake sekIdP realm for
+> local
+> testing only.
+
+| Variable                                    | Type   | Default | Description                            |
+|---------------------------------------------|--------|---------|----------------------------------------|
+| `use_fake_sekidp_testrealm`                 | bool   | `false` | Create the fake sekIdP realm           |
+| `dummy_client_for_fake_sekidp_clientsecret` | string | `""`    | Client secret of the dummy test client |
+| `dummy_user_for_fake_sekidp_password`       | string | `""`    | Password of the dummy test user        |
+
+#### Email binding (OTP delivery)
+
+| Variable    | Type   | Default | Description                                                                                                 |
+|-------------|--------|---------|-------------------------------------------------------------------------------------------------------------|
+| `smtp_host` | string | `""`    | SMTP host for the realm's `smtpServer` config (e.g. MailCatcher). Empty omits the block entirely.           |
+| `smtp_port` | string | `"25"`  | SMTP port                                                                                                   |
+| `smtp_from` | string | `""`    | Sender address. Required by Keycloak whenever `smtp_host` is set — a missing or invalid `from` is rejected. |
+
+#### Notification Service
+
+Both must match the Helm chart values; they are not wired together.
+
+| Variable                               | Type   | Default                   | Description                                                                                                                                                                                                                            |
+|----------------------------------------|--------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `notification_service_resource_suffix` | string | `"/notification-service"` | Path suffix appended to the Guard's public base URL to form the Notification Service's resource identifier (`aud`). Must match `notificationService.wellKnownResourceSuffix`; a mismatch breaks token validation. Must start with `/`. |
+| `notification_history_enabled`         | bool   | `false`                   | Whether the history feature (A_29974) is enabled. When `true`, the `notification.history.read` scope is created. Must match `notificationService.historyEnabled`.                                                                      |
+
+#### HSM-backed token signing
+
+See [HSM Token Signing](#hsm-token-signing) for the full procedure.
+
+| Variable                                 | Type   | Default | Description                                                        |
+|------------------------------------------|--------|---------|--------------------------------------------------------------------|
+| `hsm_token_signing_enabled`              | bool   | `false` | Register an HSM-backed ES256 KeyProvider in the `zeta-guard` realm |
+| `hsm_token_signing_endpoint`             | string | `""`    | gRPC endpoint of the HSM Proxy (e.g. `hsm-sim:50051`)              |
+| `hsm_token_signing_key_id`               | string | `""`    | Identifier of the signing key in the HSM                           |
+| `hsm_token_signing_priority`             | string | `"200"` | Provider priority; higher wins (software keys sit at `100`)        |
+| `hsm_token_signing_remove_software_keys` | bool   | `true`  | Remove software signing keys after the HSM key is registered       |
+
+#### VAU database encryption
+
+| Variable         | Type | Default | Description                                                                                                                |
+|------------------|------|---------|----------------------------------------------------------------------------------------------------------------------------|
+| `use_vau_db_enc` | bool | `false` | Apply client-side encryption to this realm. Recommended only when running in a trusted execution environment (German VAU). |
+
+### Validations
 
 The following validations are enforced:
 
+- `keycloak_namespace`, `keycloak_url` and `audience_scope_name` are required
+  and have no default — an apply without them fails
 - `keycloak_namespace` must be a valid Kubernetes namespace name
 - `keycloak_url` must start with `http://` or `https://`
 - `audience` must be empty or start with `http://` or `https://`
@@ -107,13 +278,12 @@ The following validations are enforced:
   colons, periods, or hyphens
 - `audience_scope_name` may only contain alphanumeric characters, underscores,
   colons, periods, or hyphens
-- When `use_kubernetes = false`, both `keycloak_username` and
-  `keycloak_password` must be set
+- `keycloak_username` and `keycloak_password` must both be non-empty, in both
+  modes
 
 > **Important — the audience scope carries the access-token claims the PEP
 requires.**
-> The scope named by `audience_scope_name` (default `zero:audience`) carries the
-> protocol
+> The scope named by `audience_scope_name` carries the protocol
 > mappers that inject the claims the PEP validates on every request: `aud`,
 > `profession_oid`,
 > `client_id`, `ip_address`, `product_id`, `product_version`, `common_name`,
@@ -126,8 +296,8 @@ requires.**
 > token lacks those
 > claims and the PEP rejects the request (e.g. `missing field 'aud'`) before any
 > policy is
-> evaluated. Note that setting `audience_scope_name` replaces the default
-> `zero:audience` scope.
+> evaluated. Exactly one audience scope exists per realm — the name you set here
+> is the only one created.
 
 ---
 
@@ -135,25 +305,34 @@ requires.**
 
 ### Kubernetes mode (default)
 
-```shell
-# Set the Keycloak admin password (optional if stored in K8s Secret)
-export TF_VAR_keycloak_password=your_password
+`make config` resolves the credentials from the `authserver-admin` Secret via
+`scripts/kc-admin-env.sh`, so nothing needs exporting:
 
-# Configure the authserver
+```shell
 make config stage=demo
 ```
 
-If the Keycloak admin password is stored in the K8s Secret `authserver-admin`,
-you can omit `TF_VAR_keycloak_password` entirely:
+Running terraform directly, source the same script first:
 
 ```shell
+cd terraform/authserver
+. scripts/kc-admin-env.sh zeta-demo
+terraform apply -var-file=../../<values-dir>/demo.tfvars -auto-approve
+```
+
+To use a different password than the one in the Secret, export **both**
+variables — the resolver only prefers them over the Secret when both are set:
+
+```shell
+export TF_VAR_keycloak_username=admin TF_VAR_keycloak_password=your_password
 make config stage=demo
 ```
 
 ### Local mode
 
 ```shell
-# Required: set credentials
+# Required: both credentials, no cluster fallback exists
+export TF_VAR_keycloak_username=admin
 export TF_VAR_keycloak_password=your_password
 
 # Run without Kubernetes backend
@@ -181,8 +360,9 @@ make config-plan stage=demo
 
 The configuration targets perform the following steps:
 
-1. **`generate-main-and-backend`** generates `main.tf`, `providers.tf`, and the
-   backend configuration file from templates, based on `TF_VAR_use_kubernetes`:
+1. **`generate-main-and-backend`** generates `main.tf`, `providers.tf`,
+   `mode-assert.tf`, the backend configuration file and — in Kubernetes mode
+   only — `sekidp-secret.tf`, from templates, based on `TF_VAR_use_kubernetes`:
 
 - `true`: uses `backend "kubernetes"` with state stored in a K8s Secret;
   includes the `hashicorp/kubernetes` required provider and
@@ -194,15 +374,19 @@ The configuration targets perform the following steps:
 2. **`config-init`** runs the generator and initializes the Terraform backend
 3. **`config`** runs `config-init`, then applies the Terraform configuration
 4. **`config-plan`** runs `config-init`, then plans without applying
-5. **`config-import`** imports existing resources not yet managed by Terraform
+5. **`config-import`** imports the existing `zeta-guard` realm into the state.
+   It is the first step when the state was lost — the remaining objects need
+   Keycloak UUIDs resolved at runtime, listed in
+   [How to upgrade ZETA Guard](How_to_upgrade_ZETA_Guard.md)
 
 Key Makefile variables:
 
-| Variable                   | Default          | Description                        |
-|----------------------------|------------------|------------------------------------|
-| `TF_VAR_use_kubernetes`    | `true`           | Toggle Kubernetes vs. local mode   |
-| `TF_VAR_config_path`       | `~/.kube/config` | Path to kubeconfig (K8s mode only) |
-| `TF_VAR_keycloak_password` | *(empty)*        | Keycloak admin password            |
+| Variable                   | Default          | Description                                                                              |
+|----------------------------|------------------|------------------------------------------------------------------------------------------|
+| `TF_VAR_use_kubernetes`    | `true`           | Toggle Kubernetes vs. local mode                                                         |
+| `TF_VAR_config_path`       | `~/.kube/config` | Path to kubeconfig (K8s mode only)                                                       |
+| `TF_VAR_keycloak_username` | *(empty)*        | Keycloak admin username. Filled from the Secret by `scripts/kc-admin-env.sh` when unset. |
+| `TF_VAR_keycloak_password` | *(empty)*        | Keycloak admin password. Filled from the Secret by `scripts/kc-admin-env.sh` when unset. |
 
 ---
 
@@ -212,18 +396,20 @@ Key Makefile variables:
 
 The pipeline uses Kubernetes mode by default. Required CI/CD variables:
 
-| Variable                   | Required | Description                                        |
-|----------------------------|----------|----------------------------------------------------|
-| `TF_VAR_config_path`       | Yes      | Path to the kubeconfig file on the runner          |
-| `TF_VAR_keycloak_password` | No       | Override password (otherwise read from K8s Secret) |
-| `KUBECONFIG_B64`           | Yes      | Base64-encoded kubeconfig for cluster access       |
+| Variable                   | Required | Description                                                              |
+|----------------------------|----------|--------------------------------------------------------------------------|
+| `TF_VAR_config_path`       | Yes      | Path to the kubeconfig file on the runner                                |
+| `TF_VAR_keycloak_password` | No       | Overrides the K8s Secret — only together with `TF_VAR_keycloak_username` |
+| `TF_VAR_keycloak_username` | No       | See above; the pipeline defaults it to `admin`                           |
+| `KUBECONFIG_B64`           | Yes      | Base64-encoded kubeconfig for cluster access                             |
 
 The pipeline stages `config` and `config-plan` rely on:
 
 - The runner having `terraform`, `curl`, and `jq` available
 - Network connectivity from the runner to the Keycloak endpoint
 - A valid kubeconfig with permissions to read Secrets and manage the TF state
-  Secret
+  Secret. `scripts/kc-admin-env.sh` reads `authserver-admin` with `kubectl`, so
+  that permission is needed even though Terraform itself no longer reads it.
 
 ### CI/CD with local mode
 
@@ -254,7 +440,9 @@ No additional tools (openssl, keytool, Java) are required.
     - In K8s mode: confirm the admin password is present in the cluster secret
       (`kubectl get secret authserver-admin -n <namespace> -o yaml`). The secret
       should contain base64-encoded `username` and `password` fields.
-    - In local mode: ensure `TF_VAR_keycloak_password` is set.
+  - Ensure `TF_VAR_keycloak_username` and `TF_VAR_keycloak_password` are both
+    set — source `scripts/kc-admin-env.sh <namespace>` to fill them from the
+    Secret. A missing value fails the run with a variable validation error.
     - If you encounter TLS certificate errors (`x509: certificate signed by unknown
     authority` or `PKIX path validation failed`), set `insecure_tls = true` in
       the
@@ -264,6 +452,21 @@ No additional tools (openssl, keytool, Java) are required.
 - **State conflicts in local mode:** If switching between K8s and local mode,
   run
   `make clean` first to remove the old backend state and re-initialize.
+- **`409 Conflict` / `400 Bad Request` on apply against a realm that already
+  exists** (`Client Scope … already exists`, `Identity Provider … already
+  exists`, `proposed client profile name duplicated`): the objects are live but
+  the state is empty, so Terraform tries to create them. Adopt them instead of
+  reinstalling — see
+  [How to upgrade ZETA Guard](How_to_upgrade_ZETA_Guard.md). No user data is at
+  risk; Terraform does not manage users or DCR-registered clients.
+- **`Error: Invalid for_each argument … will be known only after apply` during
+  `terraform import`:** `terraform import` treats resources absent from the
+  state
+  as unknown, so a `for_each` keyed on another resource aborts the run. Fixed in
+  the current chart (the notification mappers key off
+  `local.notification_scope_names`); on an older one, upgrade the Terraform
+  files
+  before adopting. `plan` and `apply` are unaffected.
 
 ---
 
@@ -279,8 +482,16 @@ No additional tools (openssl, keytool, Java) are required.
   not be edited manually (both gitignored).
 - The Makefile and Terraform configurations are designed for seamless CI/CD
   integration.
-- In some cases when starting from scratch, deleting the Terraform state may be
-  required.
+- **The state is configuration, not data.** Terraform owns realm configuration
+  only — users and DCR-registered clients live in the PostgreSQL database and
+  are
+  never touched by an apply. The state Secret carries no Helm ownership, so it
+  survives `helm upgrade` and `helm uninstall`; only `make uninstall` deletes
+  it,
+  together with the database. Deleting the state is not an upgrade step: to
+  carry
+  an existing installation forward, or to recover a lost state, follow
+  [How to upgrade ZETA Guard](How_to_upgrade_ZETA_Guard.md).
 
 ---
 
@@ -732,7 +943,7 @@ registered at startup, but the KeyProvider component is not yet active.
 Add to the stage tfvars:
 
 ```hcl
-# private/<stage>.tfvars
+# <values-dir>/<stage>.tfvars, e.g. local-test/local.tfvars
 hsm_token_signing_enabled  = true
 hsm_token_signing_endpoint = "hsm-sim:50051"
 hsm_token_signing_key_id   = "zeta-guard-keycloak-token-es256-v1.p256"
@@ -762,13 +973,8 @@ Set `hsm_token_signing_enabled = false` in tfvars and run `make config` again.
 
 ### Terraform variables
 
-| Variable                                 | Description                                         | Default |
-|------------------------------------------|-----------------------------------------------------|---------|
-| `hsm_token_signing_enabled`              | Register HSM-backed ES256 KeyProvider               | `false` |
-| `hsm_token_signing_endpoint`             | gRPC endpoint of the HSM Proxy                      | `""`    |
-| `hsm_token_signing_key_id`               | Identifier of the signing key in the HSM            | `""`    |
-| `hsm_token_signing_priority`             | Provider priority (higher wins)                     | `"200"` |
-| `hsm_token_signing_remove_software_keys` | Remove software signing keys after HSM registration | `true`  |
+See [HSM-backed token signing](#hsm-backed-token-signing) in the complete
+variable reference.
 
 ---
 
@@ -812,6 +1018,7 @@ disabled entirely (test environments only).
 
 ## Related Resources
 
+- [How to upgrade ZETA Guard](How_to_upgrade_ZETA_Guard.md)
 - [Terraform Kubernetes Provider](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs)
 - [Terraform Keycloak Provider](https://registry.terraform.io/providers/keycloak/keycloak/latest/docs)
 - [Keycloak Admin REST API](https://www.keycloak.org/docs-api/latest/rest-api/index.html)

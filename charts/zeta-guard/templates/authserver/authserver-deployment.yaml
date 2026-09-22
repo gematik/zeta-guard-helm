@@ -367,7 +367,7 @@ spec:
                 -XX:+UseG1GC
                 -XX:MaxGCPauseMillis=200
                 {{- with .Values.global.noProxy }}
-                -Dhttp.nonProxyHosts={{ . | replace ",." ",*." | replace "," "|" }}
+                -Dhttp.nonProxyHosts={{ regexReplaceAll "(^|,)\\." . "${1}*." | replace "," "|" }}
                 {{- end }}
             {{- if .Values.authServerLogConsoleOutput | eq "json" }}
             - name: KC_LOG_CONSOLE_JSON_FORMAT
@@ -397,6 +397,11 @@ spec:
               value: "{{ .Values.authserver.provider.smcB.ocspConnectTimeoutMs }}"
             - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OCSP_READ_TIMEOUT_MS
               value: "{{ .Values.authserver.provider.smcB.ocspReadTimeoutMs }}"
+            # Fail-closed guard: also deny when the OCSP revocation status cannot be determined.
+            # Keep the quote — the provider parses strictly and treats anything but
+            # "true"/"false" as unset, falling back to fail-open.
+            - name: KC_SPI_TOKEN_EXCHANGE_PROVIDER_ZETA_SMC_B_TOKEN_EXCHANGE_OCSP_FAIL_CLOSED
+              value: {{ .Values.authserver.provider.smcB.ocspFailClosed | quote }}
             {{- if $sekidpMtlsOn }}
             - name: KC_SPI_IDENTITY_PROVIDER__ZETA_SEKIDP_OIDC__MTLS_ENABLED
               value: "true"

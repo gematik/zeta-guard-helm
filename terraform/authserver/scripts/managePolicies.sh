@@ -4,22 +4,20 @@ set -euo pipefail
 POLICY_NAME_ADD="𝛇-Guard user clients limit"
 REALM="zeta-guard"
 
-# input from terraform external data source
-input=$(cat)
-keycloak_url=$(echo "$input" | jq -r '.keycloak_url')
-insecure_tls=$(echo "$input" | jq -r '.insecure_tls // "false"')
-username=$(echo "$input" | jq -r '.username // "admin"')
-password=$(echo "$input" | jq -r '.password // ""')
-policy_names_delete=$(echo "$input" | jq -r '.delete_policies | fromjson')
-provider_id_add=$(echo "$input" | jq -r '.provider_id_add')
+# Query (stdin JSON): kc_url, kc_insecure, kc_namespace, kc_admin_secret,
+# delete_policies, provider_id_add.
+# Admin creds are deliberately NOT part of the query — it is stored in tfstate
+# and echoed in plan output. They are resolved at runtime by
+# kc-admin-credentials.sh instead.
+QUERY=$(cat)
+KC_URL=$(echo "$QUERY" | jq -r '.kc_url')
+KC_INSECURE=$(echo "$QUERY" | jq -r '.kc_insecure // "false"')
+KC_NAMESPACE=$(echo "$QUERY" | jq -r '.kc_namespace // ""')
+KC_ADMIN_SECRET=$(echo "$QUERY" | jq -r '.kc_admin_secret // ""')
+policy_names_delete=$(echo "$QUERY" | jq -r '.delete_policies | fromjson')
+provider_id_add=$(echo "$QUERY" | jq -r '.provider_id_add')
 
 results="{}"
-
-# curl options
-CURL_OPTS=("-s" "-f" "--retry" "3" "--retry-delay" "2")
-if [ "$insecure_tls" = "true" ]; then
-  CURL_OPTS+=("-k")
-fi
 
 # check required tools
 for cmd in curl jq; do
@@ -29,25 +27,26 @@ for cmd in curl jq; do
   fi
 done
 
-# get password
-if [ -z "$password" ]; then
-  if [ -n "${KEYCLOAK_PASSWORD:-}" ]; then
-    password="$KEYCLOAK_PASSWORD"
-  else
-    >&2 echo "No password provided! Set via tfvars, input, or KEYCLOAK_PASSWORD env."
-    exit 1
-  fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=kc-admin-credentials.sh
+source "${SCRIPT_DIR}/kc-admin-credentials.sh"
+resolve_kc_credentials
+
+# curl options
+CURL_OPTS=("-s" "-f" "--retry" "3" "--retry-delay" "2")
+if [ "$KC_INSECURE" = "true" ]; then
+  CURL_OPTS+=("-k")
 fi
 
 # authenticate against Keycloak and obtain access token
 TOKEN_RESPONSE=$(curl "${CURL_OPTS[@]}" \
   -X POST \
   -d "client_id=admin-cli" \
-  --data-urlencode "username=$username" \
-  --data-urlencode "password=$password" \
+  --data-urlencode "username=$KC_USERNAME" \
+  --data-urlencode "password=$KC_PASSWORD" \
   -d "grant_type=password" \
-  "$keycloak_url/realms/master/protocol/openid-connect/token" 2>&1) || {
-    >&2 echo "ERROR: Failed to authenticate against Keycloak at $keycloak_url"
+  "$KC_URL/realms/master/protocol/openid-connect/token" 2>&1) || {
+    >&2 echo "ERROR: Failed to authenticate against Keycloak at $KC_URL"
     >&2 echo "$TOKEN_RESPONSE"
     exit 1
   }
@@ -64,7 +63,7 @@ get_component_by_name() {
   local name="$1"
   curl "${CURL_OPTS[@]}" \
     --oauth2-bearer "$ACCESS_TOKEN" \
-    "$keycloak_url/admin/realms/$REALM/components?name=$(jq -rn --arg n "$name" '$n|@uri')&type=org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy" \
+    "$KC_URL/admin/realms/$REALM/components?name=$(jq -rn --arg n "$name" '$n|@uri')&type=org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy" \
     2>/dev/null || echo '[]'
 }
 
@@ -83,7 +82,7 @@ for (( i=0; i<policy_count_delete; i++ )); do
       curl "${CURL_OPTS[@]}" \
         -X DELETE \
         --oauth2-bearer "$ACCESS_TOKEN" \
-        "$keycloak_url/admin/realms/$REALM/components/$POLICY_ID_DELETE" 2>/dev/null
+        "$KC_URL/admin/realms/$REALM/components/$POLICY_ID_DELETE" 2>/dev/null
       result="Policy deleted successfully."
     else
       result="No policy found, skipping."
@@ -111,7 +110,7 @@ else
     -X POST \
     --oauth2-bearer "$ACCESS_TOKEN" \
     --json "$CREATE_PAYLOAD" \
-    "$keycloak_url/admin/realms/$REALM/components" 2>/dev/null
+    "$KC_URL/admin/realms/$REALM/components" 2>/dev/null
   result="Policy created successfully."
 fi
 

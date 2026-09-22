@@ -3,15 +3,13 @@ set -euo pipefail
 
 # Removes the zeta-hsm-token-signing KeyProvider component from a Keycloak realm.
 # Called by Terraform (hsm-token-signing.tf) on destroy.
-#
-# Required environment variables:
-#   KC_URL       — Keycloak base URL
-#   KC_REALM     — Target realm
-#   KC_USERNAME  — Admin username
-#   KC_PASSWORD  — Admin password
-#
-# Optional:
-#   KC_INSECURE  — "true" to skip TLS verification
+# Required env: KC_URL, KC_REALM. Optional: KC_INSECURE ("true" skips TLS verify).
+# Admin creds resolved by kc-admin-credentials.sh — never passed via tfstate.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=kc-admin-credentials.sh
+source "${SCRIPT_DIR}/kc-admin-credentials.sh"
+resolve_kc_credentials
 
 CURL_OPTS=(-s -f --retry 3 --retry-delay 2)
 if [[ "${KC_INSECURE:-false}" == "true" ]]; then

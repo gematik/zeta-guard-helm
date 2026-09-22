@@ -7,8 +7,8 @@
 
 # affected, medium(Red Hat): libc-bin, libc6 - glibc: glibc: Heap Buffer Overflow in `scanf` with `%mc` format specifier and...
 # function of scanf family is imported by e.g. postgres libraries and executables
-CVE-2026-5928 exp:2026-09-15
+CVE-2026-5450 exp:2026-10-15
 
 # affected, medium(Red Hat): libc-bin, libc6 - glibc: glibc: Information disclosure or denial of service via ungetwc function with...
 # function ungetwc is loaded dynamically by libstdc++ which is loaded by postgres and others
-CVE-2026-5928 exp:2026-09-15
+CVE-2026-5928 exp:2026-10-15

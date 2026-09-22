@@ -21,8 +21,8 @@ dependencies:
   # wins the name collision for BOTH instances, and the loser's values
   # (built from its own, different version's values.yaml/schema) get fed
   # into template code that doesn't match, causing nil-pointer template
-  # errors. See private/docs/How_to_fix_opentelemetry-collector_version_
-  # collision.md.
+  # errors. Keep this version in sync with the telemetry-gateway pin in
+  # charts/zeta-guard/Chart.yaml whenever either is raised.
   - name: opentelemetry-demo
     repository: oci://ghcr.io/open-telemetry/opentelemetry-helm-charts
     version: 0.41.0

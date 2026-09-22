@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
   "author": "Unknown Author",
-  "version": 7,
+  "version": 8,
   "statements": [
     {
       "vulnerability": {
@@ -284,8 +284,37 @@
       "status": "affected",
       "status_notes": "crypto/tls - DoS durch unbegrenzte KeyUpdate-Nachrichten (https://pkg.go.dev/vuln/GO-2026-6090). Die Anwendung nutzt mindestens eine der betroffenen Symbole. Serverseitig besteht kein Risiko: der HTTPS-Listener von OPA setzt ein per --tls-cert-file bereitgestelltes Zertifikat voraus (v1/server/server.go, getListenerForHTTPSServer). Der zeta-guard startet OPA ohne TLS-Flags, die TLS-Terminierung erfolgt am Ingress bzw. im PEP. crypto/tls wird ausschließlich in der Client-Rolle gegenüber fest konfigurierten, TLS-authentifizierten Endpunkten genutzt (OCI-Bundle-Registry über HTTPS). Ein Angreifer müsste diese Gegenstelle kontrollieren, um unbegrenzt Post-Handshake-Nachrichten zu senden. Die govulncheck-Traces #3 (Conn.Read über io.ReadAll) und #4 (Conn.Write über fmt.Fprintf) sind Interface-Überapproximationen und stellen keine realen Aufrufpfade dar. Da der einzige Endpunkt, der die Schwachstelle ausnutzen kann, die OCI-Bundle-Registry der gematik ist, wurde der auf der öffentlichen Schwachstellenmeldung (https://nvd.nist.gov/vuln/detail/CVE-2026-56862) basierende CVSS3.1-Vektor über 'Environmental Score Metrics' angepasst (Attack Complexity: High). Außerdem wurden 'Temporal Score Metrics' gesetzt'. Der resultierende CVSS3.1-Score ist Medium. CVSS3.1-Vektor: AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:F/RL:O/RC:C/CR:X/IR:X/AR:X/MAV:X/MAC:H/MPR:X/MUI:X/MS:X/MC:X/MI:X/MA:X",
       "timestamp": "2026-08-17T16:30:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56854",
+        "aliases": [
+          "GO-2026-6303"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft das Symbol 'NewServerConn' im Paket 'golang.org/x/crypto/ssh'. Dieses Symbol wird in opa-1.18.2 und opa-1.19.0 nicht verwendet. Verifiziert mit dem Tool govulncheck des Go-Entwicklungsteams gegen die OPA-Codebasis.",
+      "timestamp": "2026-09-03T15:29:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84304"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "CVE-2026-84304 beschreibt eine Heap Memory Exhaustion (OOM) via HTTP/2 DATA Frame Fragmentation in gRPC-Go (internal/transport). Die Schwachstelle beschreibt einen Angriff gegen einen gRPC-Server. OPA lauscht ausschließlich auf der REST/HTTP-API :8181. Das gRPC-Server-Plugin envoy (:9191) ist nicht aktiv, ein gRPC-Server existiert nicht. grpc-go wird ausschließlich als ausgehender OTLP-Trace-Client zu einem vertrauenswürdigen Collector verwendet. Der verwundbare Code-Pfad liegt damit nicht im erreichbaren Ausführungspfad.",
+      "timestamp": "2026-09-03T15:29:00Z"
     }
   ],
   "timestamp": "2026-07-24T11:22:00Z",
-  "last_updated": "2026-08-19T09:00:00Z"
+  "last_updated": "2026-09-03T15:29:00Z"
 }

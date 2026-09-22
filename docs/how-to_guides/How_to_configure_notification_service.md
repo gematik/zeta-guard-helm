@@ -65,6 +65,13 @@ annotated `helm.sh/resource-policy: keep` so a failed upgrade/rollback never dro
 service or switching to `db.mode: external` orphans the Cluster and PVC — delete them (or run `make
 uninstall`) before re-enabling, otherwise a database with a possibly stale schema gets adopted.
 
+Since notification-service 1.3.2 the persistence layer is standard SQL and the database kind must be declared
+explicitly: `notificationService.db.kind` (default `postgresql`) is passed to the service as
+`NOTIFICATION_DATASOURCE_DB_KIND` — one of `postgresql`, `mariadb`, `mysql`, `mssql`, `oracle`. In
+`cloudnative` mode the kind must stay `postgresql` (the chart fails the render otherwise). To run against a
+different database, set `db.mode: external` plus a matching `db.kind`, `db.jdbcUrl` and `db.secretName`
+(username/password keys), and point `db.waitForDb.host`/`port` at it (or disable `waitForDb`).
+
 ## The bundled Push Gateway test chart
 
 `charts/push-gateway` is a thin, local/demo-only deployment of gematik's Push Gateway (upstream repo:

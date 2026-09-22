@@ -28,25 +28,25 @@ resource "terraform_data" "hsm_token_signing" {
     realm_id = keycloak_realm.zeta_realm.internal_id # changes on DB wipe → forces re-registration
   }
 
-  # Stored in state, accessible as self.output during destroy
+  # Stored in state (self.output during destroy). Deliberately holds NO
+  # credentials — anything here is cleartext in tfstate/plans. The destroy
+  # script re-reads admin creds at runtime (kc-admin-credentials.sh).
   input = {
-    kc_url      = var.keycloak_url
-    kc_realm    = keycloak_realm.zeta_realm.realm
-    kc_username = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username : data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
-    kc_password = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password : data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
-    kc_insecure = var.insecure_tls ? "true" : "false"
+    kc_url          = var.keycloak_url
+    kc_realm        = keycloak_realm.zeta_realm.realm
+    kc_insecure     = var.insecure_tls ? "true" : "false"
+    kc_namespace    = var.keycloak_namespace
+    kc_admin_secret = var.keycloak_admin_secret
   }
 
   provisioner "local-exec" {
     command = "${path.module}/scripts/configure-hsm-token-signing.sh"
 
     environment = {
-      KC_URL   = var.keycloak_url
-      KC_REALM = keycloak_realm.zeta_realm.realm
-      KC_USERNAME = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username :
-      data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
-      KC_PASSWORD = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password :
-      data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
+      KC_URL       = var.keycloak_url
+      KC_REALM     = keycloak_realm.zeta_realm.realm
+      KC_USERNAME  = var.keycloak_username
+      KC_PASSWORD  = var.keycloak_password
       KC_INSECURE  = var.insecure_tls ? "true" : "false"
       HSM_ENDPOINT = var.hsm_token_signing_endpoint
       HSM_KEY_ID   = var.hsm_token_signing_key_id
@@ -58,12 +58,20 @@ resource "terraform_data" "hsm_token_signing" {
     when    = destroy
     command = "${path.module}/scripts/remove-hsm-token-signing.sh"
 
+    # Only non-sensitive values from self.output — the script resolves the
+    # admin credentials itself from KC_ADMIN_SECRET in KC_NAMESPACE.
+    # try() tolerates state written by the older shape (kc_username/kc_password
+    # instead of kc_namespace/kc_admin_secret): during a replace the destroy
+    # provisioner reads self from the *pre-existing* state, so both shapes must
+    # resolve. kc-admin-credentials.sh accepts whichever pair is non-empty.
     environment = {
-      KC_URL      = self.output.kc_url
-      KC_REALM    = self.output.kc_realm
-      KC_USERNAME = self.output.kc_username
-      KC_PASSWORD = self.output.kc_password
-      KC_INSECURE = self.output.kc_insecure
+      KC_URL          = self.output.kc_url
+      KC_REALM        = self.output.kc_realm
+      KC_INSECURE     = self.output.kc_insecure
+      KC_NAMESPACE    = try(self.output.kc_namespace, "")
+      KC_ADMIN_SECRET = try(self.output.kc_admin_secret, "")
+      KC_USERNAME     = try(self.output.kc_username, "")
+      KC_PASSWORD     = try(self.output.kc_password, "")
     }
   }
 
@@ -85,8 +93,8 @@ resource "terraform_data" "hsm_remove_software_keys" {
     environment = {
       KC_URL      = var.keycloak_url
       KC_REALM    = keycloak_realm.zeta_realm.realm
-      KC_USERNAME = var.use_kubernetes ? (var.keycloak_username != "" ? var.keycloak_username : data.kubernetes_secret_v1.keycloak_admin[0].data["username"]) : var.keycloak_username
-      KC_PASSWORD = var.use_kubernetes ? (var.keycloak_password != "" ? var.keycloak_password : data.kubernetes_secret_v1.keycloak_admin[0].data["password"]) : var.keycloak_password
+      KC_USERNAME = var.keycloak_username
+      KC_PASSWORD = var.keycloak_password
       KC_INSECURE = var.insecure_tls ? "true" : "false"
     }
   }

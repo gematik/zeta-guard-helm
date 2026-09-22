@@ -2,6 +2,21 @@
 # separate public audience is configured (stages where both hostnames match).
 locals {
   guard_public_url = var.audience != "" ? var.audience : trimsuffix(var.keycloak_url, "/auth")
+
+  # The names live here rather than in the resource's own for_each: `terraform
+  # import` evaluates resources absent from the state as unknown, so a for_each
+  # keyed on keycloak_openid_client_scope.notification_scopes aborts the whole
+  # run with "Invalid for_each argument" before importing anything. See
+  # docs/how-to_guides/How_to_upgrade_ZETA_Guard.md.
+  # A_29974: notification.history.read exists only when history is enabled, so
+  # tokens can't carry it (PEP /history/* then 403s). Must track
+  # notificationService.historyEnabled.
+  notification_scope_names = toset(concat([
+    "notification.pusher.read",
+    "notification.pusher.write",
+    "notification.channel.read",
+    "notification.channel.write",
+  ], var.notification_history_enabled ? ["notification.history.read"] : []))
 }
 
 resource "keycloak_openid_client_scope" "zero_audience" {
@@ -34,9 +49,9 @@ resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper" {
 }
 
 resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper_notification" {
-  for_each        = keycloak_openid_client_scope.notification_scopes
+  for_each        = local.notification_scope_names
   realm_id        = keycloak_realm.zeta_realm.id
-  client_scope_id = each.value.id
+  client_scope_id = keycloak_openid_client_scope.notification_scopes[each.key].id
   name            = "zeta-guard-mapper"
   protocol        = "openid-connect"
   protocol_mapper = "zeta-guard-accesstoken-mapper"
@@ -47,42 +62,8 @@ resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper_notification" {
   }
 }
 
-resource "keycloak_openid_client_scope" "zero_register" {
-  realm_id               = keycloak_realm.zeta_realm.id
-  name                   = "zero:register"
-  description            = "Zero Trust scope for service registration"
-  include_in_token_scope = true
-}
-
-resource "keycloak_openid_client_scope" "zero_manage" {
-  realm_id               = keycloak_realm.zeta_realm.id
-  name                   = "zero:manage"
-  description            = "Zero Trust scope for policy and trust management"
-  include_in_token_scope = true
-}
-
-# Authorization-server-self audience — zero:register/zero:manage call the AS's
-# own DCR / policy-and-trust endpoints, so aud is the realm's issuer URL.
-resource "keycloak_openid_audience_protocol_mapper" "authorization_server_audience_mapper" {
-  for_each = {
-    register = keycloak_openid_client_scope.zero_register
-    manage   = keycloak_openid_client_scope.zero_manage
-  }
-  realm_id                 = keycloak_realm.zeta_realm.id
-  client_scope_id          = each.value.id
-  name                     = "authorization-server-audience-mapper"
-  included_custom_audience = "${local.guard_public_url}/auth/realms/${keycloak_realm.zeta_realm.realm}"
-}
-
-# A_29974: notification.history.read exists only when history is enabled, so tokens
-# can't carry it (PEP /history/* then 403s). Must track notificationService.historyEnabled.
 resource "keycloak_openid_client_scope" "notification_scopes" {
-  for_each = toset(concat([
-    "notification.pusher.read",
-    "notification.pusher.write",
-    "notification.channel.read",
-    "notification.channel.write",
-  ], var.notification_history_enabled ? ["notification.history.read"] : []))
+  for_each               = local.notification_scope_names
   realm_id               = keycloak_realm.zeta_realm.id
   name                   = each.key
   description            = "A_29979: Notification Service scope '${each.key}'"
@@ -92,9 +73,9 @@ resource "keycloak_openid_client_scope" "notification_scopes" {
 # Notification Service audience (A_29979) — Guard's public base URL + NS path
 # prefix (pepproxy.wellKnownBase + notificationService.wellKnownResourceSuffix).
 resource "keycloak_openid_audience_protocol_mapper" "notification_service_audience_mapper" {
-  for_each                 = keycloak_openid_client_scope.notification_scopes
+  for_each                 = local.notification_scope_names
   realm_id                 = keycloak_realm.zeta_realm.id
-  client_scope_id          = each.value.id
+  client_scope_id          = keycloak_openid_client_scope.notification_scopes[each.key].id
   name                     = "notification-service-audience-mapper"
   included_custom_audience = "${local.guard_public_url}${var.notification_service_resource_suffix}"
 }
@@ -111,19 +92,13 @@ resource "keycloak_realm_optional_client_scopes" "pdp_optional_scopes" {
   realm_id = keycloak_realm.zeta_realm.id
 
   optional_scopes = concat(
-    [
-      keycloak_openid_client_scope.zero_audience.name,
-      keycloak_openid_client_scope.zero_register.name,
-      keycloak_openid_client_scope.zero_manage.name
-    ],
+    [keycloak_openid_client_scope.zero_audience.name],
     [for scope in keycloak_openid_client_scope.notification_scopes : scope.name],
     [for scope in keycloak_openid_client_scope.pdp_scopes : scope.name]
   )
 
   depends_on = [
     keycloak_openid_client_scope.zero_audience,
-    keycloak_openid_client_scope.zero_register,
-    keycloak_openid_client_scope.zero_manage,
     keycloak_openid_client_scope.notification_scopes,
     keycloak_openid_client_scope.pdp_scopes
   ]

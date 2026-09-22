@@ -16,8 +16,12 @@
   quirk that its .Chart.Name is "telemetry-gateway", not "opentelemetry-
   collector", once it's consumed as an aliased dependency.
 
-  No storageClassName set -> uses the cluster's default StorageClass; a
-  stage needing a specific class means editing this template (none does).
+  accessModes and storageClassName come from values so an operator can match
+  their storage system without patching this template: ReadWriteOnce on block
+  storage, ReadWriteMany on a shared filesystem, and an explicit class when the
+  cluster default cannot be attached or cannot serve the requested modes. An
+  empty telemetryGatewaySendingQueuePVCStorageClass omits the field entirely,
+  which is what selects the cluster's default StorageClass.
 */}}
 {{- $telemetryGateway := index .Subcharts "telemetry-gateway" }}
 {{- if $telemetryGateway.Values.config.service.extensions | has "file_storage" }}
@@ -33,7 +37,10 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   accessModes:
-    - ReadWriteOnce
+    {{- .Values.telemetryGatewaySendingQueuePVCAccessModes | toYaml | nindent 4 }}
+  {{- with .Values.telemetryGatewaySendingQueuePVCStorageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
   resources:
     {{- .Values.telemetryGatewaySendingQueuePVCResources | toYaml | nindent 4 }}
 {{- end }}

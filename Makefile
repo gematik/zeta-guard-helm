@@ -48,7 +48,17 @@ DB_MODE ?= cloudnative
 TF_PATH := terraform/authserver
 TF_VAR_config_path ?= "~/.kube/config"
 TF_VAR_use_kubernetes ?= true
+# use_kubernetes has two consumers that must agree: generate-main-and-backend.sh
+# (which decides whether the kubernetes_* blocks are generated at all) and
+# Terraform itself. Terraform's -var-file wins over TF_VAR_* environment
+# variables, so when the stage tfvars sets use_kubernetes that value is the
+# authority and the generator has to follow it — otherwise the generated files
+# and var.use_kubernetes disagree and the check block in credentials.tf fires.
+# When the file does not set it, the exported env var below drives both.
+TF_VARS_USE_K8S := $(shell awk '$$1 == "use_kubernetes" && $$2 == "=" { v = $$3 } END { if (v == "true" || v == "false") print v }' $(TF_VARS) 2>/dev/null)
+USE_K8S := $(if $(TF_VARS_USE_K8S),$(TF_VARS_USE_K8S),$(TF_VAR_use_kubernetes))
 export TF_VAR_keycloak_password
+export TF_VAR_use_kubernetes
 # Plan file name shared by `config-plan` (writes it) and `config-show-plan` (renders it).
 # When set, `make config-plan PLAN_OUT=<file>` saves the plan so it can be reviewed later
 # via `make config-show-plan PLAN_OUT=<file>`. Empty (default) = no plan file is written.
@@ -384,7 +394,7 @@ deploy-debug: deps adopt-certificates ## Install/upgrade the release with debug 
 ### CONFIGURATION ###
 generate-main-and-backend: ## Generates main.tf and backend depending on k8s usage
 	cd terraform/authserver && \
-	STAGE=$(STAGE) NAMESPACE=$(NAMESPACE) TF_VAR_use_kubernetes=$(TF_VAR_use_kubernetes) TF_VAR_config_path=$(TF_VAR_config_path) \
+	STAGE=$(STAGE) NAMESPACE=$(NAMESPACE) TF_VAR_use_kubernetes=$(USE_K8S) TF_VAR_config_path=$(TF_VAR_config_path) \
 	./generate-main-and-backend.sh
 
 config-init: ## Run generate-main-and-backend and initialise terraform backend
@@ -398,7 +408,8 @@ config: ## Configure deployed authserver through terraform
 	# apply, retried: right after deploy the authserver may not serve the
 	# admin API yet. No sleep — one attempt takes seconds (state refresh)
 	# -parallelism=1: to avoid concurrently races (Hibernate StaleObjectStateException / HTTP 500)
-	@for i in 1 2 3 4 5; do \
+	@eval "$$(bash $(TF_PATH)/scripts/kc-admin-env.sh $(NAMESPACE))" && \
+	for i in 1 2 3 4 5; do \
 		terraform -chdir=$(TF_PATH) apply \
 			-parallelism=1 \
 			-var-file=../../$(TF_VARS) \
@@ -412,6 +423,7 @@ config-plan: ## List changes that would be made to the stage (by make config); s
 	# plan (list changes against current tf-state; skip external scripts).
 	# With PLAN_OUT=<file> the plan is also saved to a file, which `make config-show-plan PLAN_OUT=<file>` can render
 	# as a plain-text diff for review.
+	@eval "$$(bash $(TF_PATH)/scripts/kc-admin-env.sh $(NAMESPACE))" && \
 	terraform -chdir=$(TF_PATH) plan \
     	-var-file=../../$(TF_VARS) \
     	-var="skip_external_resources=true" \
@@ -421,14 +433,20 @@ config-show-plan: ## Render a plan file saved by config-plan as a plain-text dif
 	@test -n "$(strip $(PLAN_OUT))" || { echo "PLAN_OUT is required: first 'make config-plan PLAN_OUT=<file>', then 'make config-show-plan PLAN_OUT=<file>'"; exit 1; }
 	terraform -chdir=$(TF_PATH) show -no-color $(PLAN_OUT)
 
-config-import: ## For development and troubleshooting only - imports configuration not yet managed by terraform
+config-import: ## Adopt the existing realm into the terraform state; first step after state loss (see How_to_upgrade_ZETA_Guard.md)
 	$(MAKE) config-init
-	# import
-	terraform -chdir=$(TF_PATH) import \
-		  -var-file=../../$(TF_VARS) \
-		  -var="skip_external_resources=true" \
-		  keycloak_realm.pdp_realm zeta-guard \
-		  || echo "Realm not found or cannot be imported, will be created on apply";
+	# The realm is the only address with a trivial import ID (its name). Every
+	# other object needs a Keycloak UUID resolved at runtime - the upgrade guide
+	# lists those imports. An already-imported realm is not an error here; a
+	# genuine failure (wrong credentials, unknown address) is.
+	@if terraform -chdir=$(TF_PATH) state list 2>/dev/null | grep -qx 'keycloak_realm.zeta_realm'; then \
+		echo "make config-import: keycloak_realm.zeta_realm is already in the state, nothing to do"; \
+	else \
+		terraform -chdir=$(TF_PATH) import \
+			-var-file=../../$(TF_VARS) \
+			-var="skip_external_resources=true" \
+			keycloak_realm.zeta_realm zeta-guard; \
+	fi
 
 
 ### STATUS ###
@@ -491,7 +509,7 @@ uninstall: ## Uninstall the release from the namespace
 
 clean: ## Remove the generated rendered.yaml, terraform files and orphaned packaged subcharts
 	rm -f rendered.yaml
-	rm -rf $(TF_PATH)/.terraform $(TF_PATH)/terraform.tfstate* $(TF_PATH)/.terraform.lock.hcl $(TF_PATH)/main.tf $(TF_PATH)/providers.tf
+	rm -rf $(TF_PATH)/.terraform $(TF_PATH)/terraform.tfstate* $(TF_PATH)/.terraform.lock.hcl $(TF_PATH)/main.tf $(TF_PATH)/providers.tf $(TF_PATH)/mode-assert.tf $(TF_PATH)/credentials.tf $(TF_PATH)/sekidp-secret.tf
 	@find $(TF_PATH)/environments -type f -name '*.backend.hcl' ! -name 'demo.backend.hcl' -delete
 	@for tgz in charts/*.tgz; do \
 		[ -e "$$tgz" ] || continue; \

@@ -5,8 +5,11 @@ resource "keycloak_oidc_identity_provider" "smc_b" {
   provider_id  = "zeta-smc-b-oidc"
   enabled      = true
 
-  client_id                               = "smc-b-client"
-  client_secret                           = var.smc_b_client_secret
+  client_id = "smc-b-client"
+  # Write-only (Terraform >= 1.11): the value reaches Keycloak but is not
+  # persisted in the state. Bump smc_b_client_secret_version to push a change.
+  client_secret_wo                        = var.smc_b_client_secret
+  client_secret_wo_version                = var.smc_b_client_secret_version
   authorization_url                       = "${var.keycloak_url}/realms/zeta-guard/protocol/openid-connect/auth"
   token_url                               = "${var.keycloak_url}/realms/zeta-guard/protocol/openid-connect/token"
   accepts_prompt_none_forward_from_client = false
