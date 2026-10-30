@@ -2,12 +2,18 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.2.5
+
+### fixed:
+
+- bumped authserver version to 1.2.4 to include important security hotfix.
+
 ## Release 1.2.4
 
 ### fixed:
 
-- bumped pep version to 1.2.1
-
+- bumped pep version to include important security hotfix. (with thanks to
+  Machine Spirits UG)
 
 ## Release 1.2.3
 
