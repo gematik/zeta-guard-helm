@@ -93,7 +93,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 1.2.3
+    tag: 1.2.4
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
