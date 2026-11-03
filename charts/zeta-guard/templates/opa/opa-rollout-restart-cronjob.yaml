@@ -8,8 +8,14 @@ metadata:
 spec:
   timeZone: "Europe/Berlin"
   schedule: {{ .Values.opa.rolloutRestart.schedule | quote }}
+  # never overlap, never crawl for hours (a memory-starved kubectl saturates the node's OS disk)
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 300
       backoffLimit: {{ .Values.opa.rolloutRestart.backoffLimit | default 5 }}
       template:
         metadata:
@@ -27,19 +33,14 @@ spec:
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          securityContext:
-            seccompProfile:
-              type: RuntimeDefault
+          {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" dict) | nindent 10 }}
           serviceAccountName: {{ .Values.opa.rolloutRestart.serviceAccountName | default "opa-rollout-restart" }}
           restartPolicy: OnFailure
           containers:
             - name: opa-rollout-restart
               image: "{{ include "provisioningProcessor.image" . | trim }}"
               imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy | default "IfNotPresent" }}"
-              {{- with .Values.provisioningProcessor.containerSecurityContext }}
-              securityContext:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
+              {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.provisioningProcessor.containerSecurityContext) | nindent 14 }}
               {{- with .Values.opa.rolloutRestart.resources }}
               resources:
                 {{- toYaml . | nindent 16 }}
@@ -47,8 +48,8 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - >-
-                  kubectl rollout restart deployment/opa -n {{ .Release.Namespace }}
+                  kubectl --request-timeout=60s rollout restart deployment/opa -n {{ .Release.Namespace }}
                   {{- if .Values.opa.simulation.enabled }}
-                  && kubectl rollout restart deployment/opa-simulation -n {{ .Release.Namespace }}
+                  && kubectl --request-timeout=60s rollout restart deployment/opa-simulation -n {{ .Release.Namespace }}
                   {{- end }}
 {{- end }}

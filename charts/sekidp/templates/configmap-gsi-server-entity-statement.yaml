@@ -1,0 +1,10 @@
+{{- if .Values.gsiServer.entityStatementAboutRp }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sekidp-gsi-server-entity-statement-about-rp
+  labels:
+    {{- include "sekidp-gsi-server.labels" . | nindent 4 }}
+data:
+  entity-statement-about-rp.jwt: {{ .Values.gsiServer.entityStatementAboutRp | quote }}
+{{- end }}

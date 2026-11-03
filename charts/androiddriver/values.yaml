@@ -6,13 +6,30 @@ global:
 registry_name: ""
 
 image:
-  repository: testdriver-image
-  tag: 1.3.2
+  repository: android-testdriver-image
+  tag: 2.0.1
 imagePullPolicy: Always
 
-replicaCount: 1
-
 containerPort: 8080
+
+# Match the health endpoint served by the selected driver image.
+readinessPath: /androiddriver-api/health
+
+# Optional entrypoint override, for example to set a process limit before
+# exec'ing the image's entrypoint. An empty list uses the image's default.
+command: []
+
+# Start in writable storage instead of the image's /home/androidusr, which
+# may not be accessible when Kubernetes overrides the image's user ID.
+workingDir: /tmp
+
+# Direct KVM passthrough for local emulator testing. The node must already
+# have this character device. Enable explicitly alongside a privileged
+# containerSecurityContext and the device's GID in podSecurityContext.supplementalGroups.
+# This configuration requires a namespace that permits privileged pods/hostPath.
+kvm:
+  enabled: false
+  hostPath: /dev/kvm
 
 fachdienst_url: ""
 
@@ -33,27 +50,6 @@ ingressEnabled: true
 # Ingress settings (used when deploying a NIC minion Ingress for the test-driver)
 ingressClassName: "nginx"
 
-# Use nginx ingress controller for ingress
-nginxIngressEnabled: true
-
-# Use OpenShift ingress controller with tls; created routes will use https
-openshiftIngress:
-  enabled: false
-  certName: ""
-
-# Path to the PKCS12 keystore file containing the SMC-B certificate
-smcbCertificateFileName: ""
-
-# The SM-B keystore (PKCS12) Base64 encoded
-smcbCertificateB64: ""
-
-# Alias of the certificate within the PKCS12 keystore
-smcbCertificateAlias: ""
-
-# Authentication mode: OIDC or SMB (default: SMB)
-
-authMode: "SMB"
-
 # Issuer URL of the SekIDP the client authenticates against (OIDC `idp_iss` param)
 oidcIdpIss: ""
 
@@ -66,9 +62,18 @@ oidcBaseUri: ""
 # Test KVNR used to auto-fill the SekIDP login form in headless test runs
 oidcTestKvnr: ""
 
-serviceAccount:
-  create: true
-  name: testdriver
+# notifications push gateway
+pushGatewayUrl: ""
+
+# app_id sent at pusher registration- must match push-gateway receivingAppIds. Empty = firebase.projectId
+pusherAppId: ""
+
+# Firebase for push notifications. The values come from the project's google-services.json
+firebase:
+  appId: ""      # mobilesdk_app_id
+  apiKey: ""     # api_key[0].current_key (NOT a secret)
+  projectId: ""  # project_id
+  senderId: ""   # project_number
 
 resources: {}
 # resources:
@@ -78,11 +83,6 @@ resources: {}
 #   requests:
 #     cpu: "500m"
 #     memory: "512Mi"
-
-podDisruptionBudget:
-  enabled: false
-  # minAvailable: 1
-  # maxUnavailable: 1
 
 podSecurityContext:
   seccompProfile:

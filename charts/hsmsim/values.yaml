@@ -1,4 +1,6 @@
-global: {}
+global:
+  imagePullSecrets: []
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
 
 enabled: true
 registry_name: ""

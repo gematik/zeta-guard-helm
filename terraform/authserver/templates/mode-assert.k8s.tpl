@@ -2,8 +2,8 @@
 #
 # Generation is driven by the TF_VAR_use_kubernetes environment variable, while
 # var.use_kubernetes comes from the tfvars file. If the two disagree, the
-# generated files do not match the configuration (wrong backend, missing
-# kubernetes_* resources), which fails in confusing ways. Catch it explicitly.
+# generated files do not match the configuration (wrong backend), which fails
+# in confusing ways. Catch it explicitly.
 check "generated_mode_matches_variable" {
   assert {
     condition     = var.use_kubernetes

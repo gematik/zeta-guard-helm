@@ -11,9 +11,9 @@ metadata:
 spec:
   type: {{ default "ClusterIP" .Values.service.type }}
   {{- $svcType := default "ClusterIP" .Values.service.type }}
-{{- if .Values.global.enableDNSRedirect }}
-  clusterIP: {{ .Values.global.dns.tigerStaticClusterIP }}
-{{- end }}
+  {{- if .Values.global.enableDNSRedirect }}
+  clusterIP: {{ .Values.global.dns.tigerStaticClusterIP | quote }}
+  {{- end }}
   ports:
     - name: proxy-port
       port: {{ default 80 .Values.service.ports.proxy }}

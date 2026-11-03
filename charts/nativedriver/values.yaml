@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: nativedriver-image
-  tag: 1.3.2
+  tag: 2.0.1
 imagePullPolicy: Always
 
 containerPort: 8091
@@ -36,3 +36,13 @@ smcbCertificateB64: ""
 
 # Alias of the certificate within the PKCS12 keystore
 smcbCertificateAlias: ""
+
+# Authentication mode: OIDC or SMB (default: SMB)
+authMode: "SMB"
+
+# Required when authMode is OIDC.
+oidcIdpIss: ""
+oidcIdpAlias: ""
+oidcBaseUri: ""
+# Optional test KVNR for auto-filling headless logins.
+oidcTestKvnr: ""

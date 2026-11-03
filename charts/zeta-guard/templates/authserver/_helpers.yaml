@@ -10,6 +10,9 @@
   value: "/auth"
 - name: KC_METRICS_ENABLED
   value: {{ quote .Values.authServerMetricsEnabled }}
+# Log export and always-on sampling are deliberately not configurable: the authserver must send its
+# telemetry for all endpoints to the telemetry-gateway (gemSpec_ZETA A_27264, A_27492-01, A_26988), and
+# the security KPIs (A_25484-03) are derived from these logs. Sampling happens in the gateway only.
 - name: KC_TELEMETRY_LOGS_ENABLED
   value: "true"
 - name: KC_TRACING_ENABLED

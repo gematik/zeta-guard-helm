@@ -13,10 +13,18 @@ spec:
     metadata:
       labels:
         {{- include "push-gateway.labels" . | nindent 8 }}
-      {{- if .Values.devMode }}
+    {{- if or .Values.devMode .Values.firebaseCredentials.mount .Values.apnsCredentials.mount }}
       annotations:
+      {{- if .Values.devMode }}
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
       {{- end }}
+      {{- if .Values.firebaseCredentials.mount }}
+        checksum/firebase-sa: {{.Values.firebaseCredentials.serviceAccountJson | sha256sum}}
+      {{- end}}
+      {{- if .Values.apnsCredentials.mount }}
+        checksum/apns-key: {{.Values.apnsCredentials.authKeyP8 | sha256sum}}
+      {{- end}}
+    {{- end}}
     spec:
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ .Values.serviceAccount.name }}
@@ -112,6 +120,22 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          {{- if .Values.firebaseCredentials.mount }}
+            - name: firebase-sa
+              mountPath: /certs/firebase/sa.json
+              subPath: sa.json
+              readOnly: true
+          {{- end }}
+          {{- if .Values.apnsCredentials.mount}}
+            - name: apns-key
+              mountPath: /certs/apns/apns.p8
+              subPath: apns.p8
+              readOnly: true
+          {{- end}}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
@@ -140,3 +164,21 @@ spec:
             name: push-gateway-config
         - name: tmp
           emptyDir: { }
+      {{- if .Values.firebaseCredentials.mount }}
+        - name: firebase-sa
+          secret:
+            secretName: push-gateway-firebase
+            defaultMode: 0440
+            items:
+              - key: sa.json
+                path: sa.json
+      {{- end }}
+      {{- if .Values.apnsCredentials.mount}}
+        - name: apns-key
+          secret:
+            secretName: push-gateway-apns
+            defaultMode: 0440
+            items:
+              - key: apns.p8
+                path: apns.p8
+      {{- end}}

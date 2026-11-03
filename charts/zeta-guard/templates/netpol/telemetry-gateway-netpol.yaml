@@ -10,12 +10,26 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: opentelemetry-collector
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- include "telemetryGateway.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Egress
   egress:
     {{- include "zeta-guard.dnsEgressRule" . | nindent 4 }}
+    {{- if .Values.kpiMetricsPersistence.enabled }}
+    # ADR 0001: otlp_http/security_kpis exporter — pushes KPI counters to
+    # kpiPrometheus. Port is kpiPrometheus's pod containerPort (9090, via
+    # prometheus.port), not its Service's servicePort (80): kindnet
+    # evaluates egress NetworkPolicy after kube-proxy DNAT, so the
+    # post-DNAT destination is always the pod's own port (see this repo's
+    # NetworkPolicy — kindnet / KIND Gotchas notes).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "kpiPrometheus.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 9090
+          protocol: TCP
+    {{- end }}
     {{- $telemetry := .Values.networkPolicy.egress.telemetry.ipBlocks }}
     {{- $siem := .Values.networkPolicy.egress.siem.ipBlocks }}
     {{- $external := concat $telemetry $siem | uniq }}

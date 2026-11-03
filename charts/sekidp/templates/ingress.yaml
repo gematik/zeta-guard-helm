@@ -12,6 +12,13 @@ metadata:
   annotations:
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "minion"
+    {{- if not .Values.routeViaTigerProxy }}
+    # Direct routing: gsi-server and gsi-fedmaster serve at "/", so the
+    # /sekidp and /sekidp-fedmaster prefixes must be stripped here (the
+    # tiger-proxy route does that itself). Capture group 2 is the remainder.
+    nginx.org/path-regex: "case_insensitive"
+    nginx.org/rewrite-target: "/$2"
+    {{- end }}
     {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
@@ -28,26 +35,35 @@ spec:
       {{- end }}
       http:
         paths:
+          {{- if .Values.routeViaTigerProxy }}
           - path: /sekidp
             pathType: Prefix
             backend:
               service:
-                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}sekidp-gsi-server{{ end }}
+                name: tiger-proxy
                 port:
-                  {{- if .Values.routeViaTigerProxy }}
                   number: 80
-                  {{- else }}
-                  name: api
-                  {{- end }}
           - path: /sekidp-fedmaster
             pathType: Prefix
             backend:
               service:
-                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}sekidp-fedmaster{{ end }}
+                name: tiger-proxy
                 port:
-                  {{- if .Values.routeViaTigerProxy }}
                   number: 80
-                  {{- else }}
+          {{- else }}
+          - path: /sekidp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: sekidp-gsi-server
+                port:
                   name: api
-                  {{- end }}
+          - path: /sekidp-fedmaster(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: sekidp-fedmaster
+                port:
+                  name: api
+          {{- end }}
 {{- end }}

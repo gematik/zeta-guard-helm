@@ -24,6 +24,13 @@ resource "keycloak_openid_client_scope" "zero_audience" {
   name                   = var.audience_scope_name
   description            = "Zero Trust scope for audience mapper"
   include_in_token_scope = true
+
+  lifecycle {
+    precondition {
+      condition     = !contains(var.pdp_scopes, var.audience_scope_name)
+      error_message = "audience_scope_name must not also appear in pdp_scopes; both resources would try to create the same Keycloak client scope."
+    }
+  }
 }
 
 # Resource-server (Fachdienst) audience — matches pepproxy.nginxConf.requiredAudience
@@ -35,6 +42,16 @@ resource "keycloak_openid_audience_protocol_mapper" "pdp_audience_mapper" {
   included_custom_audience = local.guard_public_url
 }
 
+# introspection.token.claim / userinfo.token.claim are stated explicitly in both
+# mappers below, although Keycloak stores nothing for them by default. Keycloak
+# returns the *effective* values on read: with the keys absent,
+# OIDCAttributeMapperHelper.includeInIntrospection/includeInUserInfo fall back to
+# access.token.claim / id.token.claim, both "true" here. So every refresh read
+# them as "true", planned to remove them, the apply removed them from storage,
+# and the next read reported them again — a diff that never converged, on every
+# stage. Stating them matches what Keycloak already applies, so nothing changes
+# at runtime. The keycloak_openid_audience_protocol_mapper resources are typed
+# and manage no free-form config map, so they were never affected.
 resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper" {
   realm_id        = keycloak_realm.zeta_realm.id
   client_scope_id = keycloak_openid_client_scope.zero_audience.id
@@ -45,6 +62,9 @@ resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper" {
     "access.tokenResponse.claim" = "true"
     "access.token.claim"         = "true"
     "id.token.claim"             = "true"
+    # Both stated on purpose — see the note above this resource.
+    "introspection.token.claim" = "true"
+    "userinfo.token.claim"      = "true"
   }
 }
 
@@ -59,6 +79,9 @@ resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper_notification" {
     "access.tokenResponse.claim" = "true"
     "access.token.claim"         = "true"
     "id.token.claim"             = "true"
+    # Both stated on purpose — see the note above this resource.
+    "introspection.token.claim" = "true"
+    "userinfo.token.claim"      = "true"
   }
 }
 
@@ -107,9 +130,8 @@ resource "keycloak_realm_optional_client_scopes" "pdp_optional_scopes" {
 # ── Email-binding client scopes ──────────────────────────────────────────────
 # Scopes the reduced token is down-scoped to while email binding (F1) is
 # incomplete: zeta:email-binding (register email), zeta:email-verify (OTP).
-# Assigned as DEFAULT scopes to mobile clients during DCR by
-# ZetaGuardClientRegistrationPolicy (not optional scopes), so stationary
-# clients are unaffected.
+# Assigned as OPTIONAL client scopes to mobile clients during DCR by
+# ZetaGuardClientRegistrationPolicy.
 
 resource "keycloak_openid_client_scope" "zeta_email_binding" {
   realm_id               = keycloak_realm.zeta_realm.id
@@ -123,4 +145,71 @@ resource "keycloak_openid_client_scope" "zeta_email_verify" {
   name                   = "zeta:email-verify"
   description            = "ZETA reduced scope for resending/verifying the email OTP (I3)"
   include_in_token_scope = true
+}
+
+# The reduced binding token carries zeta:email-verify in both of its states (collect_email and
+# verify_otp). With the Guard audience and the claim mapper on this scope the token passes the PEP
+# like a regular access token, so the bind-email endpoints can be served behind the PEP as well.
+# Same pattern as zeta:client-management below.
+resource "keycloak_openid_audience_protocol_mapper" "zeta_email_verify_audience_mapper" {
+  realm_id                 = keycloak_realm.zeta_realm.id
+  client_scope_id          = keycloak_openid_client_scope.zeta_email_verify.id
+  name                     = "audience-mapper"
+  included_custom_audience = local.guard_public_url
+}
+
+resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper_email_verify" {
+  realm_id        = keycloak_realm.zeta_realm.id
+  client_scope_id = keycloak_openid_client_scope.zeta_email_verify.id
+  name            = "zeta-guard-mapper"
+  protocol        = "openid-connect"
+  protocol_mapper = "zeta-guard-accesstoken-mapper"
+  config = {
+    "access.tokenResponse.claim" = "true"
+    "access.token.claim"         = "true"
+    "id.token.claim"             = "true"
+    # Both stated on purpose — see the note above zeta_guard_mapper.
+    "introspection.token.claim" = "true"
+    "userinfo.token.claim"      = "true"
+  }
+}
+
+# ── Client-management client scope ───────────────────────────────────────────
+# Authorizes the PEP-protected endpoints a mobile client uses to list/delete the
+# clients of its identity and to change the identity's email. Assigned as an
+# OPTIONAL client scope to mobile clients during DCR by
+# ZetaGuardClientRegistrationPolicy — deliberately not a realm default, so
+# stationary (SMC-B) clients never carry it.
+# Carries its own copy of the claim mapper and the Guard audience (same pattern
+# as the notification scopes), so the token satisfies the PEP whether or not
+# audience_scope_name is requested alongside it.
+
+resource "keycloak_openid_client_scope" "zeta_client_management" {
+  realm_id               = keycloak_realm.zeta_realm.id
+  name                   = "zeta:client-management"
+  description            = "ZETA scope for managing the clients and email of the caller's identity"
+  include_in_token_scope = true
+}
+
+resource "keycloak_openid_audience_protocol_mapper" "zeta_client_management_audience_mapper" {
+  realm_id                 = keycloak_realm.zeta_realm.id
+  client_scope_id          = keycloak_openid_client_scope.zeta_client_management.id
+  name                     = "audience-mapper"
+  included_custom_audience = local.guard_public_url
+}
+
+resource "keycloak_generic_protocol_mapper" "zeta_guard_mapper_client_management" {
+  realm_id        = keycloak_realm.zeta_realm.id
+  client_scope_id = keycloak_openid_client_scope.zeta_client_management.id
+  name            = "zeta-guard-mapper"
+  protocol        = "openid-connect"
+  protocol_mapper = "zeta-guard-accesstoken-mapper"
+  config = {
+    "access.tokenResponse.claim" = "true"
+    "access.token.claim"         = "true"
+    "id.token.claim"             = "true"
+    # Both stated on purpose — see the note above zeta_guard_mapper.
+    "introspection.token.claim" = "true"
+    "userinfo.token.claim"      = "true"
+  }
 }

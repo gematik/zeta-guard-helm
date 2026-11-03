@@ -37,15 +37,28 @@ spec:
       {{- end }}
       http:
         paths:
+          {{- /* The RS API is internal only. Bypass Tiger's RS route on public ingress;
+               the PEP returns 404 for this prefix, including when the service is disabled. */}}
+          - path: /notification-service-rs
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
           {{- if and .Values.authserver.adminHostname (not .Values.routeViaTigerProxy) }}
-          {{- /* Admin REST API and console are denied here and reachable on
-               authserver.adminHostname instead. Routed to the PEP — which answers 403 (see
-               _pep-nginx-conf.tpl) — rather than denied via a NIC location-snippet, so the
-               block also holds for standard nginx-ingress, OpenShift Routes, GKE Ingress
-               and any other controller: plain Ingress path routing is all it relies on.
-               Wins over the /auth path of the zeta-guard-auth minion because both nginx
-               and the Ingress spec resolve overlapping prefixes longest-match-first,
-               independent of declaration order. */}}
+          {{- /* Admin REST API, console and the master realm are denied here and reachable
+               on authserver.adminHostname instead. The master realm goes with them: it
+               serves no ZETA traffic (that is the zeta-guard realm) and its token endpoint
+               is where an admin access token is minted — admin-cli direct grant, as every
+               terraform/authserver/scripts/*.sh does. Leaving it public would expose the
+               admin credential surface that blocking /auth/admin is meant to close.
+               Routed to the PEP — which answers 403 (see _pep-nginx-conf.tpl) — rather than
+               denied via a NIC location-snippet, so the block also holds for standard
+               nginx-ingress, OpenShift Routes, GKE Ingress and any other controller: plain
+               Ingress path routing is all it relies on. Both win over the /auth path of the
+               zeta-guard-auth minion because both nginx and the Ingress spec resolve
+               overlapping prefixes longest-match-first, independent of declaration order. */}}
           - path: /auth/admin
             pathType: Prefix
             backend:
@@ -53,7 +66,40 @@ spec:
                 name: pep-proxy-svc
                 port:
                   number: 80
+          - path: /auth/realms/master
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
           {{- end }}
+          {{- /* Client management is served on /zeta/* by the PEP; its authserver paths must not be
+               reachable via the /auth minion (zeta-client-data could be forged there). Routed to
+               the PEP, which answers 404 — like /auth/admin above, but on every stage. */}}
+          - path: /auth/realms/zeta-guard/zeta/clients
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
+          - path: /auth/realms/zeta-guard/zeta/identity/email
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
+          {{- /* E-mail binding of the registration (bind-email, /resend, /verify) via the PEP; the public
+               path stays (the SDK derives it from the issuer). On every stage, like the block above. */}}
+          - path: /auth/realms/zeta-guard/zeta/identity/bind-email
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.routeViaTigerProxy | ternary "tiger-proxy" "pep-proxy-svc" }}
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:

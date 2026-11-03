@@ -28,7 +28,28 @@ PEP).
 - Rollout trigger: `CHECKSUM_OPA` env var changes when policy/data/logging
   change, forcing a Deployment rollout.
 - Active bundle path: `zeta-guard.opa.bundle.resource` (typically `.../latest`).
-- Simulation bundle path: derived automatically from active (`.../latest` -> `.../latest-sim`).
+- Simulation bundle path: `zeta-guard.opa.simulation.bundle.resource`, set
+  explicitly (required in bundle mode, not derived from the active path).
+
+## Decision Log Reporting
+
+Remote decision logs are uploaded to the telemetry gateway every 60 seconds by
+default for both active and simulation OPA. Override the interval in environment
+values:
+
+```yaml
+zeta-guard:
+  opa:
+    decisionLogs:
+      reporting:
+        min_delay_seconds: 60
+        max_delay_seconds: 60
+```
+
+Both values must be positive integers, and the maximum must be at least the
+minimum. These settings apply when `telemetryGatewayEnabled` is true and are
+independent of `opa.bundle.polling`, which controls policy bundle downloads.
+The upload interval does not include downstream transport or indexing time.
 
 ## Simulation Settings
 
@@ -36,9 +57,19 @@ PEP).
   deploys `opa-simulation` Deployment/Service.
 - `zeta-guard.opa.simulation.replicaCount` (int, default: `1`):
   replica count for simulation Deployment.
-- `zeta-guard.opa.simulation.bundle.resource` (string, optional):
-  explicit simulation bundle resource. If empty, chart derives from active
-  `opa.bundle.resource` by appending `-sim`.
+- `zeta-guard.opa.simulation.bundle.resource` (string, required when
+  `opa.bundle.enabled` and `opa.simulation.enabled` are `true`): simulation
+  bundle resource. It is **not** derived from `opa.bundle.resource`: the
+  gematik PIP names simulation bundles differently per environment and does not
+  publish one for every product. Examples:
+    - TU: `.../zeta-policies-tu/vsdm-policy:latest` →
+      `.../zeta-policies-tu/vsdm-policy-sim:latest`
+    - PU: `.../gematik-pt-zeta-prod/zeta-policies/vsdm-policy:latest` →
+      `.../gematik-pt-zeta-prod/zeta-policies-sim/vsdm-policy:latest`
+
+  Rendering fails if it is empty. Where gematik publishes a simulation bundle,
+  never point this value at the production policies; where it does not, reuse
+  the active bundle or set `opa.simulation.enabled: false`.
 - `opa-simulation-config` is rendered only when simulation is enabled and
   either bundle mode or decision logging requires `opa.yaml`.
 
@@ -139,8 +170,8 @@ zeta-guard:
       enabled: true
       replicaCount: 1
       bundle:
-        # optional; when empty, active resource + "-sim" is used
-        resource: ""
+        # required in bundle mode; not derived from bundle.resource
+        resource: "<registry-host>/<path>/<simulation-bundle>:latest"
 ```
 
 Credentials via Secret (per namespace):
@@ -241,6 +272,9 @@ How it works
   into `opa`.
 - The schedule's timezone is fixed to `Europe/Berlin` (`spec.timeZone` on the
   CronJob), independent of the cluster's default timezone.
+- Runs never overlap (`concurrencyPolicy: Forbid`) and are capped at 5 minutes
+  (`activeDeadlineSeconds`); kubectl API calls time out after 60 s. A run that
+  is scheduled while the previous one is still active is skipped.
 - The container reuses `provisioningProcessor.image` (which includes
   `kubectl`) and `provisioningProcessor.containerSecurityContext`, instead of
   a separate, generic CI tooling image.

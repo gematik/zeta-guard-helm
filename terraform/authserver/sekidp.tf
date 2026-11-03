@@ -1,14 +1,17 @@
 # ── ZETA mobile client registration via SekIDP broker ─────────────────────────
 # Headless mobile onboarding: custom IdP plugin (zeta-sekidp-oidc) brokers login
-# to gematik's SekIDP via OIDC-Federation (through Fedmaster); the zeta-mobile
-# browser flow forces mobile DCR clients there, zeta-mobile-first-login skips the
-# profile-review page, and two scopes down-scope tokens until email binding (F1).
+# to a SekIDP.
+# The browser flow forces mobile DCR clients straight there. The
+# SekIDP plugin creates user + Federated Identity itself on first login (A_29671).
 # Mirrors keycloak-zeta's zeta-guard-realm.json + 13-15-*.sh as Terraform.
-# Activate: set enable_sekidp=true + sekidp_fedmaster_url in tfvars, make config.
+# Activate: set enable_sekidp=true in tfvars, make config.
+# fedmasterUrl is now provisioned via the provisioning-processor (federation-master.json),
+# not via Terraform — see provisioningProcessor.federationMaster in values.yaml.
 
 # ── Entity-statement signing key (ecdsa-generated, P-256) ────────────────────
-# Typed resource (provider supports this key type natively). The custom
-# SekIDPEntityStatementProvider plugin looks it up by name.
+# Typed resource (provider supports this key type natively).
+# ZetaGuardEntityStatementProvider signs the entity statement with the realm's
+# ACTIVE ES256 signing key (getActiveKey)
 
 resource "keycloak_realm_keystore_ecdsa_generated" "entity_statement_sig" {
   count              = var.enable_sekidp ? 1 : 0
@@ -22,29 +25,6 @@ resource "keycloak_realm_keystore_ecdsa_generated" "entity_statement_sig" {
   priority = 200
   enabled  = true
   active   = true
-}
-
-# ── Sync the entity-statement signing key's public half to gsi-fedmaster ────
-# The key's material only exists after `make config` creates the component, so
-# its pubkey/kid aren't known ahead of time. Read them via the Admin REST API
-# into a Secret gsi-fedmaster mounts at /public-keys, then restart it to pick up
-# the key. See docs/how-to_guides/How_to_configure_sekidp.md.
-
-data "external" "entity_statement_pubkey" {
-  count   = var.enable_sekidp ? 1 : 0
-  program = ["${path.module}/scripts/fetch-entity-statement-pubkey.sh"]
-  # No credentials in the query — it's stored in tfstate and echoed in plans.
-  # The program re-reads admin creds at runtime (kc-admin-credentials.sh) from
-  # kc_admin_secret in kc_namespace.
-  query = {
-    kc_url          = var.keycloak_url
-    kc_realm        = keycloak_realm.zeta_realm.realm
-    kc_insecure     = var.insecure_tls ? "true" : "false"
-    kc_namespace    = var.keycloak_namespace
-    kc_admin_secret = var.keycloak_admin_secret
-
-    key_provider_id = keycloak_realm_keystore_ecdsa_generated.entity_statement_sig[0].id
-  }
 }
 
 # ── Entity-statement encryption key (ecdh-generated, ECDH-ES) ────────────────
@@ -108,7 +88,7 @@ resource "terraform_data" "entity_statement_enc_key" {
 }
 
 # ── Disable VERIFY_PROFILE required action ───────────────────────────────────
-# Lets the headless first-broker-login flow skip the profile-review page.
+# Lets the headless mobile login complete without the profile-review page.
 # CAVEAT: realm-wide — disables profile verification for ALL zeta-guard logins.
 # CAVEAT: it's a built-in action; if apply errors "already exists", import first:
 #   terraform import 'keycloak_required_action.verify_profile_disabled[0]' zeta-guard/VERIFY_PROFILE
@@ -145,8 +125,10 @@ resource "keycloak_authentication_execution" "zeta_mobile_first_login" {
 
 # ── zeta-sekidp-oidc identity provider ───────────────────────────────────────
 # Custom SPI (not built-in "oidc") brokering login to SekIDP via OIDC-Federation
-# through Fedmaster. No client_secret: client_id is this realm's own issuer URL,
-# matching the authserver entry in sekidp.fedmaster.relyingPartyConfigs.
+# through Fedmaster. No client_secret: client_id is this realm's own issuer URL.
+# gsi-server validates this realm's PAR against the entity statement mounted via
+# sekidp.gsiServer.entityStatementAboutRp (GSI_FEDMASTER_MODE=local), so nothing
+# about this realm has to be registered at gsi-fedmaster.
 
 resource "keycloak_oidc_identity_provider" "zeta_sekidp_oidc" {
   count        = var.enable_sekidp ? 1 : 0
@@ -155,7 +137,7 @@ resource "keycloak_oidc_identity_provider" "zeta_sekidp_oidc" {
   display_name = "ZETA SekIDP (GesundheitsID)"
   provider_id  = "zeta-sekidp-oidc"
   enabled      = true
-  client_id    = "${var.keycloak_url}/realms/zeta-guard"
+  client_id    = var.sekidp_client_id != "" ? var.sekidp_client_id : "${var.keycloak_url}/realms/zeta-guard"
 
   # Required by the resource schema but unused by SekIDPIdentityProvider: it
   # resolves endpoints via Fedmaster and authenticates via the OIDC-Federation
@@ -174,33 +156,32 @@ resource "keycloak_oidc_identity_provider" "zeta_sekidp_oidc" {
   disable_user_info             = true
   validate_signature            = false
   sync_mode                     = "IMPORT"
-  default_scopes                = "urn:telematik:display_name urn:telematik:versicherter openid"
-  first_broker_login_flow_alias = keycloak_authentication_flow.zeta_mobile_first_login[0].alias
+  default_scopes                = "urn:telematik:display_name urn:telematik:versicherter urn:telematik:geburtsdatum openid"
+  first_broker_login_flow_alias = ""
 
   extra_config = {
     updateProfileFirstLoginMode = "off"
-    fedmasterUrl                = var.sekidp_fedmaster_url
     acrValues                   = "gematik-ehealth-loa-high"
     pkceEnabled                 = "true"
     pkceMethod                  = "S256"
     disableNonce                = "false"
   }
 
-  depends_on = [
-    keycloak_realm.zeta_realm,
-    keycloak_authentication_execution.zeta_mobile_first_login
-  ]
+  depends_on = [keycloak_realm.zeta_realm]
 }
 
-# ── zeta-mobile browser flow (Identity Provider Redirector) ─────────────────
+# ── zeta-mobile browser flow (SekIDP Direct Redirector) ─────────────────────
 # Assigned to mobile clients during DCR as a browserFlow override
 # (ZetaGuardClientRegistrationPolicy), enforcing the SekIDP redirect server-side.
+# sekidp-direct-redirector (keycloak-zeta sekidp plugin) redirects to
+# zeta-sekidp-oidc straight from the /authorize response instead of Keycloak's
+# stock identity-provider-redirector.
 
 resource "keycloak_authentication_flow" "zeta_mobile" {
   count       = var.enable_sekidp ? 1 : 0
   realm_id    = keycloak_realm.zeta_realm.realm
   alias       = "zeta-mobile"
-  description = "ZETA mobile: enforced redirect to the SekIDP (no login screen)"
+  description = "ZETA mobile: enforced redirect to the SekIDP"
   provider_id = "basic-flow"
 }
 
@@ -208,16 +189,8 @@ resource "keycloak_authentication_execution" "zeta_mobile" {
   count             = var.enable_sekidp ? 1 : 0
   realm_id          = keycloak_realm.zeta_realm.realm
   parent_flow_alias = keycloak_authentication_flow.zeta_mobile[0].alias
-  authenticator     = "identity-provider-redirector"
+  authenticator     = "sekidp-direct-redirector"
   requirement       = "REQUIRED"
-}
 
-resource "keycloak_authentication_execution_config" "zeta_mobile" {
-  count        = var.enable_sekidp ? 1 : 0
-  realm_id     = keycloak_realm.zeta_realm.realm
-  execution_id = keycloak_authentication_execution.zeta_mobile[0].id
-  alias        = "zeta-mobile-redirector"
-  config = {
-    defaultProvider = keycloak_oidc_identity_provider.zeta_sekidp_oidc[0].alias
-  }
+  depends_on = [keycloak_oidc_identity_provider.zeta_sekidp_oidc]
 }

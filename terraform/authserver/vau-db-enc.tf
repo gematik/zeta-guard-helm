@@ -40,8 +40,9 @@ resource "terraform_data" "vau_db_enc" {
     # realm.tf
     keycloak_realm.zeta_realm,
     keycloak_realm_client_policy_profile.zeta_client_policy_profile,
-    keycloak_realm_client_policy_profile_policy.zeta_client_policy_prod,
-    keycloak_realm_client_policy_profile_policy.zeta_client_policy_testonly,
+    keycloak_realm_client_policy_profile_policy.zeta_client_policy,
+    keycloak_realm_client_policy_profile.zeta_outer_par_validation,
+    keycloak_realm_client_policy_profile_policy.zeta_outer_par_validation,
     # scopes.tf
     keycloak_openid_client_scope.zero_audience,
     keycloak_openid_client_scope.pdp_scopes,
@@ -58,17 +59,5 @@ resource "terraform_data" "vau_db_enc" {
     # hsm-token-signing.tf
     terraform_data.hsm_token_signing,
     terraform_data.hsm_remove_software_keys,
-    # fakeSekIdp.tf (test realm + its IdP wiring into zeta-guard)
-    keycloak_realm.fake_sekidp_realm,
-    keycloak_authentication_flow.http_basic_auth,
-    keycloak_authentication_execution.http_basic_auth,
-    keycloak_authentication_bindings.browser,
-    keycloak_openid_client.fake_sekidp_client,
-    keycloak_user.sekidp_dummy_user,
-    keycloak_oidc_identity_provider.fake_sekidp_identity_provider,
-    keycloak_authentication_flow.idp_redirect,
-    keycloak_authentication_execution.idp_redirect,
-    keycloak_authentication_execution_config.idp_redirect,
-    keycloak_openid_client.dummy_client_for_sekidp_testing,
   ]
 }

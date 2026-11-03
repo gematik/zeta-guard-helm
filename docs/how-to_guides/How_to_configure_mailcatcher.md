@@ -63,6 +63,11 @@ instead of under `/mailcatcher`, missing the tiger-proxy route entirely and fall
 lives at `/` (typically 401s against the PEP proxy). Leave `httpPath` unset only if MailCatcher is reachable
 unprefixed (i.e. not proxied under a subpath).
 
+Without tiger-proxy, the chart can expose the web UI/API itself as a NIC mergeable minion on the shared
+ingress host (`mailcatcher.ingressEnabled: true`, plus `hostname`/`ingressClassName` matching zeta-guard's
+master). The Ingress routes `httpPath` as a prefix without rewriting, so `httpPath` is required. Do not combine
+it with a tiger-proxy `/mailcatcher` route — both would claim the same path.
+
 Only the web UI (port `1080`) is routed through tiger-proxy. **SMTP (port `1025`) is never routed through
 tiger-proxy** — tiger-proxy is a purely HTTP(S) reverse proxy (path-based `proxyRoutes`, RBEL HTTP-message
 capture; see `charts/tiger-proxy/values.yaml`), with no TCP-passthrough concept, so it structurally cannot carry
@@ -86,10 +91,33 @@ missing/invalid `from` address outright (`EmailException: Invalid sender address
 Terraform provider schema doesn't distinguish it from an optional-looking field at the values level. Any
 syntactically valid address works; MailCatcher doesn't validate the domain.
 
-If `zeta-guard.networkPolicy.enabled: true`, the consumer's own `*-netpol.yaml` will also need a new
-podSelector egress rule targeting the `mailcatcher` pod on port `1025`, following the shape already used for
-`authserver → tiger-proxy` in `charts/zeta-guard/templates/netpol/authserver-netpol.yaml` — not yet added, see
-[How to configure Egress NetworkPolicies](How_to_configure_NetworkPolicies.md).
+## Seeding the testdriver-oidc email mapping
+
+The testdriver-oidc chooses the address used by the OIDC `collect_email` flow. Its KVNR/email mapping is runtime
+state and is lost when the testdriver-oidc pod restarts; it is not a Keycloak or MailCatcher setting. Seed it before
+starting an OIDC test:
+
+The helper requires `jq` to encode the JSON payload. Email syntax is validated by the testdriver-oidc.
+
+```bash
+make oidc-test-user \
+  OIDC_TEST_BASE_URL=https://zeta-kind.local/td-oidc \
+  OIDC_TEST_KVNR=X110411675 \
+  OIDC_TEST_EMAIL=X110411675@mailgun.com \
+  OIDC_TEST_INSECURE=true
+```
+
+`OIDC_TEST_INSECURE=true` is only for the self-signed local certificate; leave it at its secure default for
+stages with a publicly trusted certificate.
+
+Use a distinct email address for each KVNR. Reusing an address already bound to another Keycloak user returns
+`Duplicate resource error`; omitting the mapping leads to `missing_email`. Re-run the target after every
+testdriver-oidc restart and whenever `oidcTestKvnr` changes.
+
+If `zeta-guard.networkPolicy.enabled: true`, the umbrella chart automatically creates an additional
+`authserver-mailcatcher-egress` policy allowing the authserver pod to reach the MailCatcher pod on its named
+`smtp` container port (1025), even when the SMTP Service port is customized. No broad namespace or IP-block
+exception is required.
 
 ## Further configuration
 

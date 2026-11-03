@@ -4,8 +4,6 @@
 # Global defaults used by subcharts; keep safe empties
 global:
   imagePullSecrets: []
-  registry: ""
-  registry_host: ""
   enableDNSRedirect: false
   # Istio PeerAuthentication resources
   istio:
@@ -14,13 +12,11 @@ global:
     tigerStaticClusterIP: "10.96.3.11"
     redirects:
       - fqdn: ehca.gematik.de
-        proxyRoutes:
-          - from: /ecc-ocsp
-            to: http://ehca.gematik.de/ecc-ocsp
+        proxyRoutes: []
+      - fqdn: cert-mock.zeta.test
+        proxyRoutes: []
       - fqdn: ocsp-testref.root-ca.ti-dienste.de
-        proxyRoutes:
-          - from: /ocsp
-            to: http://ocsp-testref.root-ca.ti-dienste.de/ocsp
+        proxyRoutes: []
   infinispanExternal:
     enabled: false
     replicaCount: 3
@@ -191,15 +187,44 @@ sekidp:
 mailcatcher:
   enabled: false
 
-testdriver:
+testdriver-smcb:
+  enabled: true
+  # Static PoPP token for the SMC-B test drivers. It is the same on every
+  # stage, so it lives here and is rotated in one place (testdriver and
+  # nativedriver below); stage files do not set it.
+  # actorId: X110411675!
+  # $ curl -k -X 'POST' 'https://$zetaFqdn/popp-token-generator/popp/test/api/v1/token-generator' -H 'accept: */*' -H 'Content-Type: application/json' -d '{
+  #   "tokenParamsList": [
+  #     {
+  #       "proofMethod": "ehc-practitioner-user-x509",
+  #       "patientProofTime": "1791553843",
+  #       "iat": "1791553843",
+  #       "patientId": "X110411675",
+  #       "insurerId": "109500969",
+  #       "actorId": "X110411675",
+  #       "actorProfessionOid": "1.2.276.0.76.4.32"
+  #     }
+  #   ]
+  # }' | jq
+  PoppToken: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZuZC50ZWxlbWF0aWsucG9wcCtqd3QiLCJraWQiOiJhbGlhcyIsIng1YyI6WyJNSUlEQmpDQ0FxeWdBd0lCQWdJSEFtQ25LeHIvUnpBS0JnZ3Foa2pPUFFRREFqQ0JoREVMTUFrR0ExVUVCaE1DUkVVeEh6QWRCZ05WQkFvTUZtZGxiV0YwYVdzZ1IyMWlTQ0JPVDFRdFZrRk1TVVF4TWpBd0JnTlZCQXNNS1V0dmJYQnZibVZ1ZEdWdUxVTkJJR1JsY2lCVVpXeGxiV0YwYVd0cGJtWnlZWE4wY25WcmRIVnlNU0F3SGdZRFZRUUREQmRIUlUwdVMwOU5VQzFEUVRZeElGUkZVMVF0VDA1TVdUQWVGdzB5TlRBM01qZ3lNakF3TURCYUZ3MHpNREEzTWpneU1UVTVOVGxhTUdzeEN6QUpCZ05WQkFZVEFrUkZNU1l3SkFZRFZRUUtEQjFuWlcxaGRHbHJJRlJGVTFRdFQwNU1XU0F0SUU1UFZDMVdRVXhKUkRFME1ESUdBMVVFQXd3cmNHOXdjQzEwYjJ0bGJpNW5aVzFoZEdsckxuUmxiR1Z0WVhScGF5MTBaWE4wSUhOcGJYVnNZWFJ2Y2pCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkhBdkkzclBpTTRVNUhCekhUSXllc24vWmNaUkh0djlWeHVqbGJUYVJQdHYyc3FPNXZ5dmEyNEVRbjhBZ1M2bU9ObmVSaElJOHFoUkxxL1ZJMDZEeE9HamdnRWZNSUlCR3pBN0JnZ3JCZ0VGQlFjQkFRUXZNQzB3S3dZSUt3WUJCUVVITUFHR0gyaDBkSEE2THk5bGFHTmhMbWRsYldGMGFXc3VaR1V2WldOakxXOWpjM0F3SFFZRFZSME9CQllFRkRobnRHbnFueEVRTnpRdkRTTUpLSFllRUROYU1DRUdBMVVkSUFRYU1CZ3dDZ1lJS29JVUFFd0VnaDh3Q2dZSUtvSVVBRXdFZ1NNd0h3WURWUjBqQkJnd0ZvQVVuelhnTUtsL3l2aG1uNUFLUXMyN2dXV2ZTZjR3RGdZRFZSMFBBUUgvQkFRREFnWkFNRnNHQlNza0NBTURCRkl3VURCT01Fd3dTakJJTURvTU9GUnZhMlZ1TFZOcFoyNWhkSFZ5TFVsa1pXNTBhWFREcEhRZ1pzTzhjaUJRY205dlppQnZaaUJRWVhScFpXNTBJRkJ5WlhObGJtTmxNQW9HQ0NxQ0ZBQk1CSUpBTUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBS3VDdi9ZczBMd3lQRTh2eVBZWVF5UFpBTGltendwRjJHallVWUlwZ3QyNUFpQUhucVpubEV0dEhzL0Y0SEExckYyZWNmMjd0L2NMMlM4b0VvSFZaMmpra2c9PSJdfQ.eyJpYXQiOjE3OTA4MjcwNjQsInZlcnNpb24iOiIxLjAuMCIsImlzcyI6Imh0dHBzOi8vcG9wcC5leGFtcGxlLmNvbSIsInByb29mTWV0aG9kIjoiZWhjLXByYWN0aXRpb25lci11c2VyLXg1MDkiLCJwYXRpZW50UHJvb2ZUaW1lIjoxNzkwODI3MDY0LCJwYXRpZW50SWQiOiJYMTEwNjM5NDkxIiwiaW5zdXJlcklkIjoiMTA5NTAwOTY5IiwiYWN0b3JJZCI6IjEtMjAwMDAzMDAxMzkiLCJhY3RvclByb2Zlc3Npb25PaWQiOiIxLjIuMjc2LjAuNzYuNC4zMiJ9.cW8css1KHgx9jxySuGoTtSz10wROm_aQRiRao21UTgh_mYlfoxTg7DMH7hchjaMSVWPjL76teYZxjakjnx20uw"
   serviceAccount:
     create: true
-    name: testdriver
+    name: testdriver-smcb
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+testdriver-oidc:
+  enabled: false
+  serviceAccount:
+    create: true
+    name: testdriver-oidc
   podSecurityContext:
     seccompProfile:
       type: RuntimeDefault
 
 nativedriver:
+  PoppToken: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZuZC50ZWxlbWF0aWsucG9wcCtqd3QiLCJraWQiOiJhbGlhcyIsIng1YyI6WyJNSUlEQmpDQ0FxeWdBd0lCQWdJSEFtQ25LeHIvUnpBS0JnZ3Foa2pPUFFRREFqQ0JoREVMTUFrR0ExVUVCaE1DUkVVeEh6QWRCZ05WQkFvTUZtZGxiV0YwYVdzZ1IyMWlTQ0JPVDFRdFZrRk1TVVF4TWpBd0JnTlZCQXNNS1V0dmJYQnZibVZ1ZEdWdUxVTkJJR1JsY2lCVVpXeGxiV0YwYVd0cGJtWnlZWE4wY25WcmRIVnlNU0F3SGdZRFZRUUREQmRIUlUwdVMwOU5VQzFEUVRZeElGUkZVMVF0VDA1TVdUQWVGdzB5TlRBM01qZ3lNakF3TURCYUZ3MHpNREEzTWpneU1UVTVOVGxhTUdzeEN6QUpCZ05WQkFZVEFrUkZNU1l3SkFZRFZRUUtEQjFuWlcxaGRHbHJJRlJGVTFRdFQwNU1XU0F0SUU1UFZDMVdRVXhKUkRFME1ESUdBMVVFQXd3cmNHOXdjQzEwYjJ0bGJpNW5aVzFoZEdsckxuUmxiR1Z0WVhScGF5MTBaWE4wSUhOcGJYVnNZWFJ2Y2pCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkhBdkkzclBpTTRVNUhCekhUSXllc24vWmNaUkh0djlWeHVqbGJUYVJQdHYyc3FPNXZ5dmEyNEVRbjhBZ1M2bU9ObmVSaElJOHFoUkxxL1ZJMDZEeE9HamdnRWZNSUlCR3pBN0JnZ3JCZ0VGQlFjQkFRUXZNQzB3S3dZSUt3WUJCUVVITUFHR0gyaDBkSEE2THk5bGFHTmhMbWRsYldGMGFXc3VaR1V2WldOakxXOWpjM0F3SFFZRFZSME9CQllFRkRobnRHbnFueEVRTnpRdkRTTUpLSFllRUROYU1DRUdBMVVkSUFRYU1CZ3dDZ1lJS29JVUFFd0VnaDh3Q2dZSUtvSVVBRXdFZ1NNd0h3WURWUjBqQkJnd0ZvQVVuelhnTUtsL3l2aG1uNUFLUXMyN2dXV2ZTZjR3RGdZRFZSMFBBUUgvQkFRREFnWkFNRnNHQlNza0NBTURCRkl3VURCT01Fd3dTakJJTURvTU9GUnZhMlZ1TFZOcFoyNWhkSFZ5TFVsa1pXNTBhWFREcEhRZ1pzTzhjaUJRY205dlppQnZaaUJRWVhScFpXNTBJRkJ5WlhObGJtTmxNQW9HQ0NxQ0ZBQk1CSUpBTUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBS3VDdi9ZczBMd3lQRTh2eVBZWVF5UFpBTGltendwRjJHallVWUlwZ3QyNUFpQUhucVpubEV0dEhzL0Y0SEExckYyZWNmMjd0L2NMMlM4b0VvSFZaMmpra2c9PSJdfQ.eyJpYXQiOjE3OTA4MjcwNjQsInZlcnNpb24iOiIxLjAuMCIsImlzcyI6Imh0dHBzOi8vcG9wcC5leGFtcGxlLmNvbSIsInByb29mTWV0aG9kIjoiZWhjLXByYWN0aXRpb25lci11c2VyLXg1MDkiLCJwYXRpZW50UHJvb2ZUaW1lIjoxNzkwODI3MDY0LCJwYXRpZW50SWQiOiJYMTEwNjM5NDkxIiwiaW5zdXJlcklkIjoiMTA5NTAwOTY5IiwiYWN0b3JJZCI6IjEtMjAwMDAzMDAxMzkiLCJhY3RvclByb2Zlc3Npb25PaWQiOiIxLjIuMjc2LjAuNzYuNC4zMiJ9.cW8css1KHgx9jxySuGoTtSz10wROm_aQRiRao21UTgh_mYlfoxTg7DMH7hchjaMSVWPjL76teYZxjakjnx20uw"
   serviceAccount:
     create: true
     name: nativedriver
@@ -207,7 +232,33 @@ nativedriver:
     seccompProfile:
       type: RuntimeDefault
 
-testfachdienst: { }
+androidDriverEnabled: false
+
+androiddriver:
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+testfachdienst:
+  # notificationServiceRsBaseUrl value has to be aligned with tags.tiger-proxy state
+  # see docs/how-to_guides/How_to_configure_tiger-proxy.md for reference
+  notificationServiceRsBaseUrl: "http://tiger-proxy/notification-service-rs"
+  # notificationServiceRsBaseUrl: "http://notification-service-rs:8080"
+
+# Shared TIGER proxy configuration. Stage files only override genuinely
+# stage-specific settings such as image pins, NodePorts, or additional routes.
+tiger-proxy:
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop: [ "ALL" ]
+  devMode: true
+  proxyConfig:
+    tls:
+      domainName: tiger-proxy
 
 # If testMonitoringServiceEnabled is true, observability backends are added to the deployment.
 testMonitoringServiceEnabled: false
@@ -297,18 +348,15 @@ testMonitoringService:
             memory: 6Gi
 
 zeta-guard:
+  nginx-ingress:
+    controller:
+      image:
+        pullPolicy: Always
   authserver:
     config:
       # optimised TTLs for nightly load tests, so we start with a clean DB each time
       userIdleTTL: "PT22H"
       clientIdleTTL: "PT22H"
-    dbEnc:
-      keychainGenerator:
-        image:
-          repository: vau/keychain-generator
-          tag: latest
-    image:
-      tag: main
     container:
       resources:
         limits:
@@ -330,12 +378,37 @@ zeta-guard:
         memory: 2Gi
     # with single instance DBs, PDB would block any node drain/upgrade as it is minAvailable=1
     enablePDB: false
+  # Mirror of cloudnativePg above, for the keycloak-db.enabled=true upstream-chart path.
+  # keycloak-db.cluster.* is a separate values path — it does NOT inherit cloudnativePg.*
+  # (see charts/zeta-guard/values.yaml) — so a stage that flips keycloak-db.enabled: true
+  # without these would silently get the upstream chart's own defaults (different image,
+  # no resource limits, enablePDB back to true) instead of what this file already declares
+  # for cloudnativePg. Keep in sync with the cloudnativePg block above.
+  keycloak-db:
+    cluster:
+      imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
+      enablePDB: false
+      resources:
+        requests:
+          cpu: "1"
+          memory: 1Gi
+        limits:
+          memory: 2Gi
+      postgresql:
+        parameters:
+          wal_compression: "on"
   notificationService:
     db:
       cloudnativePg:
         # Same image as keycloak-db above; the subchart default points at the gematik mirror
         imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
         enablePDB: false
+    sealing:
+      keychainGenerator:
+        image:
+          # Path in our registry; the subchart default is the gematik name,
+          # notification-keychain-generator (see private/renderImageNames.sh).
+          repository: notification-service/keychain-generator
   gematikConnectionEnabled: false
   # Name of the Kubernetes Secret containing the gematik certificate chain for
   # verifying the cosign signature of the provisioning data image. The Secret
@@ -344,10 +417,11 @@ zeta-guard:
   # fails without this value.
   # See: Referenz_des_Helm_Charts.md#cosign-vertrauenskette-für-image-verifikation
   imageTrustCertchainSecretRef: gematik-image-signer-test
-  nginx-ingress:
-    controller:
-      image:
-        tag: main
+  ingressMinionAnnotations:
+    # turning off rate limit to enable load tests
+    nginx.org/limit-req-rate: null
+    nginx.org/limit-req-key: null
+    nginx.org/limit-req-zone-size: null
   opa:
     image:
       registry: docker.io/
@@ -357,19 +431,12 @@ zeta-guard:
   openshiftRoute:
     enabled: false
   provisioningProcessor:
-    image:
-      tag: main
     containerSecurityContext:
-      allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 1000
-      capabilities:
-        drop: [ "ALL" ]
   pepproxy:
-    image:
-      tag: main
     nginxConf:
+      # the main image knows pep_pdp_url; stages pinning a released PEP set this to ""
+      pepInternalUrl: "http://authserver/auth/realms/zeta-guard"
       configMapName: pep-test-nginx-conf
 
       # fachdienstUrl value has to be aligned with tags.tiger-proxy state
@@ -443,6 +510,128 @@ zeta-guard:
             satisfy all;
             allow all;
         }
+        location /pep/achelos_testfachdienst/hellozeta/popp {
+            # inherits proxy_headers.conf from the server block
+            proxy_pass {{ $fd }}/achelos_testfachdienst/hellozeta/popp;
+            proxy_ssl_verify off;
+
+            {{- if .Values.openshiftIngress.enabled }}
+            # declares its own proxy_set_header (cookie strip) and therefore does NOT inherit
+            # the server-level proxy_headers.conf (non-additive) — re-include it here
+            include proxy_headers.conf;
+            proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
+            {{- end }}
+        }
+
+        # routes with popp verification explicitly disabled
+        location /pep/achelos_testfachdienst/no-popp {
+            # inherits proxy_headers.conf from the server block
+            proxy_pass {{ $fd }}/achelos_testfachdienst/no-popp;
+            proxy_ssl_verify off;
+            
+            pep_require_popp off;
+
+            {{- if .Values.openshiftIngress.enabled }}
+            # declares its own proxy_set_header (cookie strip) and therefore does NOT inherit
+            # the server-level proxy_headers.conf (non-additive) — re-include it here
+            include proxy_headers.conf;
+            proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
+            {{- end }}
+        }
+        location /pep/achelos_testfachdienst/no-popp/ {
+            # inherits proxy_headers.conf from the server block
+            proxy_pass {{ $fd }}/achelos_testfachdienst/no-popp/;
+            proxy_ssl_verify off;
+
+            pep_require_popp off;
+
+            {{- if .Values.openshiftIngress.enabled }}
+            # declares its own proxy_set_header (cookie strip) and therefore does NOT inherit
+            # the server-level proxy_headers.conf (non-additive) — re-include it here
+            include proxy_headers.conf;
+            proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
+            {{- end }}
+        }
+        location /pep/achelos_testfachdienst/no-popp/ws/ {
+            include proxy_headers.conf;
+            proxy_pass {{ $fd }}/achelos_testfachdienst/no-popp/ws/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+
+            pep_require_popp off;
+
+            # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
+            # This is ok and desired for this test setup.
+            # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
+            satisfy all;
+            allow all;
+        }
+        location /pep/achelos_testfachdienst/no-popp/ws {
+            include proxy_headers.conf;
+            proxy_pass {{ $fd }}/achelos_testfachdienst/no-popp/ws;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+
+            pep_require_popp off;
+
+            # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
+            # This is ok and desired for this test setup.
+            # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
+            satisfy all;
+            allow all;
+        }
+
+        # keep old routing during migration for test tool compatibility
+        location /pep/achelos_testfachdienst/hellozeta/no-popp {
+            # inherits proxy_headers.conf from the server block
+            proxy_pass {{ $fd }}/achelos_testfachdienst/hellozeta/no-popp;
+            proxy_ssl_verify off;
+
+            pep_require_popp off;
+
+            {{- if .Values.openshiftIngress.enabled }}
+            # declares its own proxy_set_header (cookie strip) and therefore does NOT inherit
+            # the server-level proxy_headers.conf (non-additive) — re-include it here
+            include proxy_headers.conf;
+            proxy_set_header Cookie ""; # do not pass OpenShift-session-cookies
+            {{- end }}
+        }
+        location /pep/achelos_testfachdienst/ws-no-popp/ {
+            include proxy_headers.conf;
+            proxy_pass {{ $fd }}/achelos_testfachdienst/ws/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+
+            pep_require_popp off;
+
+            # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
+            # This is ok and desired for this test setup.
+            # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
+            satisfy all;
+            allow all;
+        }
+        location /pep/achelos_testfachdienst/ws-no-popp {
+            include proxy_headers.conf;
+            proxy_pass {{ $fd }}/achelos_testfachdienst/ws;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+
+            pep_require_popp off;
+
+            # SECURITY WARNING: This will make this location public and it can be called without the ASL protocol.
+            # This is ok and desired for this test setup.
+            # If you want to copy this behaviour, make sure this is permitted by the spec of your resource server.
+            satisfy all;
+            allow all;
+        }
     resources:
       limits:
         memory: "1Gi"
@@ -467,9 +656,16 @@ zeta-guard:
               - debug
           logs/ti_siem:
             exporters:
-              - count/siem
+              - count/security_kpis
               - debug
           metrics/dienst_hersteller:
+            exporters:
+              - debug
+          # ADR 0001 (docs/adr/0001-reliable-daily-metrics.md): this is the
+          # one place the corrected KPI value actually reaches TI-SIEM
+          # (otlp_grpc/ti_siem in the base chart) — drop it for testing
+          # stages same as every other *_ti_siem pipeline below.
+          metrics/security_kpis_corrected:
             exporters:
               - debug
           metrics/ti_sim:
@@ -487,7 +683,7 @@ zeta-guard:
               - debug
           traces/ti_siem:
             exporters:
-              - count/siem
+              - count/security_kpis
               - debug
     extraVolumeMounts: [ ]
     extraVolumes: [ ]

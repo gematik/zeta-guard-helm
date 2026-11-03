@@ -77,10 +77,6 @@ spec:
               value: "8183"
             - name: FEDMASTER_SERVER_URL
               value: {{ .Values.fedmaster.env.serverUrl | quote }}
-            {{- if .Values.fedmaster.env.redirectUris }}
-            - name: FEDMASTER_REDIRECT_URIS
-              value: {{ .Values.fedmaster.env.redirectUris | quote }}
-            {{- end }}
             - name: ISSUER_IDP_01
               value: {{ .Values.fedmaster.env.issuerIdp01 | default .Values.gsiServer.env.serverUrl | quote }}
             - name: LOG_LEVEL_GEMATIK
@@ -91,18 +87,6 @@ spec:
             - name: JDK_JAVA_OPTIONS
               value: "-Djavax.net.ssl.trustStore=/truststore/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
             {{- end }}
-            {{- if .Values.fedmaster.relyingPartyConfigs }}
-            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
-              value: "optional:file:/fedmaster-config/application-relyingparties.yaml"
-            {{- end }}
-            {{- if .Values.fedmaster.relyingPartyKeySecretName }}
-            - name: RP01_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.fedmaster.relyingPartyKeySecretName }}
-                  key: keyid
-                  optional: true
-            {{- end }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -111,30 +95,24 @@ spec:
               mountPath: /truststore
               readOnly: true
             {{- end }}
-            {{- if .Values.fedmaster.relyingPartyConfigs }}
-            - name: fedmaster-config
-              mountPath: /fedmaster-config
-              readOnly: true
-            {{- end }}
-            {{- if .Values.fedmaster.relyingPartyKeySecretName }}
-            - name: public-keys
-              mountPath: /public-keys
-              readOnly: true
-            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            periodSeconds: {{ .Values.fedmaster.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.fedmaster.probes.startup.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: management
-            initialDelaySeconds: 45
-            periodSeconds: 10
-            failureThreshold: 6
+            periodSeconds: {{ .Values.fedmaster.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.fedmaster.probes.liveness.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: management
-            initialDelaySeconds: 45
-            periodSeconds: 10
-            failureThreshold: 6
+            periodSeconds: {{ .Values.fedmaster.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.fedmaster.probes.readiness.failureThreshold }}
           {{- with .Values.fedmaster.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -171,15 +149,4 @@ spec:
               {{- end }}
         - name: truststore
           emptyDir: {}
-        {{- end }}
-        {{- if .Values.fedmaster.relyingPartyConfigs }}
-        - name: fedmaster-config
-          configMap:
-            name: sekidp-fedmaster-relyingparties
-        {{- end }}
-        {{- if .Values.fedmaster.relyingPartyKeySecretName }}
-        - name: public-keys
-          secret:
-            secretName: {{ .Values.fedmaster.relyingPartyKeySecretName }}
-            optional: true
         {{- end }}

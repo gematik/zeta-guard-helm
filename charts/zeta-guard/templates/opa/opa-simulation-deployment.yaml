@@ -37,9 +37,7 @@ spec:
         {{- end }}
       {{- end }}
     spec:
-      securityContext:
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" .Values.opa.podSecurityContext) | nindent 6 }}
       {{- $wif := .Values.opa.workloadIdentityFederation }}
       {{- if .Values.opa.serviceAccountName }}
       serviceAccountName: {{ .Values.opa.serviceAccountName | quote }}
@@ -52,10 +50,7 @@ spec:
         - name: trust-anchor-provisioning-processor
           image: "{{ include "provisioningProcessor.image" . | trim }}"
           imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy }}"
-          {{- with .Values.provisioningProcessor.containerSecurityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.provisioningProcessor.containerSecurityContext) | nindent 10 }}
           env:
             - name: RESULT_DIR
               value: "/var/trust-data"
@@ -84,10 +79,7 @@ spec:
             {{- include "zeta-guard.provisioningProcessor.caVolumeMounts" . | nindent 12 }}
       containers:
         - name: opa-simulation
-          {{- with .Values.opa.containerSecurityContext }}
-          securityContext:
-          {{- toYaml . | nindent 12 }}
-          {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.opa.containerSecurityContext) | nindent 10 }}
           image: "{{ include "opa.image" . | trim }}"
           imagePullPolicy: "{{ .Values.opa.imagePullPolicy }}"
           env:

@@ -9,8 +9,14 @@ metadata:
 spec:
   timeZone: "Europe/Berlin"
   schedule: {{ $wif.tokenRenewer.schedule | quote }}
+  # never overlap, never crawl (stuck jobs otherwise pile up on a sick node)
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 240
       backoffLimit: {{ default 5 $wif.tokenRenewer.backoffLimit }}
       template:
         metadata:
@@ -28,9 +34,7 @@ spec:
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          securityContext:
-            seccompProfile:
-              type: RuntimeDefault
+          {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" dict) | nindent 10 }}
           serviceAccountName: opa-token-renewer
           restartPolicy: OnFailure
           containers:
@@ -41,10 +45,7 @@ spec:
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
-              {{- with .Values.opa.cronjobSecurityContext }}
-              securityContext:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
+              {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.opa.cronjobSecurityContext) | nindent 14 }}
               {{- with include "zeta-guard.proxyEnvVars" .Values.global | trim }}
               env:
                 {{- . | nindent 16 }}

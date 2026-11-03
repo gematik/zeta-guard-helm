@@ -1,13 +1,8 @@
-{{- /* TODO: adopt upstream cloudnative-pg/cluster chart for generic config pass-through */}}
-{{- if eq .Values.databaseMode "cloudnative" }}
-{{- /* Connection-budget guard: fail render if replicaCount × dbPool.maxSize (+ reserve for
-       CNPG/superuser slots) exceeds max_connections, which would exhaust the DB (SQLSTATE 53300). */}}
-{{- $reserve := 25 }}
-{{- $needed := add (mul (int .Values.authserver.replicaCount) (int .Values.authserver.dbPool.maxSize)) $reserve }}
-{{- $maxConn := int .Values.cloudnativePg.parameters.maxConnections }}
-{{- if gt $needed $maxConn }}
-{{- fail (printf "zeta-guard connection budget exceeded: authserver.replicaCount (%d) × authserver.dbPool.maxSize (%d) + %d reserve = %d, which exceeds cloudnativePg.parameters.maxConnections (%d). Lower dbPool.maxSize or replicaCount, or raise maxConnections and cloudnativePg.resources.limits.memory accordingly. See docs/how-to_guides/How_to_configure_authserver.md." (int .Values.authserver.replicaCount) (int .Values.authserver.dbPool.maxSize) $reserve $needed $maxConn) }}
-{{- end }}
+{{- /* TODO: retire this hand-rolled template once every stage has migrated to keycloak-db.enabled */}}
+{{- if and (eq .Values.databaseMode "cloudnative") (not (index .Values "keycloak-db" "enabled")) }}
+{{- /* Connection-budget guard lives in cnpg-connection-budget-guard.yaml, so it also covers
+     the keycloak-db.enabled path (that Cluster comes from the vendored subchart, which can't
+     run our validation itself). */}}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:

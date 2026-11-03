@@ -4,15 +4,19 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: testdriver
+  name: testdriver-oidc
   labels:
-    app: testdriver
-    app.kubernetes.io/name: testdriver
+    app: testdriver-oidc
+    app.kubernetes.io/name: testdriver-oidc
   annotations:
     {{- if .Values.nginxIngressEnabled }}
     nginx.org/mergeable-ingress-type: "minion"
-    nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver"{{ else }}"testdriver"{{ end }}
+    nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver-oidc"{{ else }}"testdriver-oidc"{{ end }}
     nginx.org/client-max-body-size: "10m"
+    # Preserve case-insensitive matching and all three URI capture groups.
+    nginx.org/path-regex: "case_insensitive"
+    nginx.org/rewrite-target: "/$1$2$3"
+  
     {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
@@ -29,39 +33,39 @@ spec:
       {{- end }}
       http:
         paths:
-          - path: /proxy
-            pathType: Prefix
+          - path: {{ if .Values.routeViaTigerProxy }}/(td-oidc/proxy)(/|$)(.*){{ else }}/td-oidc/(proxy)(/|$)(.*){{ end }}
+            pathType: ImplementationSpecific
             backend:
               service:
-                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}testdriver{{ end }}
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}testdriver-oidc{{ end }}
                 port:
                   number: 80
-          - path: /testdriver-api
-            pathType: Prefix
+          - path: /td-oidc/(testdriver-api)(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
-                name: testdriver
+                name: testdriver-oidc
                 port:
                   number: 80
-          - path: /load
-            pathType: Prefix
+          - path: /td-oidc/(oidc)(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
-                name: testdriver
+                name: testdriver-oidc
                 port:
                   number: 80
-          - path: /loaddriver-api
-            pathType: Prefix
+          - path: /td-oidc/(load)(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
-                name: testdriver
+                name: testdriver-oidc
                 port:
                   number: 80
-          - path: /oidc
-            pathType: Prefix
+          - path: /td-oidc/(loaddriver-api)(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
-                name: testdriver
+                name: testdriver-oidc
                 port:
                   number: 80
 {{- end }}

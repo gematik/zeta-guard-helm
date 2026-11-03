@@ -9,6 +9,8 @@ tags:
   testfachdienst: true
   tiger-proxy: true
   tiger-testsuite: true
+  testdriver-smcb: true
+  testdriver-oidc: true
   zeta-guard: true
   zeta-tls-test-tool-service: true
 
@@ -23,8 +25,13 @@ push-gateway:
   hostname: zeta-kind.local
   ingressClassName: nginx
   routeViaTigerProxy: true
-  image:
-    tag: "1.0.1"
+  startupProbe:
+    httpGet:
+      path: /actuator/health/liveness
+      port: management
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 60
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
@@ -66,14 +73,15 @@ sekidp:
   ingressClassName: nginx
   routeViaTigerProxy: true
   gsiServer:
-    image:
-      tag: "8-4-2-zeta-1-3-1"
     env:
       # Browser-resolvable Ingress URL, not the in-cluster Service name — baked
       # into gsi-server's signed entity statement and used as the auth redirect target.
       serverUrl: "https://zeta-kind.local/sekidp"
       # Browser-resolvable Fedmaster URL — must match fedmaster.env.serverUrl below.
       fedmasterUrl: "https://zeta-kind.local/sekidp-fedmaster"
+    # GSI_FEDMASTER_MODE=local: authserver's PAR is validated against this
+    # statement (redirect_uris: the demo callback below, see testdriver.oidcBaseUri.
+    entityStatementAboutRp: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJodHRwczovL3pldGEta2luZC5sb2NhbC9zZWtpZHAiLCJpc3MiOiJodHRwczovL3pldGEta2luZC5sb2NhbC9zZWtpZHAtZmVkbWFzdGVyIiwiaWF0IjoxNzMwMDAwMDAwLCJleHAiOjQxMDI0NDQ3OTksIm1ldGFkYXRhIjp7Im9wZW5pZF9yZWx5aW5nX3BhcnR5Ijp7InJlZGlyZWN0X3VyaXMiOlsiaHR0cDovL2xvY2FsaG9zdDo4MDkwL2NiL2RlbW8vb2lkYyIsImRlLmdlbWF0aWsuemV0YTovL29pZGMiXSwic2NvcGUiOiJ1cm46dGVsZW1hdGlrOmRpc3BsYXlfbmFtZSB1cm46dGVsZW1hdGlrOnZlcnNpY2hlcnRlciB1cm46dGVsZW1hdGlrOmdlYnVydHNkYXR1bSBvcGVuaWQiLCJqd2tzIjp7ImtleXMiOltdfX19fQ.fjzHCZGEf4AsCJxQMKcWNAWkOLqcZgmICG2MvnLvDuQ"
     additionalTrustedCAs:
       - secretName: zeta-guard-tls
         secretKey: ca.crt
@@ -85,29 +93,14 @@ sekidp:
       capabilities:
         drop: [ "ALL" ]
   fedmaster:
-    image:
-      tag: "8-4-2-zeta-1-3-1"
     env:
-      # Browser-resolvable Ingress URL (/sekidp-fedmaster) — authserver's
-      # zeta-sekidp-oidc IdP resolves federation trust here (sekidp_fedmaster_url
-      # in terraform/authserver); must be Fedmaster's published issuer.
+      # Externally-resolvable Ingress URL (/sekidp-fedmaster) — becomes the
+      # iss claim in Fedmaster's entity statement, so it must match the URL
+      # clients actually use to reach it.
       serverUrl: "https://zeta-kind.local/sekidp-fedmaster"
-      # Bundled reference defaults plus a local demo redirect target.
-      redirectUris: "https://Fachdienst007.de/client,https://redirect.testsuite.gsi,https://idpfadi.dev.gematik.solutions/auth,http://localhost:8090/cb/demo/oidc"
     additionalTrustedCAs:
       - secretName: zeta-guard-tls
         secretKey: ca.crt
-    relyingPartyConfigs:
-      - issuer: https://zeta-kind.local/auth/realms/zeta-guard
-        organizationName: authserver
-        keyConfig:
-          fileName: pubkey.pem
-          keyId: "${RP01_KEY_ID:}"
-          use: sig
-          x5cInJwks: false
-    # Populated by terraform/authserver's sekidp key-sync (make config) — see
-    # docs/how-to_guides/How_to_configure_sekidp.md.
-    relyingPartyKeySecretName: sekidp-rp01-pubkey
     containerSecurityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
@@ -136,8 +129,6 @@ zetaCertValidationMockEnabled: true
 
 zeta-cert-validation-mock:
   devMode: true
-  image:
-    tag: 1.3.0
   mock:
     mode: always_good
     enableAdminEndpoints: true
@@ -163,8 +154,6 @@ zetaTlsTestToolServiceEnabled: true
 
 zeta-tls-test-tool-service:
   devMode: true
-  image:
-    tag: 1.2.0
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
@@ -176,17 +165,6 @@ zeta-tls-test-tool-service:
     type: NodePort
     nodePorts:
       serviceMgmtNodePort: 32012
-
-zetaCertValidationMockEnabled: false
-
-zeta-cert-validation-mock:
-  devMode: true
-  image:
-    tag: 1.0.0
-    repository:
-  mock:
-    mode: always_good
-    enableAdminEndpoints: true
 
 issuers:
   local:
@@ -216,7 +194,7 @@ popp-mocks:
       className: nginx
       hostname: zeta-kind.local
 
-testdriver: &localDriver
+testdriverCommon: &localDriver
   aslProdEnv: false
   connector_base_url: ""
   connector_card_handle: ""
@@ -235,25 +213,31 @@ testdriver: &localDriver
   disableServerValidation: true
   fachdienst_url: "https://zeta-kind.local/pep/"
   hostname: zeta-kind.local
-  image:
-    tag: 1.3.2
   ingressClassName: nginx
-  PoppToken: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZuZC50ZWxlbWF0aWsucG9wcCtqd3QiLCJraWQiOiJhbGlhcyIsIng1YyI6WyJNSUlEQmpDQ0FxeWdBd0lCQWdJSEFtQ25LeHIvUnpBS0JnZ3Foa2pPUFFRREFqQ0JoREVMTUFrR0ExVUVCaE1DUkVVeEh6QWRCZ05WQkFvTUZtZGxiV0YwYVdzZ1IyMWlTQ0JPVDFRdFZrRk1TVVF4TWpBd0JnTlZCQXNNS1V0dmJYQnZibVZ1ZEdWdUxVTkJJR1JsY2lCVVpXeGxiV0YwYVd0cGJtWnlZWE4wY25WcmRIVnlNU0F3SGdZRFZRUUREQmRIUlUwdVMwOU5VQzFEUVRZeElGUkZVMVF0VDA1TVdUQWVGdzB5TlRBM01qZ3lNakF3TURCYUZ3MHpNREEzTWpneU1UVTVOVGxhTUdzeEN6QUpCZ05WQkFZVEFrUkZNU1l3SkFZRFZRUUtEQjFuWlcxaGRHbHJJRlJGVTFRdFQwNU1XU0F0SUU1UFZDMVdRVXhKUkRFME1ESUdBMVVFQXd3cmNHOXdjQzEwYjJ0bGJpNW5aVzFoZEdsckxuUmxiR1Z0WVhScGF5MTBaWE4wSUhOcGJYVnNZWFJ2Y2pCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkhBdkkzclBpTTRVNUhCekhUSXllc24vWmNaUkh0djlWeHVqbGJUYVJQdHYyc3FPNXZ5dmEyNEVRbjhBZ1M2bU9ObmVSaElJOHFoUkxxL1ZJMDZEeE9HamdnRWZNSUlCR3pBN0JnZ3JCZ0VGQlFjQkFRUXZNQzB3S3dZSUt3WUJCUVVITUFHR0gyaDBkSEE2THk5bGFHTmhMbWRsYldGMGFXc3VaR1V2WldOakxXOWpjM0F3SFFZRFZSME9CQllFRkRobnRHbnFueEVRTnpRdkRTTUpLSFllRUROYU1DRUdBMVVkSUFRYU1CZ3dDZ1lJS29JVUFFd0VnaDh3Q2dZSUtvSVVBRXdFZ1NNd0h3WURWUjBqQkJnd0ZvQVVuelhnTUtsL3l2aG1uNUFLUXMyN2dXV2ZTZjR3RGdZRFZSMFBBUUgvQkFRREFnWkFNRnNHQlNza0NBTURCRkl3VURCT01Fd3dTakJJTURvTU9GUnZhMlZ1TFZOcFoyNWhkSFZ5TFVsa1pXNTBhWFREcEhRZ1pzTzhjaUJRY205dlppQnZaaUJRWVhScFpXNTBJRkJ5WlhObGJtTmxNQW9HQ0NxQ0ZBQk1CSUpBTUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBS3VDdi9ZczBMd3lQRTh2eVBZWVF5UFpBTGltendwRjJHallVWUlwZ3QyNUFpQUhucVpubEV0dEhzL0Y0SEExckYyZWNmMjd0L2NMMlM4b0VvSFZaMmpra2c9PSJdfQ.eyJpYXQiOjE3ODI5MTEyODAsInZlcnNpb24iOiIxLjAuMCIsImlzcyI6Imh0dHBzOi8vcG9wcC5leGFtcGxlLmNvbSIsInByb29mTWV0aG9kIjoiZWhjLXByYWN0aXRpb25lci11c2VyLXg1MDkiLCJwYXRpZW50UHJvb2ZUaW1lIjoxNzgyOTA3NjgwLCJwYXRpZW50SWQiOiJYMTEwNjM5NDkxIiwiaW5zdXJlcklkIjoiMTA5NTAwOTY5IiwiYWN0b3JJZCI6IjEtMjAwMDAzMDAxMzkiLCJhY3RvclByb2Zlc3Npb25PaWQiOiIxLjIuMjc2LjAuNzYuNC4zMiJ9.Nf8oiNDg42rEACln6Or7rZoyHecH-IIKrxGsto3KklYE6GLb2Ea-m2ejH5im1Jx-u7SyxslZFCKm3LfPG7vVSw"
   routeViaTigerProxy: true
+  requiredOid: "1.2.276.0.76.4.328"
+
+testdriver-smcb:
+  <<: *localDriver
   smcbCertificateFileName: smcb-certificates.p12
   smcbCertificateAlias: zeta.c_smcb_aut
-  requiredOid: "1.2.276.0.76.4.328"
+
+nativedriver:
+  <<: *localDriver
+  smcbCertificateFileName: smcb-certificates.p12
+  smcbCertificateAlias: zeta.c_smcb_aut
+
+testdriver-oidc:
+  <<: *localDriver
+  enabled: true
   # SekIDP (gsi-server) issuer — its signed entity statement uses the public
   # Ingress URL (sekidp.gsiServer.env.serverUrl), so OIDC_IDP_ISS must match it.
   oidcIdpIss: "https://zeta-kind.local/sekidp"
   oidcIdpAlias: "zeta-sekidp-oidc"
-  # Demo OIDC callback on the tester's own machine (matches the
-  # localhost:8090/cb/demo/oidc entry in sekidp.fedmaster.env.redirectUris).
+  # Demo OIDC callback on the tester's own machine (matches the redirect_uris
+  # entry in sekidp.gsiServer.entityStatementAboutRp).
   oidcBaseUri: "http://localhost:8090/cb/demo"
   oidcTestKvnr: "X110411675"
-
-nativedriver:
-  <<: *localDriver
 
 testfachdienst:
   containerSecurityContext:
@@ -267,8 +251,6 @@ testfachdienst:
   env:
     - name: SERVER_SSL_ENABLED
       value: "true"
-  image:
-    tag: 1.3.0
   opentelemetry:
     enabled: true
     endpoint: http://telemetry-gateway-local:4318
@@ -282,6 +264,24 @@ testMonitoringServiceEnabled: true
 testMonitoringService:
   ingressRulesHost: "zeta-kind.local"
   opentelemetry-demo:
+    jaeger:
+      # Expose the query API through the host mapping in kind-local.yaml.
+      extraObjects:
+        - apiVersion: v1
+          kind: Service
+          metadata:
+            name: jaeger-query-local
+          spec:
+            type: NodePort
+            ports:
+              - name: http-query
+                port: 16686
+                targetPort: 16686
+                nodePort: 32086
+            selector:
+              app.kubernetes.io/name: jaeger
+              app.kubernetes.io/instance: '{{ .Release.Name }}'
+              app.kubernetes.io/component: all-in-one
     grafana:
       resources:
         requests:
@@ -314,64 +314,11 @@ testMonitoringService:
         nodePort: 32098
 
 tiger-proxy:
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    runAsUser: 1000
-    capabilities:
-      drop: [ "ALL" ]
-  devMode: true
-  image:
-    tag: fork-1.3.0
-  proxyConfig:
-    proxyRoutes:
-      - from: /testfachdienst
-        to: https://testfachdienst:443
-        preserveHostHeader: true
-      - from: /auth
-        to: http://authserver/auth
-      - from: /proxy
-        to: http://testdriver/proxy
-      - from: /opa
-        to: http://opa:8181
-      - from: /opa-simulation
-        to: http://opa-simulation:8181
-      - from: /.well-known/openid-federation
-        to: http://popp-statics/.well-known/openid-federation
-      - from: /.well-known/signed-jwks
-        to: http://popp-statics/.well-known/signed-jwks
-      - from: /popp
-        to: http://popp-statics
-      - from: /ocsp/tls
-        to: http://zeta-cert-validation-mock/ocsp/tls
-      - from: /ocsp/smb
-        to: http://zeta-cert-validation-mock/ocsp/smb
-      # Thin local push-gateway chart (charts/push-gateway) — single BOTH-mode
-      # instance, no HA/real delivery. See docs/how-to_guides/How_to_configure_tiger-proxy.md.
-      - from: /push-gateway
-        to: http://push-gateway:8080
-      # SEK-IDP chart (charts/sekidp) — routeViaTigerProxy is true, so both sekidp
-      # Ingress paths hop through tiger-proxy. See docs/how-to_guides/How_to_configure_sekidp.md.
-      - from: /sekidp
-        to: http://sekidp-gsi-server:8085
-      - from: /sekidp-fedmaster
-        to: http://sekidp-fedmaster:8083
-      # MailCatcher web UI (charts/mailcatcher) — no SMTP route (tiger-proxy is
-      # HTTP-only). The `to` path must keep the /mailcatcher suffix to match
-      # mailcatcher.httpPath. See docs/how-to_guides/How_to_configure_mailcatcher.md.
-      - from: /mailcatcher
-        to: http://mailcatcher:1080/mailcatcher
-      - from: /
-        to: http://pep-proxy-svc
-    tls:
-      domainName: tiger-proxy
+  registry_name: ""
   service:
     type: NodePort
     nodePorts:
-      admin: 32099
-  startup:
-    startupPeriodSeconds: 30
+      admin: 32097
 
 tiger-testsuite:
   containerSecurityContext:
@@ -384,15 +331,13 @@ tiger-testsuite:
   devMode: true
   env:
     zetaBaseUrl: zeta-kind.local
-    zetaProxyUrl: zeta-kind.local:9999
+    zetaProxyUrl: tiger-proxy:9999
     zetaProxy: proxy
     tigerEnvironment: cloud
     cucumberTags: ""
     mvnGoals: verify
     mvnAdditionalArgs: ""
     serenityExportDir: ""
-  image:
-    tag: 1.3.0
   proxyAdminService:
     enabled: true
     type: NodePort
@@ -415,6 +360,9 @@ tiger-testsuite:
 
 zeta-guard:
   authserver:
+    probes:
+      startup:
+        failureThreshold: 60
     truststoreReload:
       enabled: false
     admin:
@@ -424,23 +372,11 @@ zeta-guard:
       maxClients: "5000"
       # Required by notificationService.enabled: true (see values.schema.json allOf).
       oidcFlowEnabled: true
+      entityStatement:
+        clientName: "zeta-guard"
+        organizationName: "zeta-guard"
+        contactEmail: "noreply@localhost"
     genesisHash: 4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c
-    initContainer:
-      containerSecurityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        runAsNonRoot: true
-        runAsUser: 1000
-        capabilities:
-          drop: [ "ALL" ]
-    container:
-      containerSecurityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        runAsNonRoot: true
-        runAsUser: 1000
-        capabilities:
-          drop: [ "ALL" ]
     hostname: zeta-kind.local
     hsm:
       enabled: true
@@ -451,8 +387,6 @@ zeta-guard:
       tokenSigning:
         enabled: false
         keyId: "zeta-guard-keycloak-token-es256-v1.p256"
-    image:
-      tag: 1.3.3
     imagePullPolicy: IfNotPresent
     log:
       level: "INFO,de.gematik.zeta.zetaguard:debug"
@@ -471,9 +405,9 @@ zeta-guard:
   ingressClassName: nginx
   gematikConnectionEnabled: false
   nginx-ingress:
+    # Fixed Service name so CoreDNS can resolve the ingress hostnames to it (make kind-dns)
+    serviceNameOverride: nginx-ingress-controller
     controller:
-      image:
-        tag: 1.3.0
       ingressClass:
         name: nginx
       service:
@@ -497,13 +431,6 @@ zeta-guard:
       verification:
         enabled: false
         keyId: signer
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 1000
-      capabilities:
-        drop: [ "ALL" ]
     logLevel: info
     serviceAccountName: opa
     workloadIdentityFederation:
@@ -512,6 +439,10 @@ zeta-guard:
         sa: ""
   notificationService:
     enabled: true
+    rs:
+      mtls:
+        # Local HTTP route via Tiger; no RS client-certificate authentication.
+        enabled: false
     env:
       # Reach the Push Gateway via the public ingress /push-gateway (hops through
       # tiger-proxy -> push-gateway:8080), not the internal Service.
@@ -524,40 +455,22 @@ zeta-guard:
       trustedCAs:
         - secretName: zeta-guard-tls
           secretKey: ca.crt
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 1000
-      capabilities:
-        drop: [ "ALL" ]
   provisioningProcessor:
+    federationMaster:
+      enabled: true
+      environment: "test"
+      devModeUrl: "https://zeta-kind.local/sekidp-fedmaster"
     schedule:
       enabled: false
-    image:
-      tag: 1.3.2
     containerSecurityContext:
-      allowPrivilegeEscalation: false
       readOnlyRootFilesystem: false
-      runAsNonRoot: true
-      runAsUser: 1000
-      capabilities:
-        drop: [ "ALL" ]
   pepproxy:
     replicaCount: 1
     aslOcsp: "http://zeta-cert-validation-mock/ocsp/asl"
     asl_enabled: false
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 1000
-      capabilities:
-        drop: [ "ALL" ]
     hsmProxyAddr: "hsm-sim:50051"
-    image:
-      tag: 1.3.3
     nginxConf:
+      pepInternalUrl: ""  # chart default (off); discovery and JWKS go through the ingress
       generateConfigMap: true
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard
       requiredAudience: https://zeta-kind.local
@@ -611,7 +524,7 @@ zeta-guard:
 
           logs/ti_siem:
             exporters:
-              - count/siem
+              - count/security_kpis
               - otlp_http/tms_ti_siem
 
           metrics/dienst_hersteller:
@@ -638,7 +551,7 @@ zeta-guard:
 
           traces/ti_siem:
             exporters:
-              - count/siem
+              - count/security_kpis
               - otlp_http/tms_ti_siem
     # The root values.yaml zeroes extraVolumeMounts/extraVolumes for
     # telemetry-gateway (Helm lists replace, not merge), which silently drops

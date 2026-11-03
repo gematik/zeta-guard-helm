@@ -47,9 +47,19 @@ events {
 http {
     include http_common.conf;
 
-    access_log /dev/stdout main;
+    {{- /* `main` (from the image's http_common.conf) extended with the OTel
+         trace context; $otel_* only exist when ngx_otel_module is loaded */}}
+    {{- $accessLogFormat := "main" }}
+    {{- if $.Values.pepproxyTracingEnabled }}
+    {{- $accessLogFormat = "main_traced" }}
+    log_format main_traced '$remote_addr - $remote_user [$time_local] "$request" '
+                           '$status $body_bytes_sent ${request_time}s (${upstream_connect_time},${upstream_header_time},${upstream_response_time}) "$http_referer" '
+                           '"$http_user_agent" "$http_x_forwarded_for" trace_id=$otel_trace_id span_id=$otel_span_id';
+    {{- end }}
+
+    access_log /dev/stdout {{ $accessLogFormat }};
     {{- if $.Values.telemetryGatewayEnabled }}
-    access_log syslog:server={{ include "telemetryGateway.hostname" $ }}:54526 main;
+    access_log syslog:server={{ include "telemetryGateway.hostname" $ }}:54526 {{ $accessLogFormat }};
     {{- end }}
 
     client_body_temp_path /tmp/client_body_temp;
@@ -60,8 +70,17 @@ http {
     ### Global Config
 
     pep_pdp_issuer {{ .pepIssuer }};
+    {{- with .pepInternalUrl }}
+    ## Internal address for OIDC discovery + JWKS only, so that traffic stays in
+    ## the cluster instead of looping out through the ingress. `pep_pdp_issuer`
+    ## above remains the expected `iss`; only the network path changes.
+    pep_pdp_url {{ . }};
+    {{- end }}
 
-    pep_revocation_url http://authserver/auth/realms/zeta-guard/zeta-guard-revocation;
+    ## Session revocation (SSE block list + reports). Follows pepInternalUrl so a
+    ## non-standard authserver address or realm path needs no second setting.
+    {{- $revocationBase := .pepInternalUrl | default "http://authserver/auth/realms/zeta-guard" }}
+    pep_revocation_url {{ .pepRevocationUrl | default (printf "%s/zeta-guard-revocation" $revocationBase) }};
     ## server hosting PoPP entity statement at /.well-known/openid-federation
     ## optional if no locations use pep_require_popp
     {{- if .poppIssuer }}
@@ -127,11 +146,18 @@ http {
     {{- include "zeta-guard.pep-proxy-upstreams" (dict "root" $ "locations" .) | nindent 4 }}
     {{- end }}
 
+
+    upstream authserver-upstream {
+        server authserver:80 max_fails=1 fail_timeout=10s;
+        ## reuse connections instead of opening one per request (TIME_WAIT budget)
+        keepalive 32;
+    }
+
     server {
         include server_common.conf;
 
         listen 8081 reuseport;
-        {{- if $.Values.pepproxy.hsmProxyAddr }}
+        {{- if and $.Values.pepproxy.hsmProxyAddr $.Values.pepproxy.hsmTlsCert $.Values.pepproxy.hsmTlsKeyId }}
         listen 8443 ssl reuseport;
         ssl_certificate {{ $.Values.pepproxy.hsmTlsCert | quote }};
         ## NOTE: set HSM_PROXY_ADDR="https://hsm:50051" environment variable to use
@@ -177,6 +203,10 @@ http {
                 proxy_pass http://authserver/auth/realms/zeta-guard/.well-known/zeta-guard-well-known;
                 proxy_http_version 1.1;
             }
+            location = /.well-known/openid-federation {
+                proxy_pass http://authserver/auth/realms/zeta-guard/.well-known/openid-federation;
+                proxy_http_version 1.1;
+            }
             {{- if $.Values.notificationService.enabled }}
             # A_29979/A_28436: NS's own protected-resource doc, on its resource subpath.
             {{- $nsSubpath := include "zeta-guard.ns-well-known-subpath" $ }}
@@ -186,14 +216,120 @@ http {
             {{- end }}
         }
 
+        # The RS API is internal only. Public ingress routes this prefix here
+        # instead of through Tiger; return before authentication and ASL checks.
+        location = /notification-service-rs {
+            return 404;
+        }
+        location ^~ /notification-service-rs/ {
+            return 404;
+        }
+
         {{- if $.Values.authserver.adminHostname }}
-        # Block public access to Keycloak Admin REST API and Admin Console. Only
-        # /auth/admin is routed here (ingress-pep.yaml); every other /auth/* path goes
-        # straight to the authserver via the zeta-guard-auth minion and never reaches the
-        # PEP. `return` runs in the rewrite phase, so this answers before the PEP access
-        # check and before the server-level "deny all" that asl_enabled adds.
-        location ~ ^/auth/admin {
+        # Block public access to the Keycloak Admin REST API, the Admin Console and the
+        # master realm — the latter carries the admin token endpoint (admin-cli direct
+        # grant) and serves no ZETA traffic, which runs on the zeta-guard realm. Only
+        # /auth/admin and /auth/realms/master are routed here (ingress-pep.yaml); every
+        # other /auth/* path goes straight to the authserver via the zeta-guard-auth minion
+        # and never reaches the PEP. The (/|$) suffix keeps the 403 on segment boundaries,
+        # matching the Ingress pathType: Prefix that routes here, so a realm whose name
+        # merely starts with "master" is not denied. Such a path still reaches the PEP —
+        # the controller turns the Ingress path into a plain nginx prefix, which is not
+        # segment-aware — and then answers 401 for want of a token, exactly as /auth/admin
+        # has always behaved for e.g. /auth/administration. `return` runs in the rewrite
+        # phase, so this answers before the PEP access check and before the server-level
+        # "deny all" that asl_enabled adds.
+        location ~ ^/auth/(admin|realms/master)(/|$) {
             return 403;
+        }
+        {{- end }}
+        # The authserver paths of the client management are routed here by the Ingress / the
+        # tiger-proxy (instead of the /auth minion) and closed, regardless of oidcFlowEnabled:
+        # behind the PEP the authserver trusts zeta-client-data, so these paths must never be
+        # reachable with a client-supplied header. 404 like a path that does not exist;
+        # `return` runs before the PEP check.
+        location ~ ^/auth/realms/zeta-guard/zeta/(clients|identity/email)(/|$) {
+            return 404;
+        }
+        # E-mail binding of the registration (bind-email, /resend, /verify) on its public authserver
+        # path, routed here by the Ingress / tiger-proxy on every stage (not tied to oidcFlowEnabled:
+        # the authserver trusts zeta-client-data there). The reduced binding token carries
+        # zeta:email-verify in both of its states and, via the mappers on that scope, everything the
+        # PEP checks; the authserver takes the caller from zeta-client-data like the routes above.
+        location /auth/realms/zeta-guard/zeta/identity/bind-email {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/identity/bind-email;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:email-verify";
+            pep_forward_client_data on;
+        }
+
+        {{- if $.Values.authserver.config.oidcFlowEnabled }}
+
+        # Client management of mobile users (authserver as resource server behind the PEP):
+        # token, scope, DPoP, no-travel and block list are checked here, the caller reaches
+        # the authserver as zeta-client-data. PoPP is off (nothing to prove at a provider).
+        location = /zeta/clients {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/clients;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:client-management";
+            pep_forward_client_data on;
+        }
+
+        location /zeta/clients/ {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/clients/;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:client-management";
+            pep_forward_client_data on;
+        }
+
+        # E-mail change of the identity (+ /verify, /resend); bind-email/* of the registration stays on /auth.
+        location = /zeta/identity/email {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/identity/email;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:client-management";
+            pep_forward_client_data on;
+        }
+
+        location /zeta/identity/email/ {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/identity/email/;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:client-management";
+            pep_forward_client_data on;
         }
         {{- end }}
         {{- with .proxyLocations }}
@@ -281,7 +417,7 @@ http {
             proxy_http_version 1.1;
         }
         # A_29974: route is always present; when history is off the scope isn't issued so
-        # this 403s, and the NS 404/501s (defence in depth).
+        # this 403s, and the NS 404s (defence in depth).
         location /push/v1/history/ {
             satisfy all;
             allow all;

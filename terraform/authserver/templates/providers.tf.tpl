@@ -1,5 +1,3 @@
-{{KUBERNETES_PROVIDER_BLOCK}}
-
 provider "keycloak" {
   tls_insecure_skip_verify = var.insecure_tls
   url                      = var.keycloak_url

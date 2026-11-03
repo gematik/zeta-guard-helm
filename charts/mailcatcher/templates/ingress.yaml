@@ -1,0 +1,43 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- /* NIC mergeable minion for MailCatcher's web UI/API — mirrors charts/sekidp's
+     ingress pattern. Direct route only: MailCatcher serves under httpPath itself
+     (--http-path), so the prefix is passed through unchanged and no rewrite is
+     needed. Stages that route /mailcatcher via tiger-proxy keep this disabled and
+     use the tiger-proxy proxyRoutes entry instead (both at once would claim the
+     same path on the shared master). */ -}}
+---
+{{- if .Values.ingressEnabled }}
+{{- $path := required "mailcatcher.httpPath is required when ingressEnabled is true (MailCatcher must serve under the routed prefix)" .Values.httpPath }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mailcatcher
+  labels:
+    {{- include "mailcatcher.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: mailcatcher
+                port:
+                  name: http
+{{- end }}

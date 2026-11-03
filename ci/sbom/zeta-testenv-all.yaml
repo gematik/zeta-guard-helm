@@ -1,0 +1,31 @@
+# Enables every optional sub-chart of the umbrella so the SBOM lists all images it can deliver.
+# Used only by ci/sbom/generate_sbom.py (second render); never for a deployment.
+testMonitoringServiceEnabled: true
+androidDriverEnabled: true
+zetaTlsTestToolServiceEnabled: true
+zetaCertValidationMockEnabled: true
+hsmsim:
+  enabled: true
+popp-mocks:
+  enabled: true
+# load-dispenser has no default image (set per deployment), so it cannot be part of the inventory.
+lgtm:
+  enabled: true
+push-gateway:
+  enabled: true
+sekidp:
+  enabled: true
+  # render-only dummies for the chart's required-value checks
+  hostname: sbom-render-only
+  gsiServer:
+    env:
+      serverUrl: https://sbom-render-only
+  fedmaster:
+    env:
+      serverUrl: https://sbom-render-only
+mailcatcher:
+  enabled: true
+# both test drivers: the OIDC one is off by default
+testdriver-oidc:
+  enabled: true
+

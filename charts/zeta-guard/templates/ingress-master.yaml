@@ -23,7 +23,15 @@ metadata:
     nginx.org/hsts-include-subdomains: "true"
     {{- end }}
     {{- end }}
-    {{- with .Values.ingressMasterAnnotations }}
+    {{- $annotations := deepCopy (.Values.ingressMasterAnnotations | default dict) }}
+    {{- if and .Values.nginxIngressEnabled .Values.authserver.resourceServerMtls.enabled }}
+    {{- /* Resource servers calling userinfo/email present a client certificate. Requested from every client on
+         this host but optional and not verified here (no CA list): the authserver checks the chain itself, see
+         authserver.resourceServerMtls. Prepended to, not replacing, server-snippets the operator set (ossl_hsm). */}}
+    {{- $mtls := printf "ssl_verify_client optional_no_ca;\nssl_verify_depth %d;\n" (int .Values.authserver.resourceServerMtls.verifyDepth) }}
+    {{- $_ := set $annotations "nginx.org/server-snippets" (printf "%s%s" $mtls (get $annotations "nginx.org/server-snippets")) }}
+    {{- end }}
+    {{- with $annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:

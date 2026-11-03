@@ -2,10 +2,10 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: testdriver
+  name: testdriver-oidc
   labels:
-    app: testdriver
-    app.kubernetes.io/name: testdriver
+    app: testdriver-oidc
+    app.kubernetes.io/name: testdriver-oidc
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
@@ -18,5 +18,5 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app: testdriver
+      app: testdriver-oidc
 {{- end }}

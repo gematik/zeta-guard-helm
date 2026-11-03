@@ -1,0 +1,27 @@
+{{- /* zeta-guard may be disabled (tags.zeta-guard=false); then the guard release owns its own policies */ -}}
+{{- $zetaGuard := index .Values "zeta-guard" | default dict -}}
+{{- if and .Values.mailcatcher.enabled (dig "networkPolicy" "enabled" false $zetaGuard) (index .Subcharts "zeta-guard") }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: authserver-mailcatcher-egress
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/name: authserver
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: mailcatcher
+      ports:
+        - port: smtp
+          protocol: TCP
+{{- end }}

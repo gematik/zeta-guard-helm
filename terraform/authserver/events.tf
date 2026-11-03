@@ -18,5 +18,10 @@ resource "keycloak_realm_events" "zeta_realm_events" {
     # Session revocation: turns logouts, grant revocations and admin session
     # deletes into block-list entries the PEPs consume over SSE.
     "zeta-guard-revocation-events",
+
+    # Tamper-evident, hash-chained admin event log in the PDP database (ADMIN_EVENT_LOG).
+    "zeta-guard-admin-events",
+    # Client management notifications by e-mail: N1 client_added, N3 client_removed, N5 email_changed.
+    "zeta-guard-notifications",
   ]
 }

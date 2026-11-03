@@ -1,3 +1,13 @@
+{{- $seenRoutes := dict -}}
+{{- range $routeIndex, $route := .Values.proxyConfig.proxyRoutes -}}
+  {{- if or (empty $route.from) (empty $route.to) -}}
+    {{- fail (printf "tiger-proxy proxyConfig.proxyRoutes[%d] requires non-empty from and to values" $routeIndex) -}}
+  {{- end -}}
+  {{- if hasKey $seenRoutes $route.from -}}
+    {{- fail (printf "tiger-proxy proxyConfig.proxyRoutes contains duplicate route %q" $route.from) -}}
+  {{- end -}}
+  {{- $_ := set $seenRoutes $route.from true -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,21 +23,26 @@ data:
       activateRbelParsing: {{ .Values.proxyConfig.activateRbelParsing }}
       activateWorkflowUi: true
       parsingShouldBlockCommunication: {{ .Values.proxyConfig.parsingShouldBlockCommunication }}
+      stompClientBufferSizeInMb: {{ .Values.proxyConfig.stompClientBufferSizeInMb }}
       fileSaveInfo:
         writeToFile: {{ .Values.proxyConfig.fileSaveInfo.writeToFile }}
         fileName: {{ .Values.proxyConfig.fileSaveInfo.fileName }}
-      proxyRoutes:{{ range $route := .Values.proxyConfig.proxyRoutes }}
-      {{- if and $.Values.global.enableDNSRedirect (eq $route.from "/") }}
+      proxyRoutes:
+      {{- range $route := .Values.proxyConfig.proxyRoutes }}
+      - from: {{ $route.from }}
+        to: {{ $route.to }}{{ if $route.preserveHostHeader }}
+        preserveHostHeader: {{ $route.preserveHostHeader }}{{ end }}
+        {{- if hasKey $route "matchForProxyType" }}
+        matchForProxyType: {{ $route.matchForProxyType }}
+        {{- end }}
+      {{- end }}
+      {{- if .Values.global.enableDNSRedirect }}
         {{- range $redirect := $.Values.global.dns.redirects }}
           {{- range $redirectRoute := (default list $redirect.proxyRoutes) }}
       - from: {{ $redirectRoute.from }}
         to: {{ $redirectRoute.to }}
           {{- end }}
         {{- end }}
-      {{- end }}
-      - from: {{ $route.from }}
-        to: {{ $route.to }}{{ if $route.preserveHostHeader }}
-        preserveHostHeader: {{ $route.preserveHostHeader }}{{ end }}
       {{- end }}
       {{- with .Values.proxyConfig.tls }}
       tls:
@@ -41,6 +56,7 @@ data:
       proxyLogLevel: {{ .Values.proxyConfig.proxyLogLevel }}
       activateRbelParsing: {{ .Values.proxyConfig.activateRbelParsing }}
       parsingShouldBlockCommunication: {{ .Values.proxyConfig.parsingShouldBlockCommunication }}
+      stompClientBufferSizeInMb: {{ .Values.proxyConfig.stompClientBufferSizeInMb }}
       {{- if .Values.proxyConfig.directReverseProxy }}
       directReverseProxy:
         hostname: {{ .Values.proxyConfig.directReverseProxy.hostname }}

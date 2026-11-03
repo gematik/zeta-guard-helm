@@ -10,13 +10,11 @@ global:
     tigerStaticClusterIP: "10.96.3.11"
     redirects:
       - fqdn: ehca.gematik.de
-        proxyRoutes:
-          - from: /ecc-ocsp
-            to: http://ehca.gematik.de/ecc-ocsp
+        proxyRoutes: []
+      - fqdn: cert-mock.zeta.test
+        proxyRoutes: []
       - fqdn: ocsp-testref.root-ca.ti-dienste.de
-        proxyRoutes:
-          - from: /ocsp
-            to: http://ocsp-testref.root-ca.ti-dienste.de/ocsp
+        proxyRoutes: []
 
 registry_name: ""
 
@@ -27,7 +25,7 @@ replicaCount: 1
 devMode: false
 
 image:
-  tag: fork-1.3.0
+  tag: fork-2.0.0
   repository: testproxy
 imagePullPolicy: Always
 
@@ -82,6 +80,7 @@ proxyConfig:
   proxyLogLevel: INFO
   activateRbelParsing: true
   parsingShouldBlockCommunication: false
+  stompClientBufferSizeInMb: 32
   fileSaveInfo:
     writeToFile: false
     fileName: "tiger.log"
@@ -89,21 +88,67 @@ proxyConfig:
   proxyRoutes:
     - from: /testfachdienst
       to: https://testfachdienst:443
-      preserveHostHeader: true
+    # E-mail binding of the registration: through the PEP with the reduced binding token (see How_to_configure_Ingress.md).
+    - from: /auth/realms/zeta-guard/zeta/identity/bind-email
+      to: http://pep-proxy-svc/auth/realms/zeta-guard/zeta/identity/bind-email
     - from: /auth
       to: http://authserver/auth
+    - from: /td-smcb
+      to: http://testdriver-smcb
+    - from: /td-oidc
+      to: http://testdriver-oidc
     - from: /proxy
-      to: http://testdriver/proxy
+      to: http://testdriver-smcb/proxy
     - from: /opa
       to: http://opa:8181
+    - from: /opa-simulation
+      to: http://opa-simulation:8181
     - from: /.well-known/openid-federation
-      to: http://popp-statics/.well-known/openid-federation
-    - from: /.well-known/signed-jwks
-      to: http://popp-statics/.well-known/signed-jwks
+      to: http://authserver/auth/realms/zeta-guard/.well-known/openid-federation
     - from: /popp
       to: http://popp-statics
+    - from: /ocsp/tls
+      to: http://zeta-cert-validation-mock/ocsp/tls
+    - from: /ocsp/smb
+      to: http://zeta-cert-validation-mock/ocsp/smb
+    - from: http://ehca.gematik.de/
+      to: http://ehca.gematik.de/
+      matchForProxyType: false
+      preserveHostHeader: true
+    - from: http://cert-mock.zeta.test/
+      to: http://zeta-cert-validation-mock/
+      matchForProxyType: false
+      preserveHostHeader: true
+    - from: http://ocsp-testref.root-ca.ti-dienste.de/
+      to: http://ocsp-testref.root-ca.ti-dienste.de/
+      matchForProxyType: false
+      preserveHostHeader: true
+    # push-gateway chart (charts/push-gateway, push-gateway.enabled) — see
+    # docs/how-to_guides/How_to_configure_notification_service.md.
+    - from: /push-gateway
+      to: http://push-gateway:8080
+    # SEK-IDP chart (charts/sekidp, sekidp.enabled) — see How_to_configure_sekidp.md.
+    # routeViaTigerProxy is true, so both sekidp Ingress paths hop through tiger-proxy.
+    - from: /sekidp
+      to: http://sekidp-gsi-server:8085
+    - from: /sekidp-fedmaster
+      to: http://sekidp-fedmaster:8083
+    # mailcatcher chart (charts/mailcatcher, mailcatcher.enabled) — see How_to_configure_mailcatcher.md.
+    # Only the web UI (1080) is routed; SMTP (1025) stays ClusterIP-only.
+    - from: /mailcatcher
+      to: http://mailcatcher:1080/mailcatcher
+    - from: /notification-service-rs
+      to: http://notification-service-rs:8080
     - from: /
       to: http://pep-proxy-svc
+    - from: /zeta
+      to: http://pep-proxy-svc/zeta
+    # Authserver paths of the client management: to the PEP, which answers 404 (see How_to_configure_Ingress.md).
+    - from: /auth/realms/zeta-guard/zeta/clients
+      to: http://pep-proxy-svc/auth/realms/zeta-guard/zeta/clients
+    - from: /auth/realms/zeta-guard/zeta/identity/email
+      to: http://pep-proxy-svc/auth/realms/zeta-guard/zeta/identity/email
+
   tls: {}
 
 startup:

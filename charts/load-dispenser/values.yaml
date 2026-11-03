@@ -1,5 +1,8 @@
 global:
   imagePullSecrets: []
+  # Istio PeerAuthentication resources
+  istio:
+    enabled: false
 
 enabled: false
 

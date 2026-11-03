@@ -1,0 +1,22 @@
+{{- if and .Values.networkPolicy.enabled .Values.kpiMetricsPersistence.enabled }}
+# ADR 0001: kpiPrometheus's own egress. kpiPrometheus is purely a receiver
+# here — telemetry-gateway pushes KPI counters to it via OTLP (see
+# telemetry-gateway-netpol.yaml for that direction) and the kpi-metrics-
+# helper CronJob queries it — so DNS is the only egress it needs itself.
+# See _helpers.tpl's kpiPrometheus.selectorLabels for where the label values
+# below come from.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kpi-prometheus-egress
+  labels:
+    {{- include "kpiPrometheus.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kpiPrometheus.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "zeta-guard.dnsEgressRule" . | nindent 4 }}
+{{- end }}

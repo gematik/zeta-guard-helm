@@ -4,6 +4,23 @@
   "author": "Unknown Author",
   "version": 1,
   "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56854",
+        "aliases": [
+          "GO-2026-6303"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Die Schwachstelle betrifft das Symbol 'NewServerConn' im Paket 'golang.org/x/crypto/ssh'. Dieses Symbol wird in der Go-Anwendung 'usr/bin/nginx-prometheus-exporter' nicht verwendet. Verifiziert mit dem Tool govulncheck des Go-Entwicklungsteams gegen die Codebasis vom nginx-prometheus-exporter.",
+      "timestamp": "2026-09-03T15:29:00Z"
+    }
   ],
-  "timestamp": "2026-02-27T15:41:26Z"
+  "timestamp": "2026-02-27T15:41:26Z",
+  "last_updated": "2026-09-03T15:29:00Z"
 }

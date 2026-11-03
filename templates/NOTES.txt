@@ -1,13 +1,16 @@
-{{- $zgv := (index .Subcharts "zeta-guard").Values -}}
-{{- $host := $zgv.authserver.hostname -}}
-{{- $adminHost := $zgv.authserver.adminHostname -}}
+{{- /* zeta-guard may be disabled (tags.zeta-guard=false) when the guard runs as a separate release */ -}}
+{{- $zg := index .Subcharts "zeta-guard" -}}
+{{- $zgv := dict -}}
+{{- $host := "" -}}
+{{- $adminHost := "" -}}
+{{- if $zg }}{{- $zgv = $zg.Values }}{{- $host = $zgv.authserver.hostname }}{{- $adminHost = $zgv.authserver.adminHostname }}{{- end -}}
 =============================== ZETA ENV OVERVIEW ===============================
 Thank you for installing {{ .Chart.Name }}.
 
 Your Fachdienst is at
 
     {{
-        .Subcharts.testdriver.Values.fachdienst_url
+        (index .Subcharts "testdriver-smcb").Values.fachdienst_url
             | default "http://localhost/pep/"
     }}
 
@@ -29,7 +32,7 @@ and your administration frontend is at
     {{- end }}
 
 
-{{- $zg := (index .Subcharts "zeta-guard") }}
+{{- if $zg }}
 Deployed component versions
   (release {{ .Release.Name }} · namespace {{ .Release.Namespace }})
   chart: {{ $zg.Chart.Name }}-{{ $zg.Chart.Version }}{{ if $zg.Chart.AppVersion }} (app {{ $zg.Chart.AppVersion }}){{ end }}  ·  umbrella: {{ .Chart.Name }}-{{ .Chart.Version }}
@@ -88,9 +91,13 @@ Deployed component versions
 {{- if $zg.Values.notificationService.enabled }}
     history:        {{ $zg.Values.notificationService.historyEnabled | ternary "enabled" "disabled" }}
     channels:       {{ $zg.Values.notificationService.env.channelsAllowed | default "(unset)" }}
-    sealing:        {{ $zg.Values.notificationService.env.persistenceSealingEnabled | ternary "enabled (HSM)" "disabled" }}
+    sealing:        {{ $zg.Values.notificationService.sealing.enabled | ternary "enabled (HSM)" "disabled" }}
+    encryption:     {{ $zg.Values.notificationService.env.encryptionEnabled | ternary "enabled" "disabled" }}
     db:             {{ $zg.Values.notificationService.db.mode }}{{ if eq ($zg.Values.notificationService.db.mode | default "cloudnative") "cloudnative" }} ({{ $zg.Values.notificationService.db.clusterName }}){{ end }}
     push-gateway:   {{ (index .Values "push-gateway").enabled | ternary "bundled mock" "external/none" }}
+{{- end }}
+{{- else }}
+  zeta-guard:                not in this release (tags.zeta-guard=false; deployed as its own guard release, see make status-guard)
 {{- end }}
   sekidp (Stufe 2):          {{ (index .Values "sekidp").enabled | ternary "enabled" "disabled" }}
 {{- with (index .Subcharts "sekidp") }}
@@ -103,12 +110,13 @@ Deployed component versions
 {{- if (index .Values "mailcatcher").enabled }}
   mailcatcher:               enabled (dev mail sink)
 {{- end }}
-{{- with .Subcharts.testdriver }}
-  testdriver:                {{ .Values.image.tag | default "default" }}  (auth: {{ .Values.authMode | default "SMB" }})
-{{- if eq (.Values.authMode | default "SMB") "OIDC" }}
-    oidc-idp:       {{ .Values.oidcIdpIss | default "(unset)" }}  (alias: {{ .Values.oidcIdpAlias | default "(unset)" }})
-{{- end }}
+{{- with (index .Subcharts "testdriver-smcb") }}
+  testdriver-smcb:           {{ .Values.image.tag | default "default" }}  (auth: SMB)
     popp-token:     {{ empty .Values.PoppToken | ternary "NOT set" "set (static JWT — expires!)" }}
+{{- end }}
+{{- with (index .Subcharts "testdriver-oidc") }}
+  testdriver-oidc:           {{ .Values.image.tag | default "default" }}  (auth: OIDC)
+    oidc-idp:       {{ .Values.oidcIdpIss | default "(unset)" }}  (alias: {{ .Values.oidcIdpAlias | default "(unset)" }})
 {{- end }}
 {{- with .Subcharts.nativedriver }}
   nativedriver:              {{ .Values.image.tag | default "default" }}
@@ -131,6 +139,7 @@ Deployed component versions
   infinispan (external):     {{ .image.tag | default "default" }}  (replicas: {{ .replicaCount | default 1 }}, hsm: {{ if (and .hsm .hsm.enabled) }}enabled{{ else }}disabled{{ end }})
 {{- end }}
 {{- end }}
+{{- if $zg }}
 {{- if eq $zg.Values.databaseMode "cloudnative" }}
   database (cloudnative-pg): {{ $zg.Values.cloudnativePg.imageName | default "default" }}  (instances: {{ $zg.Values.cloudnativePg.instances | default 1 }}{{ if eq (int ($zg.Values.cloudnativePg.instances | default 1)) 1 }} — ⚠ single instance, SPOF{{ end }}, backup: {{ if (and $zg.Values.cloudnativePg.backup $zg.Values.cloudnativePg.backup.enabled) }}on{{ else }}off{{ end }})
 {{- else }}
@@ -143,6 +152,7 @@ Deployed component versions
 {{- if $zg.Values.devMode }}
 
   ⚠ devMode ENABLED — forces pod rollouts on every upgrade; intended for dev/test only.
+{{- end }}
 {{- end }}
 
 {{ if .Values.testMonitoringServiceEnabled -}}

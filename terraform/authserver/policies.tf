@@ -5,7 +5,7 @@ data "external" "manage_policies" {
   program = [
     "/usr/bin/env",
     "bash",
-    "scripts/managePolicies.sh"
+    "${path.module}/scripts/managePolicies.sh"
   ]
 
   # No credentials in the query — it's stored in tfstate and echoed in plans.

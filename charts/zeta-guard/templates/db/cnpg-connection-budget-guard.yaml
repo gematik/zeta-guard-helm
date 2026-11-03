@@ -1,0 +1,4 @@
+{{- /* Runs regardless of keycloak-db.enabled — see the helper doc in _helpers.tpl. */}}
+{{- if eq .Values.databaseMode "cloudnative" }}
+{{- include "zeta-guard.cnpgConnectionBudgetGuard" . }}
+{{- end }}

@@ -99,6 +99,14 @@ spec:
               value: {{ .Values.gsiServer.env.logLevelGematik | quote }}
             - name: REQUEST_LOGGING_ENABLED
               value: {{ .Values.gsiServer.env.requestLoggingEnabled | quote }}
+            {{- if .Values.gsiServer.entityStatementAboutRp }}
+            # local: validate authserver's PAR against the mounted entity statement
+            # instead of resolving authserver through gsi-fedmaster.
+            - name: GSI_FEDMASTER_MODE
+              value: "local"
+            - name: GSI_FEDMASTER_LOCAL_ENTITY_STATEMENT_FILE
+              value: "/fedmaster-config/entity-statement-about-rp.jwt"
+            {{- end }}
             {{- if .Values.gsiServer.additionalTrustedCAs }}
             - name: JDK_JAVA_OPTIONS
               value: "-Djavax.net.ssl.trustStore=/truststore/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
@@ -113,20 +121,29 @@ spec:
               mountPath: /truststore
               readOnly: true
             {{- end }}
+            {{- if .Values.gsiServer.entityStatementAboutRp }}
+            - name: fedmaster-config
+              mountPath: /fedmaster-config
+              readOnly: true
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            periodSeconds: {{ .Values.gsiServer.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.gsiServer.probes.startup.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: management
-            initialDelaySeconds: 45
-            periodSeconds: 10
-            failureThreshold: 6
+            periodSeconds: {{ .Values.gsiServer.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.gsiServer.probes.liveness.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: management
-            initialDelaySeconds: 45
-            periodSeconds: 10
-            failureThreshold: 6
+            periodSeconds: {{ .Values.gsiServer.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.gsiServer.probes.readiness.failureThreshold }}
           {{- with .Values.gsiServer.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -145,6 +162,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.gsiServer.entityStatementAboutRp }}
+        - name: fedmaster-config
+          configMap:
+            name: sekidp-gsi-server-entity-statement-about-rp
+            items:
+              - key: entity-statement-about-rp.jwt
+                path: entity-statement-about-rp.jwt
+        {{- end }}
         {{- if .Values.gsiServer.additionalTrustedCAs }}
         - name: trusted-ca-sources
           projected:

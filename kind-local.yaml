@@ -1,6 +1,12 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: zeta-local
+kubeadmConfigPatches:
+  # Pull images of a fresh cluster in parallel instead of one after another (kubelet default).
+  - |
+    kind: KubeletConfiguration
+    serializeImagePulls: false
+    maxParallelImagePulls: 4
 nodes:
   - role: control-plane
     extraPortMappings:
@@ -11,7 +17,7 @@ nodes:
       - containerPort: 32443
         hostPort: 443
         protocol: TCP
-      - containerPort: 32099
+      - containerPort: 32097
         hostPort: 9999
         protocol: TCP
       - containerPort: 32098
@@ -19,6 +25,9 @@ nodes:
         protocol: TCP
       - containerPort: 32090
         hostPort: 9090
+        protocol: TCP
+      - containerPort: 32086
+        hostPort: 16686
         protocol: TCP
       - containerPort: 32010
         hostPort: 9010
@@ -33,5 +42,9 @@ nodes:
         hostPort: 9013
         protocol: TCP
 
-  - role: worker
-  - role: worker
+  # Worker deliberately commented out, not deleted: single-node saves ~2 kubelet/containerd
+  # stacks plus per-node image pulls (KIND drops the control-plane taint on one-node clusters,
+  # so scheduling still works). Uncomment when testing multi-node behaviour (affinity, drain,
+  # tolerations) — topology only applies on cluster creation: make kind-down && make kind-up.
+  # - role: worker
+  # - role: worker

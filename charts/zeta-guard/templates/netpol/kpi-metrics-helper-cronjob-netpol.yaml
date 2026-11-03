@@ -1,0 +1,39 @@
+{{- if and .Values.networkPolicy.enabled .Values.kpiMetricsPersistence.enabled }}
+# ADR 0001: the kpi-metrics-helper CronJob's own egress — it queries
+# kpiPrometheus's HTTP API and OTLP-pushes the corrected value to
+# telemetry-gateway's dedicated otlp/security_kpis_corrected receiver.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kpi-metrics-helper-egress
+  labels:
+    {{- include "kpiMetricsHelper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kpiMetricsHelper.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "zeta-guard.dnsEgressRule" . | nindent 4 }}
+    # kpiPrometheus's query API. Port is the pod's containerPort (9090, via
+    # prometheus.port), not the Service's servicePort (80): kindnet
+    # evaluates egress NetworkPolicy after kube-proxy DNAT, so the
+    # post-DNAT destination is always the pod's own port (see this repo's
+    # NetworkPolicy — kindnet / KIND Gotchas notes).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "kpiPrometheus.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 9090
+          protocol: TCP
+    # telemetry-gateway's otlp/security_kpis_corrected receiver (corrected value push)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "telemetryGateway.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 4319
+          protocol: TCP
+{{- end }}
