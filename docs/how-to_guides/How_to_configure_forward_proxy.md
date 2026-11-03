@@ -23,7 +23,7 @@ These components intentionally do **not** receive proxy configuration:
 
 | Component                           | Reason                                       |
 |-------------------------------------|----------------------------------------------|
-| `keycloak-build` init container     | Runs `kc.sh build` locally, no outbound HTTP |
+| `keycloak-copy` init container      | Copies the image into the pod volume, no network |
 | `keychain-generator` init container | gRPC to cluster-internal HSM only            |
 
 ### Sub-charts (manual configuration required)

@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: androiddriver
+  labels:
+    component: androiddriver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: androiddriver
+  template:
+    metadata:
+      labels:
+        app: androiddriver
+        component: androiddriver
+      {{- if .Values.devMode }}
+      annotations:
+        zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
+      {{- end }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets | default .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: androiddriver
+          image: "{{ default (printf "%s%s" .Values.global.registry_host .Values.registry_name) .Values.image.registry }}{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          workingDir: {{ .Values.workingDir | quote }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessPath | quote }}
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 10
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+              name: http
+          volumeMounts:
+            - name: android-tmp
+              mountPath: /tmp
+            {{- if .Values.kvm.enabled }}
+            - name: android-kvm
+              mountPath: /dev/kvm
+            {{- end }}
+          env:
+            - name: HOME
+              value: "/tmp"
+            - name: FACHDIENST_URL
+              value: {{ .Values.fachdienst_url | quote }}
+            - name: POPP_TOKEN
+              value: {{ .Values.PoppToken | quote }}
+            - name: OIDC_IDP_ISS
+              value: {{ .Values.oidcIdpIss | quote }}
+            - name: OIDC_IDP_ALIAS
+              value: {{ .Values.oidcIdpAlias | quote }}
+            - name: OIDC_BASE_URI
+              value: {{ .Values.oidcBaseUri | quote }}
+            - name: OIDC_TEST_KVNR
+              value: {{ .Values.oidcTestKvnr | quote }}
+            {{- with .Values.oidcBindingEmail }}
+            - name: OIDC_BINDING_EMAIL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: PUSH_GATEWAY_URL
+              value: {{ .Values.pushGatewayUrl | quote }}
+            - name: PUSHER_APP_ID
+              value: {{ .Values.pusherAppId | quote }}
+            {{- with .Values.firebase }}
+            - name: FIREBASE_APP_ID
+              value: {{ .appId | quote }}
+            - name: FIREBASE_API_KEY
+              value: {{ .apiKey | quote }}
+            - name: FIREBASE_PROJECT_ID
+              value: {{ .projectId | quote }}
+            - name: FIREBASE_SENDER_ID
+              value: {{ .senderId | quote }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: android-tmp
+          emptyDir: {}
+        {{- if .Values.kvm.enabled }}
+        - name: android-kvm
+          hostPath:
+            path: {{ .Values.kvm.hostPath | quote }}
+            type: CharDevice
+        {{- end }}

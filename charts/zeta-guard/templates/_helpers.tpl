@@ -138,6 +138,9 @@ Common labels
 {{- define "opa.labels" -}}
 {{ include "opa.selectorLabels" . }}
 app.kubernetes.io/component: pdp
+{{- with .Values.opa.image.tag }}
+app.kubernetes.io/version: {{ . | quote }}
+{{- end }}
 {{ include "zeta-guard.baseLabels" . }}
 {{- end }}
 
@@ -155,6 +158,9 @@ Common labels for simulation OPA
 {{- define "opaSimulation.labels" -}}
 {{ include "opaSimulation.selectorLabels" . }}
 app.kubernetes.io/component: pdp
+{{- with .Values.opa.image.tag }}
+app.kubernetes.io/version: {{ . | quote }}
+{{- end }}
 {{ include "zeta-guard.baseLabels" . }}
 {{- end }}
 
@@ -201,6 +207,47 @@ Selector labels
 {{- define "pep-proxy.selectorLabels" -}}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/name: pep-proxy
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.mergedSecurityContext (internal)
+  Renders a `securityContext:` block from a component's values map (.sc) plus every
+  key of .defaults the map does not set itself (shallow: a key present in the
+  component map wins, even with a null value). Renders `securityContext: {}` if
+  both are empty.
+*/}}
+{{- define "zeta-guard.mergedSecurityContext" -}}
+{{- $sc := deepCopy (.sc | default dict) -}}
+{{- range $key, $value := .defaults | default dict -}}
+{{- if not (hasKey $sc $key) -}}
+{{- $_ := set $sc $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- if $sc -}}
+securityContext:
+  {{- toYaml $sc | nindent 2 }}
+{{- else -}}
+securityContext: {}
+{{- end -}}
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.containerSecurityContext
+  Container `securityContext:` — the component's map on top of
+  .Values.defaultContainerSecurityContext. See that value for why runAsUser is set there.
+  Usage: {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.x.containerSecurityContext) | nindent N }}
+*/}}
+{{- define "zeta-guard.containerSecurityContext" -}}
+{{- include "zeta-guard.mergedSecurityContext" (dict "sc" .sc "defaults" .root.Values.defaultContainerSecurityContext) -}}
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.podSecurityContext
+  Pod `securityContext:` — the component's map on top of .Values.defaultPodSecurityContext.
+  Usage: {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" .Values.x.podSecurityContext) | nindent N }}
+*/}}
+{{- define "zeta-guard.podSecurityContext" -}}
+{{- include "zeta-guard.mergedSecurityContext" (dict "sc" .sc "defaults" .root.Values.defaultPodSecurityContext) -}}
 {{- end -}}
 
 {{/*
@@ -352,3 +399,175 @@ The registry-ca volume itself is emitted by zeta-guard.provisioningProcessor.caV
   ports:
     {{- toYaml $dns.ports | nindent 4 }}
 {{- end -}}
+
+{{/*
+  Helper: zeta-guard.cnpgConnectionBudgetGuard
+  Fails the render if authserver.replicaCount × authserver.dbPool.maxSize (+ a reserve for
+  CNPG/superuser slots) would exceed the keycloak-db cluster's max_connections — exceeding it
+  exhausts the DB (SQLSTATE 53300). Reads max_connections from whichever provisioning path is
+  active (the hand-rolled cloudnativePg.* template, or the upstream keycloak-db chart), so the
+  guard keeps working regardless of keycloak-db.enabled.
+  Include unconditionally wherever databaseMode == "cloudnative" is already checked; produces
+  no output on success.
+*/}}
+{{- define "zeta-guard.cnpgConnectionBudgetGuard" -}}
+{{- $reserve := 25 }}
+{{- $needed := add (mul (int .Values.authserver.replicaCount) (int .Values.authserver.dbPool.maxSize)) $reserve }}
+{{- $keycloakDbEnabled := index .Values "keycloak-db" "enabled" }}
+{{- $maxConn := 0 }}
+{{- if $keycloakDbEnabled }}
+{{- $maxConn = int (index .Values "keycloak-db" "cluster" "postgresql" "parameters" "max_connections") }}
+{{- else }}
+{{- $maxConn = int .Values.cloudnativePg.parameters.maxConnections }}
+{{- end }}
+{{- if gt $needed $maxConn }}
+{{- fail (printf "zeta-guard connection budget exceeded: authserver.replicaCount (%d) × authserver.dbPool.maxSize (%d) + %d reserve = %d, which exceeds max_connections (%d, from %s). Lower dbPool.maxSize or replicaCount, or raise max_connections accordingly. See docs/how-to_guides/How_to_configure_authserver.md." (int .Values.authserver.replicaCount) (int .Values.authserver.dbPool.maxSize) $reserve $needed $maxConn (ternary "keycloak-db.cluster.postgresql.parameters.max_connections" "cloudnativePg.parameters.maxConnections" $keycloakDbEnabled)) }}
+{{- end }}
+{{- end -}}
+
+{{/*
+  Helper: authserver.dbUrl
+  Renders the authserver JDBC URL for the active databaseMode, with
+  authserver.db.urlProperties appended as query parameters.
+
+  This is where the pgjdbc driver settings live (socketTimeout, tcpKeepAlive). They cannot
+  be passed as QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_* environment variables:
+  that is a Map property, and an env var name cannot carry the camelCase key — it would
+  arrive as "sockettimeout" and pgjdbc would silently ignore it. In the URL the case
+  survives, and pgjdbc gives URL values priority over connection properties anyway
+  (Driver.parseURL: "priority 1 - URL values").
+
+  Deliberately NOT KC_DB_URL_PROPERTIES: Keycloak ignores that option whenever db-url is
+  set (DatabaseOptions.DB_URL_PROPERTIES), which it always is here.
+
+  A JDBC URL is an opaque URI, so urlParse leaves .host/.path empty and puts everything
+  after "jdbc:" into .opaque — but it does split off an existing query, and urlJoin puts
+  the pieces back together unchanged. Hence the existing query is merged rather than
+  replaced: setting .query outright would silently drop it.
+
+  Values are urlquery-escaped; pgjdbc decodes them again (URLCoder.decode -> URLDecoder).
+  Pairs are sorted so repeated renders are byte-stable — Go map iteration order is
+  randomised, and an unstable env value would roll the Deployment on every helm upgrade.
+*/}}
+{{- define "authserver.dbUrl" -}}
+{{- $base := ternary .Values.cloudnativeDbUrl .Values.authserverDb.kcDbUrl (eq .Values.databaseMode "cloudnative") -}}
+{{- $props := (.Values.authserver.db).urlProperties | default dict -}}
+{{- if not $props -}}
+{{- $base -}}
+{{- else -}}
+{{- range $forbidden := list "connectTimeout" "targetServerType" -}}
+{{- if hasKey $props $forbidden -}}
+{{- fail (printf "authserver.db.urlProperties.%s is not allowed: Keycloak substring-matches the JDBC URL and stops injecting its own default (db-connect-timeout=10s, db-postgres-target-server-type=primary) as soon as either name appears there. Use --db-connect-timeout for the former and leave the latter at Keycloak's default." $forbidden) -}}
+{{- end -}}
+{{- end -}}
+{{- $pairs := list -}}
+{{- range $k, $v := $props -}}
+{{- $pairs = append $pairs (printf "%s=%s" (urlquery $k) (urlquery (toString $v))) -}}
+{{- end -}}
+{{- $url := urlParse $base -}}
+{{- $query := join "&" (sortAlpha $pairs) -}}
+{{- if $url.query -}}{{- $query = printf "%s&%s" $url.query $query -}}{{- end -}}
+{{- $_ := set $url "query" $query -}}
+{{- urlJoin $url -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+  Helper: zeta-guard.imageReference
+  Builds an image reference from a {repository, tag, digest} dict, preferring
+  the immutable digest when set (repository@digest) over the mutable tag
+  (repository:tag) — same convention as telemetry-gateway.image above and
+  the vendored opentelemetry-collector/prometheus-community charts' own
+  image-reference logic, for our own (non-vendored) resources.
+*/}}
+{{- define "zeta-guard.imageReference" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%s" .repository .tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+  Selector labels for the kpi-metrics-helper CronJob's pods (ADR 0001).
+*/}}
+{{- define "kpiMetricsHelper.selectorLabels" -}}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/name: kpi-metrics-helper
+{{- end }}
+
+{{/*
+  Common labels for the kpi-metrics-helper CronJob.
+*/}}
+{{- define "kpiMetricsHelper.labels" -}}
+{{ include "kpiMetricsHelper.selectorLabels" . }}
+{{ include "zeta-guard.baseLabels" . }}
+{{- end }}
+
+{{/*
+  Selector labels matching kpiPrometheus's server pod (ADR 0001) — derived
+  from prometheus-community/prometheus's own prometheus.common.matchLabels/
+  prometheus.server.matchLabels helpers (app.kubernetes.io/name resolves to
+  kpiPrometheus's `nameOverride` ("kpi-prometheus" — the "kpiPrometheus" alias
+  itself is camelCase, an invalid Kubernetes label/name component in some of
+  the resources it would otherwise flow into, see kpiPrometheus.server.
+  fullnameOverride in values.yaml for the fuller explanation);
+  app.kubernetes.io/component to .Values.server.name, the chart's own
+  "server" default). Used both by kpiPrometheus's own NetworkPolicy
+  podSelector and by anything that needs to reach it as an egress peer (see
+  kpi-metrics-helper-cronjob-netpol.yaml).
+*/}}
+{{- define "kpiPrometheus.selectorLabels" -}}
+app.kubernetes.io/name: kpi-prometheus
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: server
+{{- end }}
+
+{{/*
+  Common labels for kpiPrometheus-adjacent resources rendered by this chart
+  (its NetworkPolicy) — not for kpiPrometheus's own resources, which come
+  from the vendored dependency and use its own label helpers.
+*/}}
+{{- define "kpiPrometheus.labels" -}}
+{{ include "kpiPrometheus.selectorLabels" . }}
+{{ include "zeta-guard.baseLabels" . }}
+{{- end }}
+
+{{/*
+  Selector labels matching telemetry-gateway's pods — derived from the
+  vendored opentelemetry-collector chart's own opentelemetry-collector.
+  selectorLabels helper (app.kubernetes.io/name resolves to .Chart.Name).
+  IMPORTANT: telemetry-gateway is a Chart.yaml `alias:` of the
+  opentelemetry-collector dependency (charts/zeta-guard/Chart.yaml) — Helm
+  rewrites .Chart.Name to the alias for the aliased instance, so the
+  rendered label is "telemetry-gateway", NOT the literal chart name
+  "opentelemetry-collector". Verified against an actual `helm template`
+  render (charts/zeta-guard/charts/telemetry-gateway/templates/
+  deployment.yaml's pod template labels) — do not "correct" this back to
+  "opentelemetry-collector" without re-checking a real render first.
+
+  This also happens to be what keeps this selector from also matching
+  charts/test-monitoring-service's own otel-collector pod (its
+  opentelemetry-demo dependency vendors the same opentelemetry-collector
+  chart, same pinned version — see charts/zeta-guard/Chart.yaml's comment —
+  but un-aliased, so its app.kubernetes.io/name renders as the literal
+  "opentelemetry-collector"). Both are subcharts of the same umbrella
+  release (same app.kubernetes.io/instance), so name is what disambiguates
+  them, not instance.
+
+  app.kubernetes.io/part-of below is defense-in-depth on top of that,
+  sourced from telemetry-gateway.podLabels (values.yaml) — deliberately not
+  telemetry-gateway.additionalLabels, which lands on the Deployment's own
+  metadata only, not the pod template that NetworkPolicy podSelectors
+  actually match against.
+
+  Used by telemetry-gateway's own NetworkPolicy podSelector and by anything
+  that needs to reach it as an egress peer (authserver-netpol.yaml,
+  opa-netpol.yaml, opa-simulation-netpol.yaml, pep-proxy-netpol.yaml,
+  kpi-metrics-helper-cronjob-netpol.yaml).
+*/}}
+{{- define "telemetryGateway.selectorLabels" -}}
+app.kubernetes.io/name: telemetry-gateway
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/part-of: zeta-guard
+{{- end }}

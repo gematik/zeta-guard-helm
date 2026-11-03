@@ -37,6 +37,88 @@ zeta-guard:
 This creates a Cluster resource (kind: Cluster, apiVersion: postgresql.cnpg.io/v1)
 named `keycloak-db` and wires Keycloak to it.
 
+#### What a primary switchover or pod recreate does to the authserver
+
+Losing the primary is not a clean disconnect. Deleting the primary **pod**
+destroys its network namespace while the `keycloak-db-rw` ClusterIP stays valid,
+so kube-proxy's existing conntrack entries keep routing to an IP that no longer
+answers and nothing sends a TCP reset — the connection blackholes rather than
+failing. This is why a graceful database *restart* recovers by itself while a
+*pod recreate* used to hang the authserver until someone restarted it.
+
+The authserver now handles this on its own: a bounded socket timeout and bounded
+connection validation let the pool evict and rebuild its connections. See
+[How to configure the authserver](How_to_configure_authserver.md#connection-resilience-and-database-failover)
+for the settings and for how to verify the behaviour with the `agroal_*`
+metrics.
+
+> **If the authserver fails to start with a Liquibase lock error**, a schema
+> migration was killed mid-flight (the socket timeout applies to DDL too) and
+> the
+> changelog lock is still held; the next start waits 30 minutes before failing.
+> Release it:
+>
+> ```sql
+> UPDATE databasechangeloglock SET locked = false, lockgranted = NULL, lockedby = NULL;
+> ```
+
+### Provisioning via the upstream cloudnative-pg/cluster chart (opt-in)
+
+By default the Cluster resource above is created by a hand-rolled template
+(`templates/db/cnpg-cluster.yaml`). As an opt-in alternative, `keycloak-db` can
+instead be provisioned via the upstream
+[cloudnative-pg/cluster](https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md)
+chart, giving generic pass-through access to fields the hand-rolled template
+doesn't expose (pod affinity, PodMonitor, PrometheusRule, PgBouncer poolers,
+barman backups):
+
+```yaml
+zeta-guard:
+  databaseMode: cloudnative
+  keycloak-db:
+    enabled: true
+    fullnameOverride: keycloak-db
+    cluster:
+      instances: 1
+      enableSuperuserAccess: false
+      storage:
+        size: 10Gi
+      resources:
+        requests:
+          cpu: "2"
+          memory: 2Gi
+        limits:
+          memory: 3Gi
+      postgresql:
+        parameters:
+          shared_buffers: 512MB
+          max_connections: "250"
+      initdb:
+        database: keycloak
+        owner: zeta-guard
+```
+
+`keycloak-db.enabled: true` and the hand-rolled path are mutually exclusive —
+enabling it skips `cnpg-cluster.yaml`, `cnpg-pooler.yaml` and
+`cnpg-scheduledbackup.yaml` entirely, and this block replaces `cloudnativePg.*`
+for keycloak-db rather than merging with it. `fullnameOverride: keycloak-db`
+keeps the Cluster/Service/Secret names identical to the hand-rolled path, so
+NetworkPolicies, Istio PeerAuthentication selectors and the
+`cloudnativeDbUrl`/`cloudnativeDbSecretName` defaults keep working unchanged.
+
+`cluster.enablePDB` is deliberately left unset by default, inheriting the
+upstream chart's own default (`true`). Set it to `false` per stage for
+single-instance clusters, where a PodDisruptionBudget would otherwise block
+node drains — the same convention already used by `cloudnativePg.enablePDB`
+for the hand-rolled path.
+
+The connection-budget guard (which fails the render if
+`authserver.dbPool.maxSize × replicaCount` would exceed the cluster's
+`max_connections`) runs regardless of which path is enabled.
+
+This is disabled by default; the hand-rolled template remains authoritative
+until stages have explicitly migrated.
+
 ### Resetting CNPG operator and CRDs
 
 If you need to remove the operator and all CNPG CRDs before a clean re-install, run:

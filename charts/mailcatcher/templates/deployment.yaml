@@ -34,15 +34,17 @@ spec:
         - name: mailcatcher
           image: "{{ include "mailcatcher.image" . }}"
           imagePullPolicy: "{{ .Values.imagePullPolicy }}"
-          {{- if .Values.httpPath }}
           args:
             - "mailcatcher"
             - "-f"
             - "--ip"
             - "0.0.0.0"
+            - "--messages-limit"
+            - {{ .Values.messagesLimit | quote }}
+            {{- if .Values.httpPath }}
             - "--http-path"
             - "{{ .Values.httpPath }}"
-          {{- end }}
+            {{- end }}
           ports:
             # Fixed container ports 1025 (SMTP)/1080 (UI); service.*Port only set Service ports.
             - name: smtp

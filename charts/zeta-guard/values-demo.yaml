@@ -1,7 +1,7 @@
 # =============================================================================
 # ZETA Guard Helm Chart — Demo / Reference Values
 # =============================================================================
-# This file documents configurable values of the zeta-guard subchart.
+# This file documents configurable values of the zeta-guard chart.
 # Use it as a reference when creating environment-specific overrides.
 # Values shown here are sensible demo defaults; adjust for your environment.
 # =============================================================================
@@ -43,6 +43,28 @@ registry_name: ""
 additionalLabels: {}
 
 # ---------------------------------------------------------------------------
+# Security contexts (chart-wide defaults)
+# ---------------------------------------------------------------------------
+# Every pod / container securityContext of this chart starts from these maps.
+# Components only list what differs (podSecurityContext /
+# containerSecurityContext below): a key set there wins, every other key comes
+# from here. Merged per top-level key — a component's `capabilities` replaces
+# the whole map. Not read by the telemetry-gateway subchart (see below).
+defaultPodSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+defaultContainerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  # Required: several images declare a non-numeric USER or run as root, which
+  # the kubelet cannot verify against runAsNonRoot. On OpenShift set `null`
+  # (explicitly, not by omission) so the SCC assigns the UID.
+  runAsUser: 1000
+  capabilities:
+    drop: ["ALL"]
+
+# ---------------------------------------------------------------------------
 # Authserver (Keycloak-based ZETA authorization server)
 # ---------------------------------------------------------------------------
 authserver:
@@ -51,10 +73,8 @@ authserver:
     create: true
     name: authserver
 
-  # --- Pod security context (applied to the pod spec) ---
-  podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
+  # --- Pod security context (overrides on top of defaultPodSecurityContext) ---
+  podSecurityContext: {}
 
   # --- PodDisruptionBudget ---
   podDisruptionBudget:
@@ -62,9 +82,6 @@ authserver:
     minAvailable: 1
 
   # --- Image ---
-  image:
-    repository: keycloak-zeta
-    tag: 1.3.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
 
@@ -76,8 +93,10 @@ authserver:
   hostname: "zeta-demo.example"
   wellKnownAuthServerPath: /
   # Separate hostname for the Keycloak admin console and admin REST API.
-  # When set, /auth/admin is blocked via the PEP proxy and a dedicated admin
-  # ingress is created. Terraform and CI/CD runners must use this hostname.
+  # When set, /auth/admin and /auth/realms/master are blocked via the PEP proxy
+  # and a dedicated admin ingress is created. The master realm carries the admin
+  # token endpoint; the zeta-guard realm stays reachable on the main hostname.
+  # Terraform and CI/CD runners must use this hostname.
   # IP-based access restriction must be configured at the infrastructure layer
   # (e.g. Cloud Armor, NetworkPolicy, firewall rules).
   adminHostname: "admin.zeta-demo.example"
@@ -170,10 +189,10 @@ authserver:
     bootstrapInterval: "PT30S"
     bootstrapAttempts: 15
     keychainGenerator:
-      image:
-        repository: keychain-generator
-        tag: 2.0.4
       imagePullPolicy: IfNotPresent
+      # Overrides on top of defaultContainerSecurityContext.
+      containerSecurityContext:
+        readOnlyRootFilesystem: false
 
   # --- Additional trusted CAs ---
   # CAs Keycloak trusts for its own outbound HTTPS calls; each is mounted under
@@ -218,12 +237,8 @@ authserver:
 
   # --- Keycloak build init container ---
   initContainer:
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      capabilities:
-        drop: [ "ALL" ]
+    # Overrides on top of defaultContainerSecurityContext.
+    containerSecurityContext: {}
     resources:
       limits:
         cpu: "2"
@@ -234,12 +249,8 @@ authserver:
 
   # --- Main Keycloak container ---
   container:
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      capabilities:
-        drop: [ "ALL" ]
+    # Overrides on top of defaultContainerSecurityContext.
+    containerSecurityContext: {}
     resources:
       limits:
         cpu: "8"
@@ -253,12 +264,37 @@ authserver:
   # Mounted via container.extraVolumeMounts above.
   extraVolumes: []
 
+  # --- Database connection (pgjdbc driver parameters) ---
+  # Appended to KC_DB_URL as query parameters. Driver settings belong here rather than in
+  # QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_*: that is a Map property and an
+  # environment variable name cannot carry its camelCase key — it would arrive as
+  # "sockettimeout", which pgjdbc silently ignores.
+  # socketTimeout is in SECONDS and bounds every read, including Liquibase DDL.
+  # "connectTimeout" and "targetServerType" are rejected at render time: naming either in
+  # the URL makes Keycloak stop injecting its own default for the other.
+  db:
+    urlProperties:
+      socketTimeout: 120
+      tcpKeepAlive: true
+
   # --- Database connection pool ---
   # replicaCount × maxSize (+ ~25 reserve) must stay ≤ cloudnativePg.parameters.maxConnections (100 here).
   # Enforced at render time by templates/db/cnpg-cluster.yaml.
   dbPool:
     minSize: 10
     maxSize: 75
+    # Recycle pooled connections, so a socket orphaned by a database failover cannot sit in
+    # the pool forever. Keycloak leaves this unlimited for PostgreSQL.
+    maxLifetime: PT30M
+    # Agroal connection validation, rendered as QUARKUS_DATASOURCE_JDBC_* environment
+    # variables because Keycloak exposes no option for any of them. Without a validation
+    # timeout the pool validates with isValid(0) — no socket timeout — and hangs on the very
+    # connection it is meant to detect as dead. Foreground validation has no Quarkus default,
+    # i.e. it is off unless set.
+    validationQueryTimeout: 2S
+    backgroundValidationInterval: 15S
+    foregroundValidationInterval: 5S
+    idleRemovalInterval: 1M
 
   # --- HTTP thread pool ---
   httpPool:
@@ -279,18 +315,27 @@ authserver:
   testmode: false
 
   # --- Probe thresholds ---
+  # Do not leave timeoutSeconds unset: Kubernetes then assumes 1s. Once connection validation
+  # has evicted its first connection, Agroal's invalidCount never resets, so Keycloak performs
+  # a real database check on every readiness probe instead of answering from pool metrics — and
+  # 1s flaps under load. The ceiling is Agroal's acquisition timeout (PT20S).
+  # Liveness deliberately targets the database-independent /health/live: a database-aware
+  # liveness probe would fail on every authserver pod at once during an outage.
   probes:
     liveness:
       initialDelaySeconds: 0
       periodSeconds: 15
+      timeoutSeconds: 5
       failureThreshold: 5
     readiness:
       initialDelaySeconds: 30
       periodSeconds: 10
+      timeoutSeconds: 5
       failureThreshold: 5
     startup:
       initialDelaySeconds: 30
       periodSeconds: 10
+      timeoutSeconds: 5
       failureThreshold: 20
 
   # --- Host alias (test setup: add /etc/hosts entry) ---
@@ -324,15 +369,14 @@ pepproxy:
     create: true
     name: pep-proxy
 
-  # --- Pod security context (applied to the pod spec) ---
+  # --- Pod security context (overrides on top of defaultPodSecurityContext) ---
   podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
+    sysctls:
+      # Widen the ephemeral port range for connect/close churn (TIME_WAIT).
+      - name: net.ipv4.ip_local_port_range
+        value: "10240 65535"
 
   # --- Image ---
-  image:
-    repository: ngx_pep
-    tag: 1.3.0
   imagePullPolicy: Always
   imagePullSecrets: [ ]
 
@@ -356,13 +400,9 @@ pepproxy:
       cpu: "250m"
       memory: "200Mi"
 
-  # --- Container security context ---
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
+  # --- Container security context (nginx + metrics sidecar) ---
+  # Overrides on top of defaultContainerSecurityContext.
+  containerSecurityContext: {}
 
   # --- Well-known base URL ---
   wellKnownBase: http://localhost
@@ -375,7 +415,7 @@ pepproxy:
   # Specify an override OCSP URL or "off" to disable stapling:
   # aslOcsp: "http://example.org/ocsp"
   # Change maximum validity of cached OCSP responses (default 24h per A_24624-01):
-  # alsOcspTtl: 5m
+  # aslOcspTtl: 5m
   # HSM-backed ASL signer key as store URI, e.g. "store:hsm:asl-signer.p256".
   # Replaces the signer-key file from the asl-identity secret; requires hsmProxyAddr.
   asl_hsm_key: null
@@ -393,7 +433,7 @@ pepproxy:
     aslTestmode: false
 
     # Enable (true) or disable (false) no-travel enforcement
-    noTravel: false
+    noTravel: true
 
     # Fachdienst URL forwarded to by the PEP as optional convenience variable
     # for use in the `locations` template string.
@@ -410,8 +450,14 @@ pepproxy:
     #                      defaults to seconds when no unit is given, e.g. "1d"
     poppValidity: quarter
 
-    # OIDC issuer (iss) of the authorization server
-    pepIssuer: "http://authserver/auth/realms/zeta-guard"
+    # Public OIDC issuer (iss) of the authorization server. Must match the issuer
+    # Keycloak advertises, i.e. be derived from authserver.hostname above.
+    pepIssuer: "https://zeta-demo.example/auth/realms/zeta-guard"
+
+    # Cluster-internal address used only for OIDC discovery and the JWKS fetch,
+    # so that traffic does not loop out through the ingress. Off ("") by chart
+    # default; needs a PEP image >= 2.0.0-rc1.
+    pepInternalUrl: "http://authserver/auth/realms/zeta-guard"
 
     # Audience required for a valid access token
     requiredAudience: "test"
@@ -467,6 +513,10 @@ pepproxy:
   podLabels: {}
   podAnnotations: {}
 
+  # --- Host aliases (extra /etc/hosts entries for the PEP pod) ---
+  # Prefer nginxConf.pepInternalUrl for reaching the authserver in-cluster.
+  hostAliases: []
+
   # --- Scheduling ---
   affinity: {}
   tolerations: [ ]
@@ -481,7 +531,6 @@ pepproxy:
 pepproxyMetricsEnabled: true
 
 # nginx-prometheus-exporter image (required when pepproxyMetricsEnabled is true)
-pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter@sha256:0bf30a7c0ec24554a87063905f505a4ae4ea49043eab68f03660474512ba5fc8
 
 # Enable tracing for nginx
 pepproxyTracingEnabled: true
@@ -508,7 +557,6 @@ cloudnativeDbSchema: "public"
 # For production use instances >= 3.
 cloudnativePg:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-standard-trixie
   imagePullPolicy: ""
   resources:
     requests:
@@ -606,6 +654,9 @@ nginxIngressHsm: false
 certificateAdoption:
   # Needs kubectl + bash; same default as the token-renewer worker image.
   image: google/cloud-sdk:549.0.0
+  # Overrides on top of defaultContainerSecurityContext (kubectl writes to $HOME).
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
 
 nginx-ingress:
   controller:
@@ -662,9 +713,6 @@ devMode: false
 # ---------------------------------------------------------------------------
 opa:
   replicaCount: 1
-  image:
-    repository: opa
-    tag: 1.19.1-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
 
@@ -698,21 +746,13 @@ opa:
     # the chart then creates no RBAC and expects equivalent rights to exist.
     serviceAccountName: ""
 
-  # --- Container security context ---
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
-
-  # --- CronJob security context (WIF token renewer) ---
+  # --- Security contexts (overrides on top of the chart-wide defaults) ---
+  podSecurityContext: {}
+  containerSecurityContext: {}
+  # CronJobs (WIF token renewer, rollout restart); google/cloud-sdk needs the
+  # runAsUser from defaultContainerSecurityContext.
   cronjobSecurityContext:
-    allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
 
   # --- Resources ---
   resources:
@@ -759,7 +799,8 @@ opa:
     enabled: true
     replicaCount: 1
     bundle:
-      # Optional explicit simulation bundle resource. If empty, the chart derives from active resource.
+      # Simulation bundle resource. Required when bundle.enabled and simulation.enabled
+      # are true; it is not derived from bundle.resource.
       resource: ""
       # Optional signature-verification override for the simulation bundle only
       # (same keys as opa.bundle.verification). Empty → the shared one applies.
@@ -830,10 +871,6 @@ notificationService:
   enabled: false
   replicaCount: 1
   serviceAccountName: ""
-  image:
-    repository: notification-service
-    # Tag prefix only; the chart appends "-rs" / "-fdv" per variant.
-    tag: 1.3.0
   # Optional per-variant digest pins (the two variants differ). Empty → tag only.
   # A per-variant *tag* is not supported and would be ignored.
   rs:
@@ -845,11 +882,19 @@ notificationService:
   imagePullPolicy: Always
   imagePullSecrets: []
 
+  # --- Security contexts (overrides on top of the chart-wide defaults) ---
+  # The root filesystem stays read-only — /tmp is a writable emptyDir.
+  podSecurityContext: {}
+  containerSecurityContext: {}
+
   # --- Persistence (both variants share one database) ---
   db:
     # cloudnative → provision a dedicated CNPG Cluster; external → point
-    # jdbcUrl/secretName at an out-of-band Postgres.
+    # jdbcUrl/secretName at an out-of-band database.
     mode: cloudnative
+    # Database kind (notification.datasource.db-kind): postgresql, mariadb, mysql,
+    # mssql or oracle. cloudnative mode (CNPG) requires postgresql.
+    kind: postgresql
     # CNPG Cluster name and single source of truth: the -rw/-app resources,
     # NetworkPolicy selectors and the derived jdbcUrl/secretName all follow it.
     clusterName: "notification-db"
@@ -876,8 +921,36 @@ notificationService:
     pushGatewayAllowedBaseUrls: []
     # Allowed notification channels, comma-separated. No default.
     channelsAllowed: ""
-    # HSM-backed at-rest sealing of stored notification data.
-    persistenceSealingEnabled: false
+    # Encrypt push notification payloads when dispatching them.
+    encryptionEnabled: false
+
+  # --- HSM Proxy (backs the at-rest sealing below) ---
+  # Every key is optional; each env var is emitted only when its value is set,
+  # so an unset value keeps the service default.
+  hsm:
+    # host:port of the HSM Proxy, e.g. "hsm-sim:50051".
+    endpoint: ""
+    # Accept an unprotected (plain-text gRPC) channel to the HSM Proxy. With sealing
+    # enabled the service refuses to start unless this is true (mTLS is deferred).
+    # Only where the network itself protects the channel. With sealing disabled (see below) this becomes irrelevant.
+    plainTextAccepted: null
+
+  # --- At-rest sealing (requires hsm.endpoint) ---
+  # The keychain is a file on a volume of your choice (extraVolumes plus
+  # extraVolumeMounts and keychainGenerator.extraVolumeMounts), e.g. a Secret;
+  # see the how-to guide.
+  sealing:
+    enabled: false
+    keychainFileName: /keychain/keychain.json
+    # Moving records of older keychain entries to the current one. Unset -> 1h.
+    rotationInterval: null
+    initContainerProvideKeys: {}
+    initContainerStoreKeys: {}
+    keychainGenerator:
+      enabled: true
+      # KEK of a new keychain, e.g. notification-service-keychain-kek-aesgcm-v1.
+      # Required when sealing is enabled and the generator runs.
+      kekId: ""
 
   # --- Outbound connection to the Push Gateway ---
   pushGateway:
@@ -898,17 +971,14 @@ notificationService:
         secretName: ""
         secretKey: ""
 
-  # --- Quarkus HTTP access log ---
-  accessLog:
-    enabled: false
-    # Empty → Quarkus "common" pattern. %{i,Header-Name} captures a request header.
-    pattern: ""
-
   # --- Optional history feature (A_29974) ---
   # Single knob driving the service's NOTIFICATION_HISTORY_ENABLED env, the
   # discovery scopes_supported, and (via terraform) the Keycloak scope.
   historyEnabled: false
-
+  # How long a device's message history is kept: once it has passed after the
+  # first recorded notification, the complete history is erased. Exempt from the
+  # A_29988 processing-data retention. null -> the service default, P30D.
+  historyRetention: null
   # RFC 9728 resource identifier, combined with pepproxy.wellKnownBase to form the
   # audience. Single leading-slash segment, decoupled from the /push/v1 API prefix.
   wellKnownResourceSuffix: /notification-service
@@ -967,9 +1037,6 @@ provisioningProcessor:
   #   name: registry-credentials
   #   usernameKey: username   # default: username
   #   tokenKey: token         # default: token
-  image:
-    repository: provisioning-processor
-    tag: 1.3.0
   imagePullPolicy: Always
   resources:
     limits:
@@ -978,12 +1045,9 @@ provisioningProcessor:
     requests:
       cpu: "100m"
       memory: "100Mi"
+  # Overrides on top of defaultContainerSecurityContext.
   containerSecurityContext:
-    allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
 
 # ---------------------------------------------------------------------------
 # Gematik connection (OIDC token renewer CronJob)
@@ -1033,10 +1097,6 @@ telemetryGatewaySendingQueuePVCStorageClass: ""
 
 telemetry-gateway:
   mode: deployment
-  image:
-    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
-  command:
-    name: otelcol-k8s
   resources:
     limits:
       cpu: "4"
@@ -1044,8 +1104,9 @@ telemetry-gateway:
     requests:
       cpu: "100m"
       memory: "200Mi"
-  # No securityContext here on purpose — this inherits values.yaml, which is
-  # the only place in this chart that pins a UID/GID: the collector needs a
+  # No securityContext here on purpose — this inherits values.yaml. As a
+  # subchart it does not read defaultContainerSecurityContext, so values.yaml
+  # pins its own UID plus a GID (the only one in this chart): the collector needs a
   # known non-root identity that can write the file-storage PVC. OpenShift
   # rejects both, because its SCC assigns UID and GID from the namespace's
   # allocated range — hand them over there with an explicit `fsGroup: null` /

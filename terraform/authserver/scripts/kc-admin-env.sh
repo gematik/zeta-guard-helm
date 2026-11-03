@@ -15,7 +15,7 @@
 #   executed (sh):    eval "$(bash scripts/kc-admin-env.sh zeta-staging)"
 #
 # Sourced, it exports the variables and writes nothing to stdout. Executed, it
-# prints shell-quoted `export` lines for `eval`; the values pass through the
+# prints single-quoted `export` lines for `eval` in any POSIX shell; the values pass through the
 # command substitution, so they never appear in the process list or in shell
 # history. Both forms keep them out of CI logs.
 #
@@ -60,6 +60,10 @@ if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
 else
   set -euo pipefail
   _kc_admin_env "$@"
-  printf 'export TF_VAR_keycloak_username=%q\n' "$TF_VAR_keycloak_username"
-  printf 'export TF_VAR_keycloak_password=%q\n' "$TF_VAR_keycloak_password"
+  # POSIX single quotes, not printf %q: under a C locale %q emits $'…' for
+  # non-ASCII characters (£, €, …), which dash (/bin/sh on Debian/Ubuntu)
+  # does not understand.
+  _sq() { local v=${1//\'/\'\\\'\'}; printf "'%s'" "$v"; }
+  printf 'export TF_VAR_keycloak_username=%s\n' "$(_sq "$TF_VAR_keycloak_username")"
+  printf 'export TF_VAR_keycloak_password=%s\n' "$(_sq "$TF_VAR_keycloak_password")"
 fi

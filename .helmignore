@@ -27,3 +27,9 @@ Makefile
 /tmp/
 
 /.local
+
+# repository-internal notes, local keystores and CI build leftovers
+/CLAUDE.md
+*.p12
+/variables.env
+/sbom-missing-images.txt

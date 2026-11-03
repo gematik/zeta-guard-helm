@@ -13,34 +13,16 @@
 
 ## Activate routing via tiger proxy
 
-Set the following values in the `values.yaml` file for the respective environment to activate routing via Tiger proxy:
+The shared Tiger proxy configuration, including its standard routes, is defined
+centrally in `charts/tiger-proxy/values.yaml`. Environment-specific values
+should only contain the settings needed to activate routing:
 
 ```yaml
 tags:
   tiger-proxy: true
 
-tiger-proxy:
-  proxyConfig:
-    proxyRoutes:
-      - from: /testfachdienst
-        to: https://testfachdienst:443
-        preserveHostHeader: true
-      - from: /auth
-        to: http://authserver/auth
-      - from: /proxy
-        to: http://testdriver/proxy
-      - from: /telemetry/gateway
-        to: http://test-monitoring-collector-local:4328
-      - from: /opa
-        to: http://opa:8181
-      - from: /.well-known/openid-federation
-        to: http://popp-statics/.well-known/openid-federation
-      - from: /.well-known/signed-jwks
-        to: http://popp-statics/.well-known/signed-jwks
-      - from: /popp
-        to: http://popp-statics
-      - from: /
-        to: http://pep-proxy-svc
+global:
+  enableDNSRedirect: true
 
 zeta-guard:
   routeViaTigerProxy: true
@@ -59,9 +41,27 @@ zeta-guard:
         otlp_http/ti_siem:
           endpoint: http://tiger-proxy:4138
 
-testdriver:
+testfachdienst:
+  notificationServiceRsBaseUrl: "http://tiger-proxy/notification-service-rs"
+
+testdriver-smcb:
+  routeViaTigerProxy: true
+
+testdriver-oidc:
   routeViaTigerProxy: true
 ```
+
+These settings control separate traffic paths:
+
+| Setting | Effect |
+| --- | --- |
+| `tags.tiger-proxy` | Deploys or removes Tiger proxy. |
+| `zeta-guard.routeViaTigerProxy` | Routes incoming Guard traffic through Tiger. |
+| `zeta-guard.authserver.provider.smcB.opaBaseUrl` | Selects the authserver's OPA endpoint. |
+| `global.enableDNSRedirect` | Adds responder hostname overrides to the authserver, PEP and testdriver pods. To intercept their requests through Tiger, set the redirect IP to Tiger's Service IP. |
+
+DNS redirection is optional and disabled by default. Enabling ingress routing
+through Tiger alone does not intercept OCSP requests.
 
 Note: The `/popp`, `/.well-known/openid-federation`, and `/.well-known/signed-jwks`
 routes point to the `popp-statics` Service from the `popp-mocks` chart. Keep these routes in place when
@@ -69,10 +69,15 @@ the PEP PoPP issuer is exposed through Tiger Proxy, otherwise federation metadat
 or fail through the proxy path. Ensure `popp-mocks.enabled: true` (or adjust these targets and `poppIssuer`
 to your own PoPP metadata/JWKS endpoints).
 
-For telemetry, the switch works the same way as for the other Tiger routes: keep the
-`/telemetry/gateway` entry in `tiger-proxy.proxyConfig.proxyRoutes` and point the OTLP HTTP exporter to
-`http://tiger-proxy:4138` instead of the real collector. The dedicated Tiger OTLP entrypoint on port `4138`
-forwards to the Tiger route `/telemetry/gateway`, which then forwards to the configured backend target.
+The telemetry exporter settings above require a `/telemetry/gateway` route in
+`tiger-proxy.proxyConfig.proxyRoutes` pointing to your collector. This route is
+not included in the default route list. Add it before pointing exporters to
+`http://tiger-proxy:4138`; the dedicated OTLP HTTP entrypoint forwards requests
+to `/telemetry/gateway`.
+
+Helm replaces `proxyRoutes` lists rather than merging their entries. When
+overriding the list, retain all standard routes needed by your environment,
+including the responder hostname routes described below.
 
 After setting these values the Tiger proxy chart will be deployed when running `make deploy stage=<target-stage>`.
 
@@ -81,38 +86,109 @@ After setting these values the Tiger proxy chart will be deployed when running `
 In some cases clients need to contact a domain that is not or not easily configurable (e.g. CRL endpoints or OCSP responders in TLS certificates).
 The ZETA Guard deployment can be configured to redirect DNS resolution of such domains to a statically assigned in-cluster service IP.
 This can point to the standalone Tiger proxy or, for direct OCSP mock routing, to the OCSP mock service itself.
-When routing through Tiger proxy, `global.dns.redirects[].proxyRoutes[]` are inserted before the catch-all `/` Tiger proxy route.
-This keeps OCSP routes after any more specific routes and before the fallback route.
+When routing through Tiger proxy, `global.dns.redirects[].proxyRoutes[]` are appended to the configured proxy routes when DNS redirection is enabled, even if no `/` route is configured.
+Tiger automatically prioritizes more specific paths over the catch-all `/` route; `/` does not need to be last in YAML.
 
-See `values.yaml` for the following `global` section:
+The default responder list is defined in `values.yaml`. To enable DNS
+redirection with that list, set:
 
 ```yaml
 global:
-  enableDNSRedirect: false
+  enableDNSRedirect: true
   dns:
     tigerStaticClusterIP: "10.96.3.11"
     redirects:
       - fqdn: ehca.gematik.de
-        proxyRoutes:
-          - from: /ecc-ocsp
-            to: http://ehca.gematik.de/ecc-ocsp
+        proxyRoutes: []
+      - fqdn: cert-mock.zeta.test
+        proxyRoutes: []
       - fqdn: ocsp-testref.root-ca.ti-dienste.de
-        proxyRoutes:
-          - from: /ocsp
-            to: http://ocsp-testref.root-ca.ti-dienste.de/ocsp
+        proxyRoutes: []
 ```
 
 This section is used to:
-- assign a static ClusterIP to the Tiger proxy `Service` when Tiger proxy is deployed
-- add `hostAliases` to the `template.spec.hostAliases` key of the PEP, PDP and testdriver deployments
-- add the matching OCSP proxy routes to the Tiger proxy configuration when Tiger proxy is deployed
+
+- assign the configured static IP to the Tiger proxy Service and use the same IP for client DNS redirects
+- add `hostAliases` to the `template.spec.hostAliases` key of the PEP,
+  authserver and testdriver-* deployments
+- append any explicitly configured `redirects[].proxyRoutes` to the standard routes in the Tiger chart
+
+This section is meant for test setups: every entry in `global.dns.redirects` is
+mapped to the *same* IP (`tigerStaticClusterIP`), which is either the Tiger
+proxy
+or the OCSP mock. Do not use it to steer unrelated name resolution — to give the
+PEP its own `/etc/hosts` entries use `pepproxy.hostAliases`, and to reach the
+authserver in-cluster use `pepproxy.nginxConf.pepInternalUrl` (see
+[How to configure the authserver](How_to_configure_authserver.md)). The PEP's
+custom `hostAliases` are merged with the entries generated here.
+
+### Selecting the DNS redirect target
+
+Achelos enables the OCSP signer truststore and keeps Tiger proxy disabled.
+It redirects the certificate AIA hostname `cert-mock.zeta.test`
+directly to the OCSP mock Service IP. The resulting path is:
+
+`authserver -> cert-mock.zeta.test/ocsp/smb (zeta-cert-validation-mock)`
+
+The mock Service and DNS redirect both default to `10.0.0.240`. The Makefile
+preserves the mock's existing Service IP and uses it for the DNS redirect when
+rendering or deploying. For a first install, ensure the address is available in
+the cluster's Service CIDR, or override both the mock Service IP and the DNS
+redirect IP for that cluster.
 
 `Service.spec.clusterIP` is immutable after Kubernetes creates the Service. If `tiger-proxy` already exists,
 set `global.dns.tigerStaticClusterIP` to the current `tiger-proxy` Service IP, or deploy through the Makefile
 targets so the live Service IP is injected automatically before rendering.
 For direct mock routing, the same applies to `zeta-cert-validation-mock.service.clusterIP`.
 
-Enable `global.enableDNSRedirect` in each environment that should route certificate AIA domains through Tiger proxy.
+`zeta-guard.routeViaTigerProxy` controls incoming Guard traffic. OPA traversal
+is selected separately with `authserver.provider.smcB.opaBaseUrl`.
+With `global.enableDNSRedirect: true` and Tiger's Service IP configured in
+`global.dns.tigerStaticClusterIP`, the authserver, PEP and testdrivers resolve
+the hostnames in `global.dns.redirects` through Tiger. The defaults include
+the three responder hostnames. This is independent of the ingress and OPA
+settings. The Tiger chart has one route per
+hostname, preserving the original hostname and path:
+
+| Incoming hostname | Tiger destination |
+| --- | --- |
+| `ehca.gematik.de` | `http://ehca.gematik.de/` |
+| `cert-mock.zeta.test` | `http://zeta-cert-validation-mock/` |
+| `ocsp-testref.root-ca.ti-dienste.de` | `http://ocsp-testref.root-ca.ti-dienste.de/` |
+
+These routes also match ordinary HTTP requests redirected by DNS. The proxy
+itself resolves public responders normally. For `cert-mock.zeta.test`, Tiger
+forwards to the `zeta-cert-validation-mock` Service through Kubernetes DNS,
+preserving the original Host header and path. This also works on a first
+installation or with offline manifest rendering, without a pinned mock Service IP.
+Tiger's Service and the client DNS redirects both use
+`global.dns.tigerStaticClusterIP`. The Makefile injects Tiger's existing Service
+IP into this value for upgrades; for direct Helm upgrades, set it to the
+existing Service IP explicitly. ConfigMap changes trigger a Tiger rollout
+through its configuration checksum.
+
+This interception applies to HTTP requests for the listed hostnames from
+the pods with these hosts-file entries. Other OCSP responder hostnames use
+normal DNS resolution. An explicit endpoint such as
+`http://zeta-cert-validation-mock/ocsp/asl` also bypasses Tiger; configure a
+Tiger URL and a matching route if that traffic should be captured too.
+DNS redirection does not enable or disable the OCSP checks themselves.
+
+| Tiger deployed | DNS redirection | Redirect target | OCSP path for listed hostnames |
+| --- | --- | --- | --- |
+| Yes | Enabled | Tiger Service IP | Client -> Tiger -> public responder or mock, according to the route. |
+| Yes | Disabled | Unused | Normal DNS resolution; deploying Tiger alone does not intercept the requests. |
+| No | Disabled | Unused | Normal DNS resolution without Tiger. |
+| No | Enabled | Mock Service IP | Client -> mock directly; the mock must serve the certificate's AIA path. |
+
+When DNS redirection is enabled, its target Service must exist. Disabling
+Tiger while leaving redirects pointed at its former IP does not restore
+direct responder access.
+
+The same DNS setting supports direct mock routing by selecting the mock's
+Service IP instead, as in Achelos. The local values enable DNS redirection
+through Tiger alongside the separate ingress and OPA settings. The k3s
+overlay explicitly disables DNS redirection.
 
 For direct OCSP mock routing without Tiger proxy, override the static IP and give the OCSP mock service that ClusterIP.
 The IP must be valid for the target cluster's Service CIDR. Do not copy an IP from another cluster.
@@ -121,21 +197,30 @@ If there is no live Service, it falls back to the reserved achelos IP `10.0.0.24
 another Service already owns that IP.
 
 ```yaml
+tags:
+  tiger-proxy: false
+
+zetaCertValidationMockEnabled: true
+
 global:
   enableDNSRedirect: true
   dns:
     tigerStaticClusterIP: "<cluster-service-ip>"
     redirects:
-      - fqdn: ehca.gematik.de
-      - fqdn: ocsp-testref.root-ca.ti-dienste.de
+      - fqdn: cert-mock.zeta.test
+        proxyRoutes: []
 
 zeta-cert-validation-mock:
   service:
     clusterIP: "<cluster-service-ip>"
 ```
 
-**Note**: The full list of DNS redirections (`global.dns.redirects[]`) is written to the `hosts` file of the PEP, PDP and testdriver containers.
-If a redirect is routed through Tiger proxy and the domain is contacted for multiple purposes, all unique URL paths have to be added to `global.dns.redirects[].proxyRoutes[]`.
+This example redirects only `cert-mock.zeta.test`; public responder hostnames
+continue to resolve normally. Add other certificate AIA hostnames only when
+the mock should answer those requests too.
+
+**Note**: The full list of DNS redirections (`global.dns.redirects[]`) is written to the `hosts` file of the authserver, PEP and testdriver-* containers.
+The standard hostname routes in the Tiger chart preserve all paths. Add routes for any additional redirected hostnames to `tiger-proxy.proxyConfig.proxyRoutes`.
 If a redirect is routed directly to a backend service, the backend must expose the exact path embedded in the certificate AIA, for example `/ecc-ocsp` or `/ocsp`.
 
 
@@ -146,6 +231,9 @@ Set the following values in the `values.yaml` file for the respective environmen
 ```yaml
 tags:
   tiger-proxy: false
+
+global:
+  enableDNSRedirect: false
 
 tiger-proxy: {}
 
@@ -166,11 +254,20 @@ zeta-guard:
         otlp_http/ti_siem:
           endpoint: http://test-monitoring-collector-local:4338
 
-testdriver:
+testfachdienst:
+  notificationServiceRsBaseUrl: "http://notification-service-rs:8080"
+
+testdriver-smcb:
+  routeViaTigerProxy: false
+
+testdriver-oidc:
   routeViaTigerProxy: false
 ```
 
 After setting these values the Tiger proxy chart will be ignored when running `make deploy stage=<target-stage>`.
+
+If OCSP requests should continue to use the mock directly, keep DNS
+redirection enabled and configure the mock Service IP as shown above instead.
 
 If the Tiger proxy chart stays enabled but telemetry should bypass it, remove the `/telemetry/gateway` route
 from `tiger-proxy.proxyConfig.proxyRoutes` and point the exporter directly to the real collector.
@@ -272,7 +369,6 @@ tiger-proxy:
     proxyRoutes:
       - from: /testfachdienst
         to: https://testfachdienst:443
-        preserveHostHeader: true
       # … other routes …
     tls:
       domainName: tiger-proxy

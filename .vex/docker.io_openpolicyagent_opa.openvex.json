@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://openvex.dev/docs/public/vex-a8a1a8202039738e2da718c7ca976b33c4ae7f48e4682956331fe74e72352fb0",
   "author": "Unknown Author",
-  "version": 8,
+  "version": 9,
   "statements": [
     {
       "vulnerability": {
@@ -299,6 +299,7 @@
       ],
       "status": "not_affected",
       "status_notes": "Die Schwachstelle betrifft das Symbol 'NewServerConn' im Paket 'golang.org/x/crypto/ssh'. Dieses Symbol wird in opa-1.18.2 und opa-1.19.0 nicht verwendet. Verifiziert mit dem Tool govulncheck des Go-Entwicklungsteams gegen die OPA-Codebasis.",
+      "justification": "vulnerable_code_not_present",
       "timestamp": "2026-09-03T15:29:00Z"
     },
     {
@@ -312,9 +313,114 @@
       ],
       "status": "not_affected",
       "status_notes": "CVE-2026-84304 beschreibt eine Heap Memory Exhaustion (OOM) via HTTP/2 DATA Frame Fragmentation in gRPC-Go (internal/transport). Die Schwachstelle beschreibt einen Angriff gegen einen gRPC-Server. OPA lauscht ausschließlich auf der REST/HTTP-API :8181. Das gRPC-Server-Plugin envoy (:9191) ist nicht aktiv, ein gRPC-Server existiert nicht. grpc-go wird ausschließlich als ausgehender OTLP-Trace-Client zu einem vertrauenswürdigen Collector verwendet. Der verwundbare Code-Pfad liegt damit nicht im erreichbaren Ausführungspfad.",
+      "justification": "vulnerable_code_not_in_execute_path",
       "timestamp": "2026-09-03T15:29:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56855",
+        "aliases": [
+          "GO-2026-6355"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "DoS in golang.org/x/crypto/ssh: ein bösartiger Peer kann über präparierte Nachrichten auf einem etablierten Kanal die gesamte SSH-Verbindung blockieren (https://pkg.go.dev/vuln/GO-2026-6355). Das Paket golang.org/x/crypto/ssh ist nicht in die Go-Binary '/opa' gelinkt; keines der betroffenen Symbole (ssh.Dial, ssh.NewClientConn, ssh.NewControlClientConn, ssh.NewServerConn, channel.handlePacket) ist enthalten. Verifiziert über die Funktionstabelle (.gopclntab) und die Rohbytes der Binary (vulnsymbols.go) sowie mit govulncheck im Source-Modus auf OPA v1.18.2 (nur Modul-Treffer, Paket nicht importiert).",
+      "justification": "component_not_present",
+      "timestamp": "2026-09-25T11:42:52Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78662",
+        "aliases": [
+          "GO-2026-6354"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "DoS in golang.org/x/crypto/ssh: Flooding der incomingRequests eines noch nicht etablierten Kanals blockiert die gesamte SSH-Verbindung (https://pkg.go.dev/vuln/GO-2026-6354). Das Paket golang.org/x/crypto/ssh ist nicht in die Go-Binary '/opa' gelinkt; keines der betroffenen Symbole ist enthalten. Verifiziert über die Funktionstabelle (.gopclntab) und die Rohbytes der Binary (vulnsymbols.go) sowie mit govulncheck im Source-Modus auf OPA v1.18.2 (nur Modul-Treffer).",
+      "justification": "component_not_present",
+      "timestamp": "2026-09-25T11:42:52Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84445",
+        "aliases": [
+          "GO-2026-6443",
+          "GHSA-2v4p-qf9q-27wj"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Server-Panic in gRPC-Go (https://pkg.go.dev/vuln/GO-2026-6443): Bei mit xds.NewGRPCServer() erzeugten Servern akzeptiert internal/transport RPCs ohne :authority- und Host-Header, RouteAndProcess in internal/xds/server indiziert dann ein leeres Slice. Die Transport-Symbole (http2Server.HandleStreams/operateHeaders) sind zwar gelinkt, der verwundbare Code in internal/xds/server (RouteAndProcess) ist jedoch nicht in der Go-Binary '/opa' enthalten. OPA startet zudem keinen gRPC-Server: grpc.NewServer und xds.NewGRPCServer kommen weder im Nicht-Test-Code von OPA v1.18.2 noch in der Funktionstabelle vor; grpc-go dient nur als ausgehender OTLP-Client, OPA lauscht ausschließlich auf der REST-API :8181. Verifiziert mit vulnsymbols.go (.gopclntab + Rohbytes) und govulncheck im Source-Modus (Paket importiert, kein Aufrufpfad zu den verwundbaren Symbolen).",
+      "justification": "vulnerable_code_not_present",
+      "timestamp": "2026-09-25T11:42:52Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84303",
+        "aliases": [
+          "GO-2026-6441",
+          "GHSA-qc2q-p7wx-3px3"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/google.golang.org/grpc"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Fail-open im xDS-RBAC-HTTP-Filter von gRPC-Go: Header-Matcher-Namen werden nicht kleingeschrieben, DENY-Regeln mit gemischter Schreibweise greifen nicht (https://pkg.go.dev/vuln/GO-2026-6441). Das Paket google.golang.org/grpc/internal/xds/httpfilter/rbac ist nicht in die Go-Binary '/opa' gelinkt, OPA nutzt kein xDS. Verifiziert mit vulnsymbols.go (.gopclntab + Rohbytes) und govulncheck im Source-Modus auf OPA v1.18.2 (nur Modul-Treffer).",
+      "justification": "component_not_present",
+      "timestamp": "2026-09-25T11:42:52Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-85731",
+        "aliases": [
+          "GHSA-m37j-52j7-pjw7"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/oras.land/oras-go/v2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Path-Traversal beim Entpacken von OCI-Layern im File-Store oras.land/oras-go/v2/content/file (https://github.com/oras-project/oras-go/security/advisories/GHSA-m37j-52j7-pjw7). OPA nutzt oras-go nur im OCI-Bundle-Downloader (v1/download/oci_download.go, oci_downloader.go) mit dem OCI-Layout-Store content/oci; das Paket content/file wird nicht importiert und ist weder in der Funktionstabelle (.gopclntab) noch in den Rohbytes der Go-Binary '/opa' enthalten.",
+      "justification": "component_not_present",
+      "timestamp": "2026-09-25T11:42:52Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-85732",
+        "aliases": [
+          "GHSA-h7vf-4x9w-h99v"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/oras.land/oras-go/v2"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Blind-SSRF in oras-go: parseLink (registry/remote/utils.go) übernimmt eine absolute URL aus dem Link-Header der Registry ungeprüft und die Paginierung von Tags, Referrers und Repositories ruft sie auf (https://github.com/oras-project/oras-go/security/advisories/GHSA-h7vf-4x9w-h99v). OPA importiert das Paket oras.land/oras-go/v2/registry/remote nicht (nur registry/remote/auth) und greift über einen eigenen ociTarget mit auth.Client auf die Registry zu (v1/download/oci_download.go:323). parseLink und die Paginierungsfunktionen sind weder in der Funktionstabelle (.gopclntab) noch in den Rohbytes der Go-Binary '/opa' enthalten.",
+      "justification": "component_not_present",
+      "timestamp": "2026-09-25T11:42:52Z"
     }
   ],
   "timestamp": "2026-07-24T11:22:00Z",
-  "last_updated": "2026-09-03T15:29:00Z"
+  "last_updated": "2026-09-25T11:42:52Z"
 }

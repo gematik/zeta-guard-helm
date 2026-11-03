@@ -77,6 +77,7 @@ spec:
     spec:
       serviceAccountName: certificate-adopt
       restartPolicy: Never
+      {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" dict) | nindent 6 }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -84,6 +85,7 @@ spec:
       containers:
         - name: adopt
           image: {{ .Values.certificateAdoption.image | quote }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.certificateAdoption.containerSecurityContext) | nindent 10 }}
           command: ["bash", "-c"]
           args:
             - |

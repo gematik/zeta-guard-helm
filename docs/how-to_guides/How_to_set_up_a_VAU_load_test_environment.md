@@ -10,17 +10,17 @@ comparable environment in their own cluster.
 
 ## What this environment contains
 
-| Area                  | Setup                                                                                      |
-|-----------------------|--------------------------------------------------------------------------------------------|
-| Service mesh          | Istio enabled                                                                              |
-| PEP proxy             | **2 replicas**, ASL enabled, TLS via HSM                                                   |
-| Authserver (Keycloak) | **2 replicas**, TLS via HSM, token signing via HSM, DB column encryption + integrity check |
-| Session/cache         | **external Infinispan** (Hot Rod), TLS via HSM                                             |
-| Database              | **1× CloudNativePG** PostgreSQL cluster                                                    |
-| OCSP                  | **disabled** (PEP ASL + authserver TSL)                                                    |
-| Testing               | testdriver, tiger-proxy, exauthsim, testfachdienst, cert-validation-mock, TLS-test-tool    |
-| Observability         | telemetry gateway + monitoring backend (Prometheus/Grafana)                                |
-| Operations            | manual restarts/changes only; no auto-deploy                                               |
+| Area                  | Setup                                                                                                            |
+|-----------------------|------------------------------------------------------------------------------------------------------------------|
+| Service mesh          | Istio enabled                                                                                                    |
+| PEP proxy             | **2 replicas**, ASL enabled, TLS via HSM                                                                         |
+| Authserver (Keycloak) | **2 replicas**, TLS via HSM, token signing via HSM, DB column encryption + integrity check                       |
+| Session/cache         | **external Infinispan** (Hot Rod), TLS via HSM                                                                   |
+| Database              | **1× CloudNativePG** PostgreSQL cluster                                                                          |
+| OCSP                  | **disabled** (PEP ASL + authserver TSL)                                                                          |
+| Testing               | testdriver-smcb, testdriver-oidc, tiger-proxy, testfachdienst, cert-validation-mock, TLS-test-tool               |
+| Observability         | telemetry gateway + monitoring backend (Prometheus/Grafana)                                                      |
+| Operations            | manual restarts/changes only; no auto-deploy                                                                     |
 
 > **ASL via HSM** is **not** part of this recipe yet — the ASL *signer key* is
 > still loaded from a mounted file. Only ASL *TLS* uses the HSM. Moving the ASL
@@ -83,6 +83,21 @@ flowchart TD
 > (`PeerAuthentication: STRICT`). The HSM link is gRPC.
 
 ---
+
+
+## dev stage: load-test overlay
+
+`dev` is an auto-deploy stage (every merge to `main` redeploys it with the tiger-proxy
+routing the smoke test needs). For a load run, layer the load-test overlay on top of the
+stage values — it disables tiger-proxy and the DNS redirect (drivers hit the public host
+directly), enables `load-dispenser` and the `lgtm` observability stack, tunes the OCSP mock
+and forwards telemetry to lgtm:
+
+```sh
+make deploy stage=dev HELM_EXTRA_VALUES_PARAMS="--values private/values.dev-loadtest.yaml"
+```
+
+Announce the run: the next merge to `main` redeploys `dev` without the overlay.
 
 ## Recipe
 
@@ -206,9 +221,9 @@ Notes:
 - **Monitoring/telemetry**: enable the telemetry gateway and a monitoring
   backend
   (Prometheus/Grafana) — see [Telemetry](../explanations/Telemetry.md).
-- **Testsuite components** (testdriver, tiger-proxy, exauthsim, testfachdienst,
-  cert-validation-mock, TLS-test-tool) are toggled via the umbrella `tags:` and
-  their subchart values —
+- **Testsuite components** (testdriver-smcb, testdriver-oidc, tiger-proxy,
+  testfachdienst, cert-validation-mock, TLS-test-tool) are toggled via the umbrella 
+  `tags:` and their subchart values —
   see [How to run the tiger testsuite](How_to_run_tiger_testsuite.md)
   and [How to configure tiger-proxy](How_to_configure_tiger-proxy.md).
 - **Ingress**: one hostname, TLS terminated on the NIC with the HSM key — see
@@ -237,7 +252,7 @@ the ES256 HSM KeyProvider is registered. See
 - PEP log shows the ossl_hsm provider loading the TLS key from the HSM (no
   `emerg`), and the protected-resource metadata advertises
   `"zeta_asl_use": "required"`.
-- A full client flow through the PEP (e.g. via the testdriver) reaches the
+- A full client flow through the PEP (e.g. via the testdriver-*) reaches the
   Fachdienst.
 
 ---

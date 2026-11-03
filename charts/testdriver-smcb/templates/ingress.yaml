@@ -1,0 +1,94 @@
+{{- /* vim: set ft=helm: */ -}}
+---
+{{- if .Values.ingressEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: testdriver-smcb
+  labels:
+    app: testdriver-smcb
+    app.kubernetes.io/name: testdriver-smcb
+  annotations:
+    {{- if .Values.nginxIngressEnabled }}
+    nginx.org/mergeable-ingress-type: "minion"
+    nginx.org/websocket-services: {{ if .Values.routeViaTigerProxy }}"tiger-proxy,testdriver-smcb"{{ else }}"testdriver-smcb"{{ end }}
+    nginx.org/client-max-body-size: "10m"
+    # Preserve case-insensitive matching and all three URI capture groups.
+    nginx.org/path-regex: "case_insensitive"
+    nginx.org/rewrite-target: "/$1$2$3"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- if .Values.openshiftIngress.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hostname | quote }}
+      secretName: {{ .Values.openshiftIngress.certName }}
+  {{- end }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: {{ if .Values.routeViaTigerProxy }}/(td-smcb/proxy)(/|$)(.*){{ else }}/td-smcb/(proxy)(/|$)(.*){{ end }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}testdriver-smcb{{ end }}
+                port:
+                  number: 80
+          - path: /td-smcb/(testdriver-api)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: testdriver-smcb
+                port:
+                  number: 80
+          - path: /td-smcb/(load)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: testdriver-smcb
+                port:
+                  number: 80
+          - path: /td-smcb/(loaddriver-api)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: testdriver-smcb
+                port:
+                  number: 80
+          # keep previous endpoints for backwards compatibility
+          - path: /(proxy)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}testdriver-smcb{{ end }}
+                port:
+                  number: 80
+          - path: /(testdriver-api)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: testdriver-smcb
+                port:
+                  number: 80
+          - path: /(load)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: testdriver-smcb
+                port:
+                  number: 80
+          - path: /(loaddriver-api)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: testdriver-smcb
+                port:
+                  number: 80
+
+
+{{- end }}

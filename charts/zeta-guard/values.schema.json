@@ -4,6 +4,41 @@
     "authserver": {
       "type": "object",
       "description": "Keycloak-based authorization server configuration.",
+      "if": {
+        "properties": {
+          "resourceServerMtls": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "resourceServerMtls"
+        ]
+      },
+      "then": {
+        "description": "authserver.resourceServerMtls requires authserver.config.oidcFlowEnabled: true (userinfo/email only exists with the OIDC flow).",
+        "properties": {
+          "config": {
+            "properties": {
+              "oidcFlowEnabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "oidcFlowEnabled"
+            ]
+          }
+        },
+        "required": [
+          "config"
+        ]
+      },
       "properties": {
         "additionalTrustedCAs": {
           "$ref": "#/$defs/TrustedCaList",
@@ -19,31 +54,35 @@
             },
             "columnEncryptionEnabled": {
               "type": "boolean",
-              "description": "Enables/disables database encryption."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables database encryption."
             },
             "integrityChecksEnabled": {
               "type": "boolean",
-              "description": "Enables/disables integrity checks (global feature option)."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables integrity checks (global feature option)."
             },
             "integrityRowChecksEnabled": {
               "type": "boolean",
-              "description": "Enables/disables row-based integrity checks."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables row-based integrity checks."
             },
             "integrityTableChecksEnabled": {
               "type": "boolean",
-              "description": "Enables/disables table-based integrity checks."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables table-based integrity checks."
             },
             "shutdownOnError": {
               "type": "boolean",
-              "description": "Enables/disables automatic shut down of server upon integrity failure."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables automatic shut down of server upon integrity failure."
             },
             "periodicRowChecksEnabled": {
               "type": "boolean",
-              "description": "Enables/disables periodic row integrity check."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables periodic row integrity check."
             },
             "lockdownOnError": {
               "type": "boolean",
-              "description": "Enables/disables permanent error state when integrity checks fails."
+              "description": "SECURITY! DO NOT TOUCH UNLESS specifically instructed: Enables/disables permanent error state when integrity checks fails."
+            },
+            "automaticCryptoUpdatesEnabled": {
+              "type": "boolean",
+              "description": "Enables/disables automatic crypto update when detecting keychain configuration changes."
             },
             "bootstrapInterval": {
               "type": "string",
@@ -60,11 +99,25 @@
                 5
               ]
             },
+            "futureKeychainFileName": {
+              "type": "string",
+              "description": "Absolute file name of the HSM encrypted keychain file to be used in a future rotation.",
+              "examples": [
+                "/keychain_data/future_keychain"
+              ]
+            },
             "keychainFileName": {
               "type": "string",
               "description": "Absolute file name of the HSM encrypted keychain file.",
               "examples": [
                 "/keychain_data/keychain"
+              ]
+            },
+            "previousKeychainFileName": {
+              "type": "string",
+              "description": "Absolute file name of the HSM encrypted keychain file that was used before the last rotation.",
+              "examples": [
+                "/keychain_data/previous_keychain"
               ]
             },
             "initContainerProvideKeys": {
@@ -85,7 +138,7 @@
                 },
                 "containerSecurityContext": {
                   "$ref": "#/$defs/K8sContainerSecurityContext",
-                  "description": "Kubernetes SecurityContext applied to the keychain-generator init container."
+                  "description": "Kubernetes SecurityContext applied to the keychain-generator init container Keys not set here come from defaultContainerSecurityContext."
                 },
                 "extraVolumeMounts": {
                   "type": "array",
@@ -114,7 +167,7 @@
         },
         "podSecurityContext": {
           "$ref": "#/$defs/K8sPodSecurityContext",
-          "description": "Pod-level security context for the authserver deployment."
+          "description": "Pod-level security context for the authserver deployment. Keys not set here come from defaultPodSecurityContext."
         },
         "podDisruptionBudget": {
           "$ref": "#/$defs/K8sPodDisruptionBudget",
@@ -169,7 +222,7 @@
           "type": "string",
           "description": "If you provide a secret with the smcb hashing pepper yourself, you can reference it here via its name. It needs the field 'pepper'.",
           "examples": [
-            "genesis-hash"
+            "smcb-hashing-pepper"
           ]
         },
         "admin": {
@@ -243,6 +296,43 @@
             "oidcFlowEnabled": {
               "type": "boolean",
               "description": "Enables the OIDC client flow in the authserver (env ZETA_OIDC_FLOW_ENABLED). Required when notificationService.enabled is true."
+            },
+            "entityStatement": {
+              "type": "object",
+              "description": "Entity statement RP metadata (A_23034-02, A_27598). Required when oidcFlowEnabled is true.",
+              "properties": {
+                "clientName": {
+                  "type": "string",
+                  "description": "client_name in the openid_relying_party metadata and name in the federation_entity metadata (gemSpec_IDP_Sek, Tab. 28).",
+                  "examples": ["zeta-guard"]
+                },
+                "organizationName": {
+                  "type": "string",
+                  "description": "organization_name in the openid_relying_party and federation_entity metadata (gemSpec_IDP_Sek, Tab. 28).",
+                  "examples": ["zeta-guard"]
+                },
+                "contactEmail": {
+                  "type": "string",
+                  "description": "Contact email address published in the entity statement contacts array.",
+                  "examples": ["noreply@localhost", "support@example.com"]
+                },
+                "redirectUris": {
+                  "type": "array",
+                  "description": "Static redirect_uris in the openid_relying_party metadata (A_25656, env ENTITY_STATEMENT_REDIRECT_URIS). Empty: derived from the realm's SekIDP clients.",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "examples": [
+                    [
+                      "https://app.example.com/cb/oidc",
+                      "de.example.app://oidc"
+                    ]
+                  ]
+                }
+              },
+              "required": ["clientName", "organizationName", "contactEmail"],
+              "additionalProperties": false
             }
           }
         },
@@ -252,7 +342,7 @@
           "properties": {
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
-              "description": "Kubernetes SecurityContext applied to the authserver container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+              "description": "Kubernetes SecurityContext applied to the authserver container. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
               "examples": [
                 {
                   "runAsUser": 1000,
@@ -274,11 +364,11 @@
         },
         "initContainer": {
           "type": "object",
-          "description": "Authserver keycloak-build init container configuration.",
+          "description": "Authserver keycloak-copy init container configuration (copies /opt/keycloak into the writable volume).",
           "properties": {
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
-              "description": "Kubernetes SecurityContext applied to the authserver init container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+              "description": "Kubernetes SecurityContext applied to the authserver init container. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
               "examples": [
                 {
                   "runAsUser": 1000,
@@ -312,7 +402,7 @@
             },
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
-              "description": "Kubernetes SecurityContext applied to the provisioning processor init container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+              "description": "Kubernetes SecurityContext applied to the provisioning processor init container. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
               "examples": [
                 {
                   "runAsUser": 1000,
@@ -518,7 +608,9 @@
                     "secretKey": {
                       "type": "string",
                       "description": "Key within the referenced Secret that holds the PKCS12 keystore.",
-                      "examples": ["sekidp-client.p12"]
+                      "examples": [
+                        "sekidp-client.p12"
+                      ]
                     }
                   }
                 },
@@ -538,6 +630,98 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "resourceServerMtls": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "mTLS authentication of resource servers calling GET /auth/realms/<realm>/zeta/userinfo/email (releases the verified email of a mobile user). When enabled, the master ingress requests an optional client certificate on authserver.hostname (ssl_verify_client optional_no_ca, not verified by the ingress), the /auth ingress forwards it in the ssl-client-cert header and Keycloak's nginx x509cert-lookup hands it to the plugin, which validates the chain against the truststore. Requires authserver.config.oidcFlowEnabled: true.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Request and forward resource server client certificates."
+            },
+            "truststore": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Existing Secret holding the truststore dedicated to resource servers; every certificate in it is a trust anchor. Mounted at /opt/keycloak/conf/resource-server-truststore/ (not conf/truststores, which is trusted for outbound calls). Empty secretName falls back to Keycloak's HTTPS truststore (KC_HTTPS_TRUST_STORE_FILE); with neither, userinfo/email answers every request with 401.",
+              "properties": {
+                "secretName": {
+                  "type": "string",
+                  "description": "Name of an existing Secret holding the truststore. Empty uses Keycloak's HTTPS truststore."
+                },
+                "secretKey": {
+                  "type": "string",
+                  "description": "Key within the Secret. Its extension selects the format: .p12/.pfx (PKCS12), .jks, anything else a PEM bundle.",
+                  "examples": [
+                    "ca.pem",
+                    "resource-servers.p12"
+                  ]
+                }
+              },
+              "if": {
+                "properties": {
+                  "secretName": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "secretName"
+                ]
+              },
+              "then": {
+                "description": "secretKey is required when secretName is set.",
+                "properties": {
+                  "secretKey": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "secretKey"
+                ]
+              }
+            },
+            "truststorePassword": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Existing Secret holding the truststore password; only for PKCS12/JKS truststores.",
+              "properties": {
+                "secretName": {
+                  "type": "string",
+                  "description": "Name of an existing Secret holding the truststore password."
+                },
+                "secretKey": {
+                  "type": "string",
+                  "description": "Key within the Secret that holds the truststore password."
+                }
+              },
+              "if": {
+                "properties": {
+                  "secretName": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "secretName"
+                ]
+              },
+              "then": {
+                "description": "secretKey is required when secretName is set.",
+                "properties": {
+                  "secretKey": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "secretKey"
+                ]
+              }
+            },
+            "verifyDepth": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "ssl_verify_depth of the ingress: the longest certificate chain a resource server may present."
             }
           }
         },
@@ -575,6 +759,45 @@
               "description": "Keycloak --db-pool-max-size: maximum DB connections per authserver pod. Total worst-case = replicaCount × maxSize; this (+ ~25 CNPG/superuser reserve) must stay ≤ cloudnativePg.parameters.maxConnections, otherwise the chart fails the render (SQLSTATE 53300 / DB crash under load). Values above authserver.httpPool.maxThreads are wasteful. Default is minimal; scale-out stages raise it in their overlay together with maxConnections and cloudnativePg.resources.",
               "examples": [
                 100
+              ]
+            },
+            "maxLifetime": {
+              "type": "string",
+              "description": "Keycloak --db-pool-max-lifetime: ISO-8601 duration after which a pooled connection is closed and replaced, so a socket orphaned by a CloudNativePG switchover cannot sit in the pool forever. Keycloak's own default for PostgreSQL is unlimited. Use this first-class option rather than the underlying quarkus.datasource.jdbc.max-lifetime, which Keycloak warns against setting directly.",
+              "examples": [
+                "PT30M"
+              ]
+            },
+            "validationQueryTimeout": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.validation-query-timeout: bounds the pool's own connection validation. Unset, Quarkus validates with isValid(0) - no socket timeout - so validation hangs on a dead socket and the pool never recovers.",
+              "examples": [
+                "2S"
+              ]
+            },
+            "backgroundValidationInterval": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.background-validation-interval: background sweep over idle connections (Quarkus default 2M).",
+              "examples": [
+                "15S"
+              ]
+            },
+            "foregroundValidationInterval": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.foreground-validation-interval: validate on acquire once a connection has been idle longer than this. Quarkus has no default, i.e. it is off by default.",
+              "examples": [
+                "5S"
+              ]
+            },
+            "idleRemovalInterval": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.idle-removal-interval: reap idle connections (Quarkus default 5M). Never shrinks the pool below minSize.",
+              "examples": [
+                "1M"
               ]
             }
           }
@@ -671,7 +894,7 @@
         },
         "adminHostname": {
           "type": "string",
-          "description": "When set, /auth/admin is blocked via the PEP proxy and a dedicated admin ingress is created. Terraform/CI must use this hostname for keycloak_url.",
+          "description": "When set, /auth/admin and /auth/realms/master are blocked via the PEP proxy and a dedicated admin ingress is created. The master realm carries the admin token endpoint; the zeta-guard realm is unaffected. Terraform/CI must use this hostname for keycloak_url.",
           "examples": [
             "admin.zeta-kind.local"
           ]
@@ -725,6 +948,29 @@
         "tolerations": {
           "type": "array",
           "description": "Kubernetes tolerations for authserver pod scheduling."
+        },
+        "db": {
+          "type": "object",
+          "description": "Authserver database connection behaviour (JDBC parameters and startup ordering).",
+          "properties": {
+            "urlProperties": {
+              "type": "object",
+              "description": "pgjdbc connection parameters appended to KC_DB_URL as query parameters. Driver settings live here rather than in QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_* because that is a Map property whose camelCase key an environment variable name cannot carry ('sockettimeout' is silently ignored by pgjdbc). 'connectTimeout' and 'targetServerType' are rejected: naming either in the URL makes Keycloak stop injecting its own default.",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "integer",
+                  "boolean"
+                ]
+              },
+              "examples": [
+                {
+                  "socketTimeout": 120,
+                  "tcpKeepAlive": true
+                }
+              ]
+            }
+          }
         }
       }
     },
@@ -755,7 +1001,7 @@
       "type": "string",
       "description": "Container image for the nginx-prometheus-exporter sidecar. Required when pepproxyMetricsEnabled is true.",
       "examples": [
-        "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-prometheus-exporter:1.5.1-zeta1"
+        "nginx/nginx-prometheus-exporter:1.5.3@sha256:85666e7fde7e253f1c6d978f9a961245df4c9cdb7677e1866d9bb28e8f9ee41d"
       ]
     },
     "gematik": {
@@ -1158,7 +1404,7 @@
         },
         "podSecurityContext": {
           "$ref": "#/$defs/K8sPodSecurityContext",
-          "description": "Pod-level security context for the PEP proxy deployment."
+          "description": "Pod-level security context for the PEP proxy deployment. Keys not set here come from defaultPodSecurityContext."
         },
         "replicaCount": {
           "type": "integer",
@@ -1170,13 +1416,17 @@
         },
         "containerSecurityContext": {
           "$ref": "#/$defs/K8sContainerSecurityContext",
-          "description": "Kubernetes SecurityContext applied to the pep container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+          "description": "Kubernetes SecurityContext applied to the nginx container and the metrics sidecar of the PEP proxy. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
           "examples": [
             {
-              "runAsUser": 1000,
-              "runAsGroup": 1000,
-              "readOnlyRootFilesystem": false,
-              "allowPrivilegeEscalation": false
+              "allowPrivilegeEscalation": false,
+              "readOnlyRootFilesystem": true,
+              "runAsNonRoot": true,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              }
             }
           ]
         },
@@ -1325,15 +1575,46 @@
                   "extraConfig": {
                     "type": "string",
                     "description": "Raw nginx directives appended inside both generated location blocks (tpl-rendered)."
+                  },
+                  "retain": {
+                    "type": "object",
+                    "properties": {
+                      "authorization": {
+                        "type": "boolean",
+                        "description": "`set $zeta_strip_authorization 0;` for this location to retain the authorization header during forwarding."
+                      },
+                      "dpop": {
+                        "type": "boolean",
+                        "description": "`set $zeta_strip_dpop 0;` for this location to retain the dpop header during forwarding."
+                      },
+                      "popp": {
+                        "type": "boolean",
+                        "description": "`set $zeta_strip_popp 0;` for this location to retain the popp header during forwarding."
+                      }
+                    }
                   }
                 }
               }
             },
             "pepIssuer": {
               "type": "string",
-              "description": "OIDC issuer (iss) of the authorization server used for access token validation. This is used for token validation as well as for retvrieving the JWKS and similar things.",
+              "description": "Public OIDC issuer (iss) of the authorization server. Always the issuer the PEP expects in access tokens. Unless pepInternalUrl is set, it is also the base URL used to fetch the OIDC discovery document and the JWKS.",
               "examples": [
                 "https://zeta-kind.local/auth/realms/zeta-guard"
+              ]
+            },
+            "pepInternalUrl": {
+              "type": "string",
+              "description": "Cluster-internal address of the authserver, used only for the OIDC discovery and JWKS fetches so that traffic stays inside the cluster instead of looping out through the ingress. Off by default (\"\"): no released PEP image knows pep_pdp_url yet and refuses to start on it; set it only with a PEP image built from main. pepIssuer remains the expected iss. Must mirror the issuer's path structure, e.g. http://authserver/auth/realms/zeta-guard.",
+              "examples": [
+                "http://authserver/auth/realms/zeta-guard"
+              ]
+            },
+            "pepRevocationUrl": {
+              "type": "string",
+              "description": "Session revocation endpoint of the authserver (SSE block list and reports). Empty derives it from pepInternalUrl (or the authserver Service default) plus /zeta-guard-revocation. Set only when the authserver is reachable under another address or realm path.",
+              "examples": [
+                "http://authserver/auth/realms/zeta-guard/zeta-guard-revocation"
               ]
             },
             "poppIssuer": {
@@ -1453,6 +1734,38 @@
             "type": "string"
           }
         },
+        "hostAliases": {
+          "type": "array",
+          "description": "Extra /etc/hosts entries for the PEP pod (native Kubernetes hostAliases form). Escape hatch for resolving a hostname to a cluster-internal address; prefer pepproxy.nginxConf.pepInternalUrl for the authserver. Merged with the entries generated by global.enableDNSRedirect.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "type": "string",
+                "description": "IP address the hostnames resolve to inside the pod.",
+                "examples": [
+                  "10.96.1.23"
+                ]
+              },
+              "hostnames": {
+                "type": "array",
+                "description": "Hostnames mapped to this IP.",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "zeta.example.com"
+                  ]
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "hostnames"
+            ]
+          }
+        },
         "hsmProxyAddr": {
           "type": [
             "string",
@@ -1545,7 +1858,7 @@
         },
         "containerSecurityContext": {
           "$ref": "#/$defs/K8sContainerSecurityContext",
-          "description": "Kubernetes SecurityContext applied to the provisioningProcessor container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+          "description": "Kubernetes SecurityContext applied to the provisioningProcessor container. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
           "examples": [
             {
               "runAsUser": 1000,
@@ -1869,6 +2182,30 @@
             }
           }
         },
+        "decisionLogs": {
+          "type": "object",
+          "description": "Remote decision-log upload settings shared by active and simulation OPA when telemetryGatewayEnabled is true.",
+          "properties": {
+            "reporting": {
+              "type": "object",
+              "description": "Periodic upload delays in seconds. The maximum must be greater than or equal to the minimum; these settings are independent of bundle polling.",
+              "properties": {
+                "min_delay_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 60,
+                  "description": "Minimum delay between remote decision-log uploads in seconds."
+                },
+                "max_delay_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 60,
+                  "description": "Maximum delay between remote decision-log uploads in seconds."
+                }
+              }
+            }
+          }
+        },
         "logDecisions": {
           "type": "boolean"
         },
@@ -1884,7 +2221,7 @@
           "properties": {
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
-              "description": "Kubernetes SecurityContext applied to the trust-anchor provisioning processor init container in OPA deployments. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+              "description": "Kubernetes SecurityContext applied to the trust-anchor provisioning processor init container in OPA deployments. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
               "examples": [
                 {
                   "runAsUser": 1000,
@@ -1900,9 +2237,13 @@
             }
           }
         },
+        "podSecurityContext": {
+          "$ref": "#/$defs/K8sPodSecurityContext",
+          "description": "Pod-level security context for the opa and opa-simulation deployments. Keys not set here come from defaultPodSecurityContext."
+        },
         "containerSecurityContext": {
           "$ref": "#/$defs/K8sContainerSecurityContext",
-          "description": "Kubernetes SecurityContext applied to the opa container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+          "description": "Kubernetes SecurityContext applied to the opa container. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
           "examples": [
             {
               "runAsUser": 1000,
@@ -1914,7 +2255,7 @@
         },
         "cronjobSecurityContext": {
           "$ref": "#/$defs/K8sContainerSecurityContext",
-          "description": "Kubernetes SecurityContext applied to the OPA-related CronJob containers (e.g. token renewer). See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+          "description": "Kubernetes SecurityContext applied to the OPA-related CronJob containers (e.g. token renewer). Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
           "examples": [
             {
               "runAsUser": 1000,
@@ -2072,9 +2413,9 @@
               "properties": {
                 "resource": {
                   "type": "string",
-                  "description": "Bundle resource path for the simulation instance.",
+                  "description": "Fully qualified bundle resource for the simulation instance. Required when opa.bundle.enabled and opa.simulation.enabled are true; not derived from opa.bundle.resource. Where gematik publishes a simulation bundle, it must reference that bundle, never the production policies.",
                   "examples": [
-                    "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies-test/test-fachdienst-policy:latest"
+                    "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies-tu/vsdm-policy-sim:latest"
                   ]
                 },
                 "verification": {
@@ -2244,6 +2585,16 @@
           "type": "object",
           "description": "RS-facing variant overrides. Deployed as notification-service-rs (internal ClusterIP; reached in-cluster by resource servers, not via the PEP).",
           "properties": {
+            "mtls": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Require application-level client-certificate authentication for the RS API. Disable only for local testing with restricted access to the internal RS Service."
+                }
+              }
+            },
             "image": {
               "type": "object",
               "properties": {
@@ -2455,9 +2806,13 @@
           "$ref": "#/$defs/K8sImagePullSecrets",
           "description": "Image pull secrets for the notification-service container."
         },
+        "podSecurityContext": {
+          "$ref": "#/$defs/K8sPodSecurityContext",
+          "description": "Pod-level security context for the notification-service deployments. Keys not set here come from defaultPodSecurityContext."
+        },
         "containerSecurityContext": {
           "$ref": "#/$defs/K8sContainerSecurityContext",
-          "description": "Kubernetes SecurityContext applied to the notification-service container. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
+          "description": "Kubernetes SecurityContext applied to the notification-service container. Keys not set here come from defaultContainerSecurityContext. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/",
           "examples": [
             {
               "runAsUser": 1000,
@@ -2473,16 +2828,128 @@
           "properties": {
             "pushGatewayAllowedBaseUrls": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Allowlist of Push Gateway base URLs, joined with \",\" into PUSH_GATEWAY_ALLOWED_BASE_URLS. The service has no default for this property, so an empty list is expected to fail config validation at startup — set at least one URL when enabling this component."
             },
             "channelsAllowed": {
               "type": "string",
               "description": "Comma-separated list of allowed notification channels (NOTIFICATION_CHANNELS_ALLOWED). The service has no default for this property either — set at least one channel name when enabling this component."
             },
-            "persistenceSealingEnabled": {
+            "encryptionEnabled": {
               "type": "boolean",
-              "description": "Enable HSM-backed at-rest sealing of stored notification data (NOTIFICATION_PERSISTENCE_SEALING_ENABLED)."
+              "description": "Encrypt push notification payloads when dispatching them to the Push Gateway (NOTIFICATION_ENCRYPTION_ENABLED / notification.encryption.enabled). Default false. A_29968: Operator decision per ZETA Guard instance, never the resource server's; mandatory true where the Fachdienst spec requires encryption (ePA, E-Rezept). When true, pusher registrations must carry the encryption block and payloads above 1018 serialized bytes are rejected with 413."
+            }
+          }
+        },
+        "hsm": {
+          "type": "object",
+          "description": "gRPC HSM Proxy backing the notification-service's at-rest sealing (hsm-proxy.* application properties). Every key is optional — each env var is emitted only when its value is set, so an unset value keeps the service default.",
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "pattern": "^$|^([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\]):([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+              "description": "host:port of the HSM Proxy (HSM_PROXY_ENDPOINT, hsm-proxy.endpoint) — no scheme; host is a DNS name, IPv4 or bracketed IPv6, port 1-65535. Empty = unset. Required when sealing.enabled is true.",
+              "examples": [
+                "hsm-sim:50051"
+              ]
+            },
+            "kek": {
+              "description": "Removed: the keys come from the keychain (see sealing). Setting it fails the render with a hint; the KEK of a new keychain is sealing.keychainGenerator.kekId."
+            },
+            "plainTextAccepted": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Accept an unprotected (plain-text gRPC) channel to the HSM Proxy (HSM_PROXY_PLAIN_TEXT_ACCEPTED, hsm-proxy.plain-text-accepted). The HSM proxy client currently speaks plain-text gRPC only (mTLS per A_28830 is deferred), so with sealing.enabled the service refuses to start unless this is true. Set it only where the network itself protects the channel, e.g. hsm-sim in a local cluster. Null/unset -> the service's default (false)."
+            }
+          }
+        },
+        "sealing": {
+          "type": "object",
+          "description": "HSM-backed at-rest sealing of stored notification data (notification.persistence.sealing.*). Requires hsm.endpoint. The keychain is the file keychainFileName on a volume from extraVolumes, mounted via extraVolumeMounts and keychainGenerator.extraVolumeMounts; the init containers initContainerProvideKeys (optional), keychain-generator and initContainerStoreKeys (optional) run in that order.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable at-rest sealing (NOTIFICATION_PERSISTENCE_SEALING_ENABLED, notification.persistence.sealing.enabled). Always emitted; false when unset."
+            },
+            "dekCacheSize": {
+              "description": "Removed: the service holds the keychain's keys and no per-record DEKs. Setting it fails the render with a hint."
+            },
+            "keychainFileName": {
+              "type": "string",
+              "pattern": "^/.+[^/]$",
+              "description": "Absolute path of the keychain file (NOTIFICATION_PERSISTENCE_SEALING_KEYCHAIN_FILE, notification.persistence.sealing.keychain-file). It has to be on a volume the service mounts (extraVolumeMounts), and the keychain generator too (keychainGenerator.extraVolumeMounts).",
+              "examples": [
+                "/keychain/keychain.json"
+              ]
+            },
+            "rotationInterval": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^([Pp][Tt][1-9][0-9]*[HhMmSs]|[1-9][0-9]*[HhMmSs])$",
+              "description": "How often the service moves the records of older keychain entries to the current one (NOTIFICATION_PERSISTENCE_SEALING_ROTATION_INTERVAL, notification.persistence.sealing.rotation-interval). ISO-8601 time (PT1H) or Quarkus shorthand (1h, 30m). Null/unset -> the service default, 1h.",
+              "examples": [
+                "1h"
+              ]
+            },
+            "initContainerProvideKeys": {
+              "type": "object",
+              "description": "Container spec of an init container that puts an existing keychain at keychainFileName, so the keychain generator leaves it alone."
+            },
+            "initContainerStoreKeys": {
+              "type": "object",
+              "description": "Container spec of an init container that stores the keychain at keychainFileName. Has to be authoritative: store only if nothing is stored yet, otherwise put the stored keychain in place, so every pod of both variants ends up with the same one."
+            },
+            "keychainGenerator": {
+              "type": "object",
+              "description": "The keychain-generator init container: creates a keychain with a first entry through the HSM Proxy if keychainFileName does not exist yet, and does nothing otherwise.",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Whether the keychain-generator init container runs. Turn it off only when initContainerProvideKeys always provides the keychain."
+                },
+                "kekId": {
+                  "type": "string",
+                  "pattern": "^$|^([a-z0-9]+-){3,}v[0-9]+$",
+                  "description": "KEK a new keychain is wrapped under (HSM_PROXY_KEK_ID), A_28831 scheme [component]-[purpose]-[algorithm]-v<N>. Required while sealing.enabled and keychainGenerator.enabled are true.",
+                  "examples": [
+                    "notification-service-keychain-kek-aesgcm-v1"
+                  ]
+                },
+                "image": {
+                  "$ref": "#/$defs/ZetaImage",
+                  "description": "Container image of the keychain generator, notification-keychain-generator. Registry defaults to notificationService.image.registry, tag to notificationService.image.tag (without variant suffix)."
+                },
+                "imagePullPolicy": {
+                  "type": "string",
+                  "description": "Kubernetes image pull policy for the keychain-generator container.",
+                  "examples": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ]
+                },
+                "resources": {
+                  "$ref": "#/$defs/K8sResourceRequirements",
+                  "description": "CPU and memory resource requests/limits for the keychain-generator init container."
+                },
+                "containerSecurityContext": {
+                  "$ref": "#/$defs/K8sContainerSecurityContext",
+                  "description": "Kubernetes SecurityContext applied to the keychain-generator init container. Keys not set here come from defaultContainerSecurityContext."
+                },
+                "extraVolumeMounts": {
+                  "type": "array",
+                  "description": "Additional volume mounts for the keychain-generator init container."
+                }
+              }
             }
           }
         },
@@ -2511,7 +2978,9 @@
                     "secretKey": {
                       "type": "string",
                       "description": "Key within the referenced Secret that holds the PEM client certificate chain.",
-                      "examples": ["tls.crt"]
+                      "examples": [
+                        "tls.crt"
+                      ]
                     }
                   }
                 },
@@ -2527,7 +2996,9 @@
                     "secretKey": {
                       "type": "string",
                       "description": "Key within the referenced Secret that holds the PEM private key.",
-                      "examples": ["tls.key"]
+                      "examples": [
+                        "tls.key"
+                      ]
                     }
                   }
                 },
@@ -2547,20 +3018,6 @@
                   }
                 }
               }
-            }
-          }
-        },
-        "accessLog": {
-          "type": "object",
-          "description": "Quarkus built-in HTTP access log (quarkus.http.access-log.*), mapped to QUARKUS_HTTP_ACCESS_LOG_* container env vars. Useful for tracing requests reaching the notification-service, e.g. confirming the PEP-forwarded ZETA-User-Info header.",
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Enable the Quarkus HTTP access log (QUARKUS_HTTP_ACCESS_LOG_ENABLED). Off by default."
-            },
-            "pattern": {
-              "type": "string",
-              "description": "Access log pattern (QUARKUS_HTTP_ACCESS_LOG_PATTERN). Empty uses the Quarkus default (\"common\"). Use %{i,Header-Name} to capture an incoming request header, e.g. %h \"%r\" %s %b user-info=\"%{i,ZETA-User-Info}\"."
             }
           }
         },
@@ -2591,6 +3048,17 @@
           "type": "boolean",
           "description": "A_29974: single knob for the optional history feature — drives the NS's NOTIFICATION_HISTORY_ENABLED env var, the discovery doc's scopes_supported, and (via terraform notification_history_enabled, kept in sync) the Keycloak scope."
         },
+        "historyRetention": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^([Pp][1-9][0-9]*[Dd]|[Pp][Tt][1-9][0-9]*[HhMmSs]|[1-9][0-9]*[DdHhMmSs])$",
+          "description": "How long a device's message history is kept (NOTIFICATION_HISTORY_RETENTION, notification.history.retention): once it has passed after the first recorded notification, the complete history is erased and the next notification restarts it. A_29988 exempts the history from the short processing-data retention; it follows the operator's configuration. ISO-8601 days or time (P30D, PT720H) or Quarkus shorthand (30d, 720h); must be positive. Null/unset -> the service default, P30D.",
+          "examples": [
+            "P30D"
+          ]
+        },
         "wellKnownResourceSuffix": {
           "type": "string",
           "pattern": "^/[^/]+$",
@@ -2598,8 +3066,55 @@
           "examples": [
             "/notification-service"
           ]
+        },
+        "extraVolumes": {
+          "type": "array",
+          "description": "Additional volumes for the notification-service pods, e.g. the keychain."
+        },
+        "extraVolumeMounts": {
+          "type": "array",
+          "description": "Additional volume mounts for the notification-service container, e.g. the keychain (read-only is enough)."
         }
-      }
+      },
+      "allOf": [
+        {
+          "$comment": "Sealing unwraps the keychain through the HSM, so it needs an HSM Proxy address; there is no software fallback.",
+          "if": {
+            "properties": {
+              "sealing": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "sealing"
+            ]
+          },
+          "then": {
+            "properties": {
+              "hsm": {
+                "properties": {
+                  "endpoint": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "endpoint"
+                ]
+              }
+            },
+            "required": [
+              "hsm"
+            ]
+          }
+        }
+      ]
     },
     "opaPolicy": {
       "type": "object",
@@ -2657,6 +3172,10 @@
         "image": {
           "type": "string",
           "description": "Image for the adoption Job; needs kubectl and bash."
+        },
+        "containerSecurityContext": {
+          "$ref": "#/$defs/K8sContainerSecurityContext",
+          "description": "Kubernetes SecurityContext applied to the adoption Job container. Keys not set here come from defaultContainerSecurityContext."
         }
       },
       "additionalProperties": false
@@ -2854,6 +3373,64 @@
       },
       "additionalProperties": true
     },
+    "keycloak-db": {
+      "type": "object",
+      "description": "Opt-in: provision the keycloak-db CNPG Cluster via the upstream cloudnative-pg/cluster chart (aliased dependency, see Chart.yaml) instead of the hand-rolled Cluster in templates/db/cnpg-cluster.yaml. Disabled by default; relevant only for databaseMode=cloudnative. When enabled, this block replaces cloudnativePg.* entirely for keycloak-db (the two are not merged) and the hand-rolled cnpg-cluster.yaml/cnpg-pooler.yaml/cnpg-scheduledbackup.yaml templates are skipped. For the full field set see https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When true, provision keycloak-db via the upstream cluster chart instead of the hand-rolled templates."
+        },
+        "fullnameOverride": {
+          "type": "string",
+          "description": "Pins the Cluster/Service/Secret names so they match the hand-rolled path (keycloak-db), keeping NetworkPolicy/Istio selectors and authserverDb.* defaults valid across the switch.",
+          "examples": [
+            "keycloak-db"
+          ]
+        },
+        "cluster": {
+          "type": "object",
+          "description": "Upstream chart's Cluster spec passthrough — not otherwise enumerated here to avoid silently drifting from the upstream schema on a chart bump. For the full field set see https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md. Two deviations from that upstream schema worth knowing:",
+          "properties": {
+            "enableSuperuserAccess": {
+              "type": "boolean",
+              "description": "Upstream default is true; set false to match the hand-rolled path, which never grants superuser access."
+            },
+            "initdb": {
+              "type": "object",
+              "description": "Sibling of cluster.postgresql, not nested under it.",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "poolers": {
+          "type": "array",
+          "description": "PgBouncer Pooler(s) via the upstream chart. Empty by default."
+        },
+        "backups": {
+          "type": "object",
+          "description": "Continuous backup configuration via the upstream chart.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "secret": {
+              "type": "object",
+              "properties": {
+                "create": {
+                  "type": "boolean",
+                  "description": "Avoids plaintext credentials in values by letting the chart create the backup secret."
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "devMode": {
       "type": "boolean",
       "description": "When true, inject a changing annotation on each helm upgrade to force pod rollouts even if the image tag is unchanged. May/will lead to unneccesary restarts."
@@ -2863,6 +3440,37 @@
       "description": "Registry path segment appended after global.registry_host for zeta-guard images.",
       "examples": [
         "zeta/zeta-guard/"
+      ]
+    },
+    "defaultContainerSecurityContext": {
+      "$ref": "#/$defs/K8sContainerSecurityContext",
+      "description": "Chart-wide base for every container securityContext of the zeta-guard chart (PSS 'restricted', runAsUser 1000). Each key is added to a component's containerSecurityContext unless that sets the key itself; the merge is per top-level key, so a component's capabilities replace the whole map. runAsUser is required for images with a non-numeric or root USER under runAsNonRoot; set it to null on OpenShift so the SCC assigns the UID. Does not apply to the telemetry-gateway subchart.",
+      "examples": [
+        {
+          "allowPrivilegeEscalation": false,
+          "readOnlyRootFilesystem": true,
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          }
+        },
+        {
+          "runAsUser": null
+        }
+      ]
+    },
+    "defaultPodSecurityContext": {
+      "$ref": "#/$defs/K8sPodSecurityContext",
+      "description": "Chart-wide base for every pod securityContext of the zeta-guard chart (seccompProfile RuntimeDefault). Each key is added to a component's podSecurityContext unless that sets the key itself (per top-level key). Does not apply to subcharts (telemetry-gateway, kpiPrometheus, nginx-ingress, keycloak-db).",
+      "examples": [
+        {
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        }
       ]
     },
     "networkPolicy": {
@@ -3152,6 +3760,31 @@
     {
       "if": {
         "properties": {
+          "authserver": {
+            "properties": {
+              "config": {
+                "properties": { "oidcFlowEnabled": { "const": true } },
+                "required": ["oidcFlowEnabled"]
+              }
+            },
+            "required": ["config"]
+          }
+        },
+        "required": ["authserver"]
+      },
+      "then": {
+        "properties": {
+          "authserver": {
+            "properties": {
+              "config": { "required": ["entityStatement"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "telemetryGatewayEnabled": {
             "const": true
           }
@@ -3253,7 +3886,8 @@
             "latest"
           ]
         }
-      }
+      },
+      "additionalProperties": false
     },
     "K8sImagePullSecrets": {
       "type": "array",
@@ -3340,13 +3974,16 @@
         },
         "timeoutSeconds": {
           "type": "integer",
-          "description": "Number of seconds after which the probe times out."
+          "description": "Number of seconds after which the probe times out. Required: left unset, Kubernetes applies its own default of 1s, which is too tight for the readiness probe once connection validation has evicted its first connection - Keycloak then answers every probe with a real database round-trip instead of from pool metrics. The ceiling is Agroal's acquisition timeout (PT20S)."
         },
         "successThreshold": {
           "type": "integer",
           "description": "Minimum consecutive successes for the probe to be considered successful after having failed."
         }
-      }
+      },
+      "required": [
+        "timeoutSeconds"
+      ]
     },
     "K8sPodDisruptionBudget": {
       "type": "object",

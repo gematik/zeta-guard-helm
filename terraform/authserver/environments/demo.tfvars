@@ -43,7 +43,6 @@ audience_scope_name = "zero:audience"
 
 # insecure_tls            = false              # Skip TLS verification — enable for self-signed certificates
 # use_kubernetes          = true               # Kubernetes state backend, credentials from the cluster secret
-# config_path             = "~/.kube/config"   # Kubeconfig path (only used when use_kubernetes = true)
 # keycloak_admin_secret   = "authserver-admin" # Secret holding the Keycloak admin credentials
 # keycloak_username       = ""                 # Required when use_kubernetes = false (prefer TF_VAR_keycloak_username)
 # keycloak_password       = ""                 # Required when use_kubernetes = false (prefer TF_VAR_keycloak_password)
@@ -58,20 +57,32 @@ audience_scope_name = "zero:audience"
 # audience = "https://example.domain"  # Explicit audience value; required when keycloak_url points at an admin
 #                                      # hostname. Empty (default) derives it from keycloak_url.
 
+# ── Admin hostname ───────────────────────────────────────────────────────────
+
+# master_realm_frontend_url = ""  # Browser-facing base URL of the master realm. It keeps the Admin Console's
+#                                 # login redirect on the admin hostname instead of the public one, which
+#                                 # denies it. Empty (default) derives it from keycloak_url whenever audience
+#                                 # is set — correct as long as Terraform uses the same URL administrators
+#                                 # open in a browser.
+#                                 #
+#                                 # SET IT when those two differ: an admin hostname that does not resolve
+#                                 # publicly forces Terraform through a tunnel or port-forward, and the
+#                                 # derived pin would be that tunnel — dead for every other browser:
+#                                 #   keycloak_url              = "https://localhost:8443/auth"
+#                                 #   master_realm_frontend_url = "https://admin.example.domain/auth"
+#                                 #
+#                                 # NOT a way to relocate or hide the Admin UI: it only changes the URLs
+#                                 # Keycloak advertises, never where it answers (ingress + --hostname-admin).
+#                                 # A host or path without a route to the authserver breaks the console
+#                                 # instead of moving it, and the UI stays reachable at its real address.
+#                                 # Must end in /auth; a validation rejects anything else at plan time.
+
 # ── Identity providers ───────────────────────────────────────────────────────
 
 # smc_b_client_secret = "**********"  # Secret of the SMC-B identity provider
 
-# enable_sekidp        = false  # Register the zeta-sekidp-oidc IdP, mobile browser/first-login
-#                               # flows, entity-statement keys and email-binding scopes
-# sekidp_fedmaster_url = ""     # Externally reachable Fedmaster Ingress URL (e.g.
-#                               # https://<host>/sekidp-fedmaster). Must match sekidp.fedmaster.env.serverUrl
-#                               # and Fedmaster's own published issuer — not the in-cluster Service URL.
-
-# NEVER USE IN PRODUCTION — a minimal fake sekIdP realm for local testing.
-# use_fake_sekidp_testrealm                 = false
-# dummy_client_for_fake_sekidp_clientsecret = ""
-# dummy_user_for_fake_sekidp_password       = ""
+# enable_sekidp        = false  # Register the zeta-sekidp-oidc IdP, mobile browser flow
+#                               # entity-statement keys and email-binding scopes
 
 # ── Email binding (F1) ───────────────────────────────────────────────────────
 
@@ -100,3 +111,9 @@ audience_scope_name = "zero:audience"
 
 # use_vau_db_enc = false  # Client-side encryption for this realm. Recommended only when running in a
 #                         # trusted execution environment (German VAU).
+
+# ── Session lifetime ─────────────────────────────────────────────────────────
+# Both must be at least the largest refresh-token TTL the policy issues (ttl.refresh_token).
+
+# sso_session_idle_timeout = "24h"  # Realm SSO session idle timeout (Go duration)
+# sso_session_max_lifespan = "24h"  # Realm SSO session max lifespan (Go duration)

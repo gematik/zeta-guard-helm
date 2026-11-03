@@ -11,10 +11,11 @@ spec:
       {{- include "tiger-proxy.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- if .Values.devMode }}
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.devMode }}
         zeta.dev/rollout-timestamp: "{{ now | unixEpoch }}"
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "tiger-proxy.selectorLabels" . | nindent 8 }}
     spec:

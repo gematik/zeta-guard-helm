@@ -7,13 +7,14 @@ terraform {
   required_providers {
     keycloak = {
       source  = "keycloak/keycloak"
-      version = ">= 5.7.0"
+      # 5.9+ is needed for the write-only client_secret_wo argument on the SMC-B
+      # identity provider; older providers fail with "client_secret is required".
+      version = ">= 5.9.0"
     }
     external = {
       source  = "hashicorp/external"
       version = "~> 2.3"
     }
-{{KUBERNETES_REQUIRED_PROVIDER}}
   }
 
   {{BACKEND_BLOCK}}

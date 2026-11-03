@@ -1,0 +1,41 @@
+# Enables every optional component of the zeta-guard chart so the SBOM lists all images the chart
+# can deliver. Used only by ci/sbom/generate_sbom.py (second render); never for a deployment.
+authserver:
+  config:
+    oidcFlowEnabled: true
+    entityStatement:
+      clientName: "sbom-render-only"
+      organizationName: "sbom-render-only"
+      contactEmail: "noreply@localhost"
+  dbEnc:
+    enabled: true
+  hsm:
+    enabled: true
+notificationService:
+  enabled: true
+  hsm:
+    endpoint: "sbom-render-only:50051"
+  sealing:
+    enabled: true
+    keychainGenerator:
+      kekId: notification-service-keychain-kek-aesgcm-v1
+kpiMetricsPersistence:
+  enabled: true
+keycloak-db:
+  enabled: true
+opa:
+  bundle:
+    enabled: true
+    resource: "sbom-render-only"
+  simulation:
+    enabled: true
+  rolloutRestart:
+    enabled: true
+  workloadIdentityFederation:
+    enabled: true
+    tokenRenewer:
+      enabled: true
+telemetryGatewayEnabled: true
+pepproxyMetricsEnabled: true
+pepproxy:
+  asl_enabled: true

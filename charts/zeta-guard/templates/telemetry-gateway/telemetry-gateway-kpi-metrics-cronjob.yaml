@@ -1,0 +1,248 @@
+{{/*
+  ADR 0001 (docs/adr/0001-reliable-daily-metrics.md), mechanism step 3:
+  computes the true UTC-calendar-day total for each count/security_kpis KPI from
+  kpiPrometheus's durable storage (which absorbs telemetry-gateway
+  restarts via increase()), and OTLP-pushes the corrected value back into
+  telemetry-gateway's dedicated otlp/security_kpis_corrected receiver, which
+  forwards it on to SIEM (metrics/security_kpis_corrected pipeline).
+
+  Computing a UTC-midnight-aligned "count so far today" isn't a single
+  static PromQL recording rule — range-vector durations are fixed literals,
+  not a "time since 00:00 UTC" expression — so this script computes the
+  elapsed seconds itself on every run and uses that as the query's range.
+
+  Both target service names are resolved here, at Helm template time, from
+  the real subchart contexts — not hardcoded, and not guessed at runtime by
+  the script itself.
+*/}}
+{{- if .Values.kpiMetricsPersistence.enabled }}
+{{- $kpiProm := .Subcharts.kpiPrometheus }}
+{{- $kpiPromFullname := include "prometheus.server.fullname" $kpiProm }}
+{{- $telemetryGatewayHost := include "telemetryGateway.hostname" . }}
+{{- $cronJob := .Values.kpiMetricsPersistence.cronJob }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kpi-metrics-helper-cronjob
+  labels:
+    {{- include "kpiMetricsHelper.labels" . | nindent 4 }}
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 2
+  schedule: {{ $cronJob.schedule | quote }}
+  startingDeadlineSeconds: 43200  # 12 h
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 43200  # 12 h
+      backoffLimit: {{ default 3 $cronJob.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "kpiMetricsHelper.labels" . | nindent 12 }}
+        spec:
+          automountServiceAccountToken: false
+          {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" dict) | nindent 10 }}
+          restartPolicy: OnFailure
+          containers:
+            - name: kpi-metrics-helper
+              image: {{ include "zeta-guard.imageReference" $cronJob.image | quote }}
+              imagePullPolicy: {{ $cronJob.image.pullPolicy | quote }}
+              {{- with $cronJob.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- /* The pinned python:3.12-slim image has no non-root USER of its
+                     own, so runAsNonRoot relies on the runAsUser from
+                     defaultContainerSecurityContext — without a UID the kubelet rejects the pod
+                     (CreateContainerConfigError: "image will run as root"). */}}
+              {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" dict) | nindent 14 }}
+              # Standardized OTel SDK env vars (see the OpenTelemetry spec's
+              # "Resource SDK" environment variables): identify this CronJob
+              # as the source of the corrected metrics it pushes. Read by the
+              # script below, not hardcoded there, so the identity stays
+              # defined in exactly one place.
+              env:
+                - name: OTEL_SERVICE_NAME
+                  value: "ZETA Guard KPI metrics helper"
+                - name: OTEL_RESOURCE_ATTRIBUTES
+                  value: "service.version={{ .Chart.Version }}"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  python3 <<'PYEOF'
+                  import json
+                  import os
+                  import sys
+                  import urllib.error
+                  import urllib.parse
+                  import urllib.request
+                  from datetime import datetime, timezone
+
+                  PROM_URL = "http://{{ $kpiPromFullname }}/api/v1/query"
+                  OTLP_URL = "http://{{ $telemetryGatewayHost }}:4319/v1/metrics"
+
+                  def resource_attributes():
+                      # Parses the standardized OTel SDK env vars set on this
+                      # container (see the Helm template) into the resource
+                      # attributes for the payload below, instead of
+                      # hardcoding the CronJob's identity here. OTEL_RESOURCE_
+                      # ATTRIBUTES is a comma-separated key=value list, values
+                      # percent-encoded per the W3C Baggage spec it's based on;
+                      # OTEL_SERVICE_NAME takes precedence over any
+                      # service.name it also carries, per spec.
+                      attributes = {}
+                      for pair in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
+                          pair = pair.strip()
+                          if not pair:
+                              continue
+                          key, _, value = pair.partition("=")
+                          if key:
+                              attributes[key.strip()] = urllib.parse.unquote(value.strip())
+                      service_name = os.environ.get("OTEL_SERVICE_NAME")
+                      if service_name:
+                          attributes["service.name"] = service_name
+                      return attributes
+
+                  RESOURCE_ATTRIBUTES = resource_attributes()
+
+                  # OTel dotted metric name -> its Prometheus-sanitized series name
+                  # (dots become underscores, monotonic sums get a "_total" suffix).
+                  # Hardcoded, not discovered, on purpose: this runs in a plain
+                  # container with no access to the Helm values that define
+                  # count/security_kpis's metric set, so the two have to be kept in sync by
+                  # hand when a KPI is added or removed there.
+                  METRICS = {
+                      "attack.detection.count": "attack_detection_count_total",
+                      "zeta_guard_kpi.botnet_accesses_24h": "zeta_guard_kpi_botnet_accesses_24h_total",
+                      "zeta_guard_kpi.country_accesses_24h": "zeta_guard_kpi_country_accesses_24h_total",
+                      "zeta_guard_kpi.failed_authorization_codes_24h": "zeta_guard_kpi_failed_authorization_codes_24h_total",
+                      "zeta_guard_kpi.failed_client_activations_24h": "zeta_guard_kpi_failed_client_activations_24h_total",
+                      "zeta_guard_kpi.tor_accesses_24h": "zeta_guard_kpi_tor_accesses_24h_total",
+                      "zeta_guard_kpi.vpn_accesses_24h": "zeta_guard_kpi_vpn_accesses_24h_total",
+                      "zeta_guard_kpi.requests_by_unregister_clients.authorization_server.count": "zeta_guard_kpi_requests_by_unregister_clients_authorization_server_count_total",
+                      "zeta_guard_kpi.requests_by_unregister_clients.resource_server.count": "zeta_guard_kpi_requests_by_unregister_clients_resource_server_count_total",
+                  }
+
+                  now = datetime.now(timezone.utc)
+                  midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                  seconds_today = max(1, int((now - midnight).total_seconds()))
+                  now_unix_nano = int(now.timestamp() * 1_000_000_000)
+                  # A_25484-03: same "zeta-client.date" attribute (UTC
+                  # calendar day, %F/yyyy-mm-dd) that transform/siem sets on
+                  # every log/span record exported straight to SIEM
+                  # (values.yaml's transform/siem processor) — this is the
+                  # day these corrected totals cover, i.e. `midnight`'s own
+                  # date, not `now`'s (relevant right around midnight, and
+                  # if a run is ever delayed past it).
+                  today = midnight.strftime("%Y-%m-%d")
+
+                  def query_increase(prom_name):
+                      promql = f"sum(increase({prom_name}[{seconds_today}s]))"
+                      url = PROM_URL + "?" + urllib.parse.urlencode({"query": promql})
+                      with urllib.request.urlopen(url, timeout=10) as resp:
+                          body = json.load(resp)
+                      if body.get("status") != "success":
+                          raise RuntimeError(f"query returned {body}")
+                      result = body["data"]["result"]
+                      if not result:
+                          return None  # no samples yet today (e.g. right after a fresh restart)
+                      # These are event counts; increase() over a counter
+                      # can still return a fractional value (it extrapolates
+                      # slightly beyond the observed samples), so round back
+                      # to a whole number here rather than reporting e.g.
+                      # 41.98 events.
+                      return round(float(result[0]["value"][1]))
+
+                  def push_metric(otel_name, value):
+                      payload = {
+                          "resourceMetrics": [{
+                              "resource": {
+                                  "attributes": [
+                                      {"key": key, "value": {"stringValue": v}}
+                                      for key, v in RESOURCE_ATTRIBUTES.items()
+                                  ],
+                              },
+                              "scopeMetrics": [{
+                                  "scope": {"name": "kpi-metrics-helper"},
+                                  "metrics": [{
+                                      "name": otel_name,
+                                      "unit": "1",
+                                      "gauge": {
+                                          "dataPoints": [{
+                                              "timeUnixNano": str(now_unix_nano),
+                                              "asDouble": value,
+                                              "attributes": [
+                                                  {"key": "zeta-client.date", "value": {"stringValue": today}},
+                                              ],
+                                          }],
+                                      },
+                                  }],
+                              }],
+                          }],
+                      }
+                      req = urllib.request.Request(
+                          OTLP_URL, data=json.dumps(payload).encode(),
+                          headers={"Content-Type": "application/json"},
+                          method="POST",
+                      )
+                      with urllib.request.urlopen(req, timeout=10) as resp:
+                          return resp.status
+
+                  # Each KPI is queried and pushed as its own, independent
+                  # OTLP request: a query or push failure for one metric is
+                  # logged and skipped, not allowed to abort the loop, so it
+                  # can't stop the remaining metrics from being processed.
+                  # sent_count/error_count below decide the run's outcome
+                  # once every metric has been attempted.
+                  sent_count = 0
+                  error_count = 0
+                  for otel_name, prom_name in METRICS.items():
+                      # Caught broadly on purpose: besides network/OS-level
+                      # failures (URLError/HTTPError/TimeoutError/OSError,
+                      # our own status-check RuntimeError), a malformed-but-
+                      # 200 response (e.g. an ingress/proxy serving an HTML
+                      # error page, or a differently-shaped JSON body) raises
+                      # json.JSONDecodeError/KeyError/IndexError instead —
+                      # none of those are OSError subclasses, so narrower
+                      # tuples here would let them slip past this try/except
+                      # and abort the whole loop, defeating the point of
+                      # isolating one metric's failure from the rest.
+                      try:
+                          value = query_increase(prom_name)
+                      except Exception as e:
+                          print(f"ERROR: prometheus query failed for {prom_name}: {e}", file=sys.stderr)
+                          error_count += 1
+                          continue
+                      if value is None:
+                          continue  # no samples yet today - not a failure
+
+                      try:
+                          status = push_metric(otel_name, value)
+                      except urllib.error.HTTPError as e:
+                          print(f"ERROR: OTLP push failed for {otel_name}: HTTP {e.code} {e.read()}", file=sys.stderr)
+                          error_count += 1
+                          continue
+                      except Exception as e:
+                          print(f"ERROR: OTLP push failed for {otel_name}: {e}", file=sys.stderr)
+                          error_count += 1
+                          continue
+
+                      print(f"Pushed {otel_name}={value}, OTLP receiver returned HTTP {status}")
+                      sent_count += 1
+
+                  if sent_count == 0:
+                      if error_count == 0:
+                          # every metric queried cleanly but had no samples
+                          # yet (e.g. right after a fresh kpiPrometheus
+                          # restart) - not a failure, just nothing to report.
+                          print("No KPI values available this run; nothing to push.")
+                          sys.exit(0)
+                      print("ERROR: no KPI values could be sent this run", file=sys.stderr)
+                      sys.exit(1)
+
+                  print(f"Sent {sent_count}/{len(METRICS)} KPI value(s) this run"
+                        + (f", {error_count} failed" if error_count else "") + ".")
+                  PYEOF
+{{- end }}

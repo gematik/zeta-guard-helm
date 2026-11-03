@@ -23,6 +23,9 @@ Common labels (variant-aware).
 {{- define "notificationService.labels" -}}
 {{ include "notificationService.selectorLabels" . }}
 app.kubernetes.io/component: notification-service
+{{- with .root.Values.notificationService.image.tag }}
+app.kubernetes.io/version: {{ . | quote }}
+{{- end }}
 {{ include "zeta-guard.baseLabels" .root }}
 {{- end }}
 
@@ -56,19 +59,27 @@ rs and fdv are distinct images with distinct digests.
 */}}
 {{- define "notificationService.image" -}}
 {{- $ns := .root.Values.notificationService -}}
-{{- $variantCfg := index $ns .variant -}}
-{{- $registry := default (printf "%s%s" .root.Values.global.registry_host .root.Values.registry_name) $ns.image.registry -}}
-{{- $tag := printf "%s-%s" $ns.image.tag .variant -}}
-{{- $digest := "" -}}
-{{- if and $variantCfg $variantCfg.image -}}
-{{- $tag = default $tag $variantCfg.image.tag -}}
-{{- if $variantCfg.image.digest -}}
-{{- $digest = $variantCfg.image.digest -}}
-{{- end -}}
-{{- end -}}
+{{- $variantCfg := get $ns .variant -}}
+{{- $registry := $ns.image.registry | default (printf "%s%s" .root.Values.global.registry_host .root.Values.registry_name) -}}
+{{- $tag := $variantCfg.image.tag | default (printf "%s-%s" $ns.image.tag .variant) -}}
+{{- $digest := $variantCfg.image.digest -}}
 {{- printf "%s%s" $registry $ns.image.repository -}}
 {{- if $tag }}:{{ $tag }}{{ end }}
 {{- if $digest }}@{{ $digest }}{{ end }}
+{{- end -}}
+
+{{/*
+Full image reference of the keychain generator. Shares registry and version
+with the service image; the tag has no variant suffix. Arg: root.
+*/}}
+{{- define "notificationService.keychainGeneratorImage" -}}
+{{- $ns := .Values.notificationService -}}
+{{- $gen := $ns.sealing.keychainGenerator.image -}}
+{{- $registry := $gen.registry | default $ns.image.registry | default (printf "%s%s" .Values.global.registry_host .Values.registry_name) -}}
+{{- $tag := $gen.tag | default $ns.image.tag -}}
+{{- printf "%s%s" $registry $gen.repository -}}
+{{- if $tag }}:{{ $tag }}{{ end }}
+{{- if $gen.digest }}@{{ $gen.digest }}{{ end }}
 {{- end -}}
 
 {{/*
@@ -86,6 +97,21 @@ Full Deployment manifest for one variant. Arg: dict "root" $ "variant" ...
 {{- $mtlsOn := and $mtlsCert $mtlsKey -}}
 {{- if and (eq $ns.db.mode "cloudnative") (ne $ns.db.kind "postgresql") -}}
 {{- fail (printf "notificationService.db.kind=%q: cloudnative mode (CNPG) is PostgreSQL — set kind: postgresql or mode: external" $ns.db.kind) -}}
+{{- end -}}
+{{- if hasKey $ns.env "persistenceSealingEnabled" -}}
+{{- fail "notificationService.env.persistenceSealingEnabled moved to notificationService.sealing.enabled" -}}
+{{- end -}}
+{{- if hasKey $ns.hsm "kek" -}}
+{{- fail "notificationService.hsm.kek is gone: the keys come from the keychain, see notificationService.sealing; the KEK of a new keychain is notificationService.sealing.keychainGenerator.kekId" -}}
+{{- end -}}
+{{- if hasKey $ns.sealing "dekCacheSize" -}}
+{{- fail "notificationService.sealing.dekCacheSize is gone: the service holds the keychain's keys and no per-record DEKs any more" -}}
+{{- end -}}
+{{- if and $ns.sealing.enabled (not $ns.hsm.endpoint) -}}
+{{- fail "notificationService.sealing.enabled requires notificationService.hsm.endpoint (the keychain is wrapped by the HSM)" -}}
+{{- end -}}
+{{- if and $ns.sealing.enabled $ns.sealing.keychainGenerator.enabled (not $ns.sealing.keychainGenerator.kekId) -}}
+{{- fail "notificationService.sealing.keychainGenerator.kekId is required while the keychain generator runs (the KEK a new keychain is wrapped under)" -}}
 {{- end -}}
 {{- /* Datasource JDBC URL / secret default to the CNPG cluster's -rw service and
        -app secret so clusterName stays the single source of truth in cloudnative
@@ -120,9 +146,7 @@ spec:
         {{- end }}
       {{- end }}
     spec:
-      securityContext:
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "zeta-guard.podSecurityContext" (dict "root" $root "sc" $ns.podSecurityContext) | nindent 6 }}
       {{- if $ns.serviceAccountName }}
       serviceAccountName: {{ $ns.serviceAccountName | quote }}
       {{- end }}
@@ -131,10 +155,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if or $ns.db.waitForDb.enabled $ns.sealing.enabled }}
+      initContainers:
+      {{- end }}
       {{- if $ns.db.waitForDb.enabled }}
       {{- $wait := $ns.db.waitForDb }}
       {{- $dbHost := $wait.host | default (printf "%s-rw" $ns.db.clusterName) }}
-      initContainers:
         # Wait for Postgres so the app doesn't crash-loop on Flyway's connect.
         - name: wait-for-db
           image: {{ $wait.image | quote }}
@@ -146,24 +172,55 @@ spec:
               echo "Waiting for Postgres at {{ $dbHost }}:{{ $wait.port }}..."
               while ! nc -z {{ $dbHost }} {{ $wait.port }}; do sleep {{ $wait.intervalSeconds }}; done
               echo "Postgres ready"
-          {{- with $ns.containerSecurityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $root "sc" $ns.containerSecurityContext) | nindent 10 }}
           {{- with $wait.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       {{- end }}
-      containers:
-        - name: notification-service
-          {{- with $ns.containerSecurityContext }}
-          securityContext:
+      {{- if $ns.sealing.enabled }}
+      {{- $gen := $ns.sealing.keychainGenerator }}
+        {{- with $ns.sealing.initContainerProvideKeys }}
+        - {{ tpl (toYaml .) $root | nindent 10 }}
+        {{- end }}
+        {{- if $gen.enabled }}
+        # Creates the keychain if no hook provided one; leaves an existing one alone.
+        - name: keychain-generator
+          image: "{{ include "notificationService.keychainGeneratorImage" $root | trim }}"
+          imagePullPolicy: {{ $gen.imagePullPolicy | quote }}
+          env:
+            - name: HSM_PROXY_ENDPOINT
+              value: {{ $ns.hsm.endpoint | quote }}
+            - name: HSM_PROXY_KEK_ID
+              value: {{ $gen.kekId | quote }}
+            - name: KEYCHAIN_OUTPUT_FILE
+              value: {{ $ns.sealing.keychainFileName | quote }}
+          {{- with $gen.resources }}
+          resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $root "sc" $gen.containerSecurityContext) | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with $gen.extraVolumeMounts }}
+            {{- tpl (toYaml .) $root | nindent 12 }}
+            {{- end }}
+        {{- end }}
+        {{- with $ns.sealing.initContainerStoreKeys }}
+        - {{ tpl (toYaml .) $root | nindent 10 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: notification-service
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $root "sc" $ns.containerSecurityContext) | nindent 10 }}
           image: "{{ include "notificationService.image" . | trim }}"
           imagePullPolicy: "{{ $ns.imagePullPolicy }}"
           env:
+            {{- if eq .variant "rs" }}
+            - name: QUARKUS_HTTP_AUTH_PERMISSION_RS_ENABLED
+              value: {{ $ns.rs.mtls.enabled | quote }}
+            {{- end }}
             - name: PUSH_GATEWAY_ALLOWED_BASE_URLS
               value: {{ $ns.env.pushGatewayAllowedBaseUrls | join "," | quote }}
             {{- if $ns.pushGateway.trustedCAs }}
@@ -187,11 +244,38 @@ spec:
             {{- end }}
             - name: NOTIFICATION_CHANNELS_ALLOWED
               value: {{ $ns.env.channelsAllowed | quote }}
+            {{- /* HSM Proxy wiring for at-rest sealing. Each var is emitted only when
+                   its value is set, so an unset value keeps the service default. */}}
+            {{- with $ns.hsm.endpoint }}
+            - name: HSM_PROXY_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" $ns.hsm.plainTextAccepted) }}
+            - name: HSM_PROXY_PLAIN_TEXT_ACCEPTED
+              value: {{ $ns.hsm.plainTextAccepted | quote }}
+            {{- end }}
             - name: NOTIFICATION_PERSISTENCE_SEALING_ENABLED
-              value: {{ $ns.env.persistenceSealingEnabled | quote }}
-            # A_29974: when false the NS disables /history/* (404/501) and persists nothing.
+              value: {{ $ns.sealing.enabled | quote }}
+            {{- if $ns.sealing.enabled }}
+            - name: NOTIFICATION_PERSISTENCE_SEALING_KEYCHAIN_FILE
+              value: {{ $ns.sealing.keychainFileName | quote }}
+            {{- with $ns.sealing.rotationInterval }}
+            - name: NOTIFICATION_PERSISTENCE_SEALING_ROTATION_INTERVAL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            # Encrypt push notification payloads on dispatch (notification.encryption.enabled).
+            # A_29968: when true the NS requires pusher key material and sends encrypted batches only.
+            - name: NOTIFICATION_ENCRYPTION_ENABLED
+              value: {{ $ns.env.encryptionEnabled | quote }}
+            # A_29974: when false the NS answers /history/* with 404 and persists nothing.
             - name: NOTIFICATION_HISTORY_ENABLED
               value: {{ $ns.historyEnabled | quote }}
+            {{- /* Emitted only when set, so an unset value keeps the service default (P30D). */}}
+            {{- with $ns.historyRetention }}
+            - name: NOTIFICATION_HISTORY_RETENTION
+              value: {{ . | quote }}
+            {{- end }}
             - name: NOTIFICATION_DATASOURCE_DB_KIND
               value: {{ $ns.db.kind | quote }}
             - name: QUARKUS_DATASOURCE_JDBC_URL
@@ -206,16 +290,19 @@ spec:
                 secretKeyRef:
                   name: {{ $dbSecretName | quote }}
                   key: password
-            - name: OTEL_RESOURCE_ATTRIBUTES
+            - name: "QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT"
+              value: "http://{{ include "telemetryGateway.hostname" $root }}:4317"
+            - name: QUARKUS_OTEL_RESOURCE_ATTRIBUTES
               value: "service.version={{ $root.Chart.Version }}"
-            {{- if $ns.accessLog.enabled }}
+            - name: "QUARKUS_OTEL_SDK_DISABLED"
+              value: "{{ $root.Values.telemetryGatewayEnabled | ternary "false" "true" }}"
+            - name: "QUARKUS_OTEL_SERVICE_NAME"
+              value: "ZETA Guard Notification Service"
+            {{/* A_29990 access log must remain disabled while the notification
+                 service receives KVNRs and Telematik-Ids in request target
+                 URLs */}}
             - name: QUARKUS_HTTP_ACCESS_LOG_ENABLED
-              value: "true"
-            {{- with $ns.accessLog.pattern }}
-            - name: QUARKUS_HTTP_ACCESS_LOG_PATTERN
-              value: {{ . | quote }}
-            {{- end }}
-            {{- end }}
+              value: "false"
             {{- include "zeta-guard.proxyEnvVars" $root.Values.global | nindent 12 }}
           ports:
             - containerPort: 8080
@@ -241,6 +328,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- with $ns.extraVolumeMounts }}
+            {{- tpl (toYaml .) $root | nindent 12 }}
+            {{- end }}
             {{- if $ns.pushGateway.trustedCAs }}
             - name: push-gateway-trusted-ca
               mountPath: /certs/push-gateway
@@ -255,6 +345,9 @@ spec:
         # Quarkus/Vert.x needs a writable /tmp even with readOnlyRootFilesystem: true.
         - name: tmp
           emptyDir: {}
+        {{- with $ns.extraVolumes }}
+        {{- tpl (toYaml .) $root | nindent 8 }}
+        {{- end }}
         {{- if $ns.pushGateway.trustedCAs }}
         # PEM CA(s) for outbound HTTPS to the Push Gateway; each lands at
         # /certs/push-gateway/ca-<i>.pem. Quarkus reads PEM directly (no keytool/PKCS12).

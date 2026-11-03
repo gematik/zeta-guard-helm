@@ -12,11 +12,14 @@ metadata:
   labels:
     {{- include "opa.labels" . | nindent 4 }}
 spec:
+  concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 2
   schedule: "*/30 * * * *"
+  startingDeadlineSeconds: 1800
   successfulJobsHistoryLimit: 2
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 240
       backoffLimit: 5
       template:
         metadata:
@@ -34,9 +37,7 @@ spec:
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          securityContext:
-            seccompProfile:
-              type: RuntimeDefault
+          {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" dict) | nindent 10 }}
           serviceAccountName: opa-token-renewer
           restartPolicy: OnFailure
           containers:
@@ -47,10 +48,7 @@ spec:
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
-              {{- with .Values.opa.cronjobSecurityContext }}
-              securityContext:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
+              {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.opa.cronjobSecurityContext) | nindent 14 }}
               env:
                 - name: AUDIENCE
                   value: "{{ .Values.gematik.tiSim.idTokenAudience }}"

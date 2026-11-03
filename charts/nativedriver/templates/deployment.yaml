@@ -1,3 +1,12 @@
+{{- $authMode := upper (default "SMB" .Values.authMode) -}}
+{{- if not (has $authMode (list "SMB" "OIDC")) -}}
+  {{- fail "nativedriver.authMode must be either SMB or OIDC" -}}
+{{- end -}}
+{{- if eq $authMode "OIDC" -}}
+  {{- $_ := required "nativedriver.oidcIdpIss is required when authMode is OIDC" .Values.oidcIdpIss -}}
+  {{- $_ := required "nativedriver.oidcIdpAlias is required when authMode is OIDC" .Values.oidcIdpAlias -}}
+  {{- $_ := required "nativedriver.oidcBaseUri is required when authMode is OIDC" .Values.oidcBaseUri -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -82,15 +91,17 @@ spec:
             - name: SMCB_CARD_HANDLE
               value: {{ .Values.connector_card_handle }}
             - name: REQUIRED_ROLE_OID
-              value: {{ .Values.requiredOid }}
+              value: {{ .Values.requiredOid | quote }}
+            - name: AUTH_MODE
+              value: {{ $authMode | quote }}
             - name: OIDC_IDP_ISS
-              value: {{ .Values.oidcIdpIss }}
+              value: {{ .Values.oidcIdpIss | quote }}
             - name: OIDC_IDP_ALIAS
-              value: {{ .Values.oidcIdpAlias }}
+              value: {{ .Values.oidcIdpAlias | quote }}
             - name: OIDC_BASE_URI
-              value: {{ .Values.oidcBaseUri }}
+              value: {{ .Values.oidcBaseUri | quote }}
             - name: OIDC_TEST_KVNR
-              value: {{ .Values.oidcTestKvnr }}
+              value: {{ .Values.oidcTestKvnr | quote }}
       volumes:
         - name: smcb-keystore
           secret:

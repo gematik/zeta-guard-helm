@@ -94,6 +94,16 @@ opentelemetry-demo:
     telemetry-docs:
       enabled: false
 
+  # File cache counts against the memory limit; the upstream 1100Mi default leaves ~150 MB next
+  # to the heap, so the pod re-reads its index from the node's OS disk at full disk bandwidth.
+  opensearch:
+    opensearchJavaOpts: "-Xms1g -Xmx1g"
+    resources:
+      requests:
+        memory: 2Gi
+      limits:
+        memory: 4Gi
+
   opentelemetry-collector:
     mode: deployment
     config:

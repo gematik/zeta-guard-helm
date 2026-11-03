@@ -39,22 +39,22 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.pepproxy.podSecurityContext }}
-      securityContext:
+      {{- include "zeta-guard.podSecurityContext" (dict "root" $ "sc" .Values.pepproxy.podSecurityContext) | nindent 6 }}
+      {{- if or .Values.pepproxy.hostAliases .Values.global.enableDNSRedirect }}
+      hostAliases:
+        {{- with .Values.pepproxy.hostAliases }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.global.enableDNSRedirect }}
+          {{- template "global.tigerDNSRedirectEntryOnly" . }}
+        {{- end }}
       {{- end }}
-    {{- if .Values.global.enableDNSRedirect }}
-      {{- template "global.tigerDNSRedirect" . }}
-    {{- end }}
       {{- if .Values.pepproxy.asl_enabled }}
       initContainers:
         - name: trust-anchor-provisioning-processor
           image: "{{ include "provisioningProcessor.image" . | trim }}"
           imagePullPolicy: "{{ .Values.provisioningProcessor.imagePullPolicy }}"
-          {{- with .Values.provisioningProcessor.containerSecurityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.provisioningProcessor.containerSecurityContext) | nindent 10 }}
           env:
             - name: RESULT_DIR
               value: "/var/trust-data"
@@ -125,10 +125,7 @@ spec:
               port: status
             periodSeconds: 1
             failureThreshold: 30
-          {{- if .Values.pepproxy.containerSecurityContext }}
-          securityContext:
-          {{- toYaml .Values.pepproxy.containerSecurityContext | nindent 12 }}
-          {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.pepproxy.containerSecurityContext) | nindent 10 }}
           {{- with .Values.pepproxy.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -208,10 +205,7 @@ spec:
               port: metrics
             periodSeconds: 1
             failureThreshold: 30
-          {{- if .Values.pepproxy.containerSecurityContext }}
-          securityContext:
-          {{- toYaml .Values.pepproxy.containerSecurityContext | nindent 12 }}
-          {{- end }}
+          {{- include "zeta-guard.containerSecurityContext" (dict "root" $ "sc" .Values.pepproxy.containerSecurityContext) | nindent 10 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp

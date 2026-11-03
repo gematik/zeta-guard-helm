@@ -20,19 +20,49 @@ global:
 
 registry_name: ""
 
+# Chart-wide base for every container securityContext of this chart (PSS
+# 'restricted'). A component's containerSecurityContext only lists what differs:
+# each key set there wins, every other key comes from here. The merge is
+# per top-level key — setting `capabilities` in a component replaces the whole
+# map, so keep `drop: [ "ALL" ]` when adding capabilities.
+# runAsUser is needed because several images declare a non-numeric USER
+# (keycloak, nginx) or none at all (google/cloud-sdk, python), which the kubelet
+# cannot verify against runAsNonRoot. On OpenShift set `runAsUser: null` so the
+# SCC assigns the UID. Deliberately not under `global`: Helm drops a `null` there
+# when zeta-guard is used as a dependency. The telemetry-gateway subchart does
+# not read it, see telemetry-gateway below.
+defaultContainerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop: ["ALL"]
+
+# Chart-wide base for every pod securityContext of this chart, merged the same
+# way as defaultContainerSecurityContext (a component's podSecurityContext only
+# lists what differs). Set on the pod so it also covers containers the chart does
+# not render itself (injected sidecars, debug containers). runAsUser stays on the
+# container level, so it is not inherited by an injected istio-proxy.
+defaultPodSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
 # additionalLabels is a map of labels added to each zeta-guard resource.
 additionalLabels: {}
 
 authserver:
   dbEnc:
     enabled: false
-    columnEncryptionEnabled: false
-    integrityChecksEnabled: false
-    integrityRowChecksEnabled: false
-    integrityTableChecksEnabled: false
+    columnEncryptionEnabled: true
+    integrityChecksEnabled: true
+    integrityRowChecksEnabled: true
+    integrityTableChecksEnabled: true
     periodicRowChecksEnabled: false
     lockdownOnError: false
     shutdownOnError: false
+    # Enable to automatically start key rotation when detecting changes in keychain configuration
+    automaticCryptoUpdatesEnabled: false
     bootstrapInterval: "PT30S"
     bootstrapAttempts: 15
     keychainGenerator:
@@ -43,16 +73,18 @@ authserver:
           cpu: "100m"
           memory: "128Mi"
       extraVolumeMounts: []
+      # Overrides on top of defaultContainerSecurityContext.
+      containerSecurityContext:
+        readOnlyRootFilesystem: false
       image:
         repository: keychain-generator
-        tag: 2.0.4
+        tag: 2.0.10
       imagePullPolicy: IfNotPresent
   serviceAccount:
     create: true
     name: authserver
-  podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
+  # Overrides on top of defaultPodSecurityContext.
+  podSecurityContext: {}
   podDisruptionBudget:
     enabled: false
     minAvailable: 1
@@ -64,26 +96,19 @@ authserver:
     enabled: true
     # ISO-8601 duration between two checks, hours or less. The first check runs one interval after startup.
     interval: PT1H
+  # keycloak-copy: copies /opt/keycloak from the image into the pod's writable volume.
   initContainer:
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      capabilities:
-        drop: [ "ALL" ]
+    # Overrides on top of defaultContainerSecurityContext.
+    containerSecurityContext: {}
     resources:
       limits:
-        memory: "2Gi"
+        memory: "256Mi"
       requests:
-        cpu: "500m"
-        memory: "512Mi"
+        cpu: "100m"
+        memory: "64Mi"
   container:
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      capabilities:
-        drop: [ "ALL" ]
+    # Overrides on top of defaultContainerSecurityContext.
+    containerSecurityContext: {}
     resources:
       limits:
         memory: "6Gi"
@@ -106,9 +131,11 @@ authserver:
   replicaCount: 1
   hostname: ""
   wellKnownAuthServerPath: /
-  # When set, /auth/admin on the main hostname is routed to the PEP proxy, which
-  # denies it with 403, and a dedicated admin ingress is created for this
-  # hostname. Terraform/CI must use this hostname for keycloak_url.
+  # When set, /auth/admin and /auth/realms/master on the main hostname are routed
+  # to the PEP proxy, which denies them with 403, and a dedicated admin ingress is
+  # created for this hostname. The master realm is blocked because it carries the
+  # admin token endpoint; ZETA traffic runs on the zeta-guard realm and is
+  # unaffected. Terraform/CI must use this hostname for keycloak_url.
   adminHostname: ""
   # TLS secret for the admin ingress. Defaults to "zeta-guard-admin-tls".
   # For local/KIND environments reuse the main cert by setting this to "zeta-guard-tls"
@@ -123,7 +150,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 1.3.3
+    tag: 2.0.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
@@ -191,6 +218,26 @@ authserver:
       keystorePassword:
         secretName: ""                 # Secret holding the keystore password
         secretKey: ""
+  # mTLS authentication of resource servers calling GET /auth/realms/<realm>/zeta/userinfo/email, which releases the
+  # verified email of a mobile user. When enabled, the ingress asks every client on authserver.hostname for a
+  # certificate (optional, unverified by the ingress: ssl_verify_client optional_no_ca) and forwards it to Keycloak in
+  # the ssl-client-cert header; the authserver checks its chain against the truststore below. Requires
+  # config.oidcFlowEnabled. Side effect: browsers with client certificates installed may show a certificate picker.
+  resourceServerMtls:
+    enabled: false
+    # Truststore dedicated to resource servers; every certificate in it is a trust anchor. Its format follows the
+    # extension of secretKey: .p12/.pfx (PKCS12), .jks, anything else a PEM bundle. Empty secretName falls back to
+    # Keycloak's HTTPS truststore (KC_HTTPS_TRUST_STORE_FILE). With neither, userinfo/email answers every request
+    # with 401. Never put it into additionalTrustedCAs: those are trusted for outbound calls.
+    truststore:
+      secretName: ""
+      secretKey: ca.pem
+    # Only for PKCS12/JKS truststores.
+    truststorePassword:
+      secretName: ""
+      secretKey: ""
+    # ssl_verify_depth of the ingress: the longest certificate chain a resource server may present.
+    verifyDepth: 3
   testmode: false
   # verbose adds --verbose to the Keycloak start command, which makes the CLI
   # print full stacktraces for startup/build errors. It does not change the
@@ -204,14 +251,71 @@ authserver:
     clientRegistrationSchedulerInterval: "PT2M"
     # Enable the OIDC client flow (env ZETA_OIDC_FLOW_ENABLED).
     oidcFlowEnabled: false
+    # Entity statement metadata (A_23034-02, A_27598). Required when oidcFlowEnabled is true.
+    # entityStatement:
+    #   clientName: ""
+    #   organizationName: ""
+    #   contactEmail: ""
+    #   # Optional (A_25656): static redirect_uris of the entity statement. Empty: derived from the realm's SekIDP clients.
+    #   redirectUris: []
   # Mostly for test setup purposes.
   # Adds an entry to the authserver's host file, mapping hostAlias.ip to hostAlias.name
   hostAlias: { }
+  db:
+    # pgjdbc connection parameters, appended to KC_DB_URL as query parameters.
+    #
+    # socketTimeout (SECONDS) is the only bound on a blocking read, and the only bound on
+    # the auth exchange of a NEW connection — db-connect-timeout maps to
+    # quarkus.datasource.jdbc.login-timeout, which does not exist in Quarkus, so that
+    # mapping is a no-op. Without it, a CNPG primary whose pod vanished (the -rw ClusterIP
+    # stays valid while kube-proxy still routes to the dead pod IP, so no RST is ever sent)
+    # blackholes the pooled connections and every replacement attempt alike.
+    #
+    # These live in the URL rather than as QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_*
+    # env vars because that is a Map property, and an environment variable name cannot carry
+    # the camelCase key — it would arrive as "sockettimeout", which pgjdbc silently ignores.
+    #
+    # 120s is 12x db-log-slow-queries-threshold (10s), so no legitimate runtime statement is
+    # near it, while staying above any realistic single Liquibase DDL statement. Raise it for
+    # one release if a heavy migration is expected: a statement killed by this timeout leaves
+    # the Liquibase changelog lock held and the next start waits 30 min before failing.
+    #
+    # "connectTimeout" and "targetServerType" are rejected here — naming either in the URL
+    # makes Keycloak stop injecting its own defaults (10s / primary).
+    urlProperties:
+      socketTimeout: 120
+      tcpKeepAlive: true
   dbPool:
     # Per-pod JDBC pool. replicaCount × maxSize (+ reserve) must stay ≤ maxConnections
     # (enforced in cnpg-cluster.yaml).
     minSize: 10
     maxSize: 100
+    # Recycle every pooled connection after this long (ISO-8601 duration), so a socket
+    # orphaned by a CNPG switchover cannot sit in the pool forever. Keycloak's own default
+    # for Postgres is empty == unlimited; only MySQL/MariaDB get PT7H50M.
+    # Set through this first-class Keycloak option rather than the underlying Quarkus
+    # property: Keycloak maps kc.db-pool-max-lifetime -> quarkus.datasource.jdbc.max-lifetime
+    # and logs "Please use the first-class option ..." if the Quarkus name is set directly.
+    maxLifetime: PT30M
+    # Agroal connection validation. Keycloak exposes no option for any of these, so they are
+    # passed as plain QUARKUS_* environment variables — Keycloak's own KcEnvConfigSource only
+    # reads KC_/KCRAW_ names, but it does not replace Quarkus' default EnvConfigSource, which
+    # stays active alongside it. A misspelled name here is silently ignored — to prove one is
+    # actually read, give it a value that cannot be converted: Keycloak then refuses to start
+    # with SRCFG00039 naming the property.
+    #
+    # queryTimeout bounds the validation itself. Unset, Quarkus validates with isValid(0) —
+    # no socket timeout — so the check hangs on the very socket it is meant to detect, which
+    # is why the pool never recovered on its own.
+    validationQueryTimeout: 2S
+    # Background sweep over idle connections (Quarkus default 2M).
+    backgroundValidationInterval: 15S
+    # Validate on acquire once a connection has been idle longer than this. Quarkus has NO
+    # default, i.e. this is off, which is why a stale connection went straight to a request
+    # thread.
+    foregroundValidationInterval: 5S
+    # Reap idle connections (Quarkus default 5M). Never shrinks the pool below minSize.
+    idleRemovalInterval: 1M
   httpPool:
     maxThreads: 300
   log:
@@ -219,18 +323,32 @@ authserver:
   # podAnnotations is for setting additional Kubernetes Annotations to a Pod.
   podAnnotations: {}
   probes:
+    # timeoutSeconds matters more than it looks: Agroal's invalidCount is a monotonic counter
+    # that never resets, so once validation has evicted its first connection Keycloak takes the
+    # blocking DataSourceHealthCheck branch on EVERY readiness probe (open a connection and
+    # validate it). Kubernetes' default of 1s flaps under load. The ceiling is Agroal's
+    # acquisition timeout, PT20S.
     liveness:
+      # Kubernetes suppresses liveness until the startupProbe has succeeded, so 0 is fine.
       initialDelaySeconds: 0
-      periodSeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      # Liveness deliberately targets /health/live, which never touches the database, so this
+      # threshold is about an unresponsive JVM — not about database availability. A DB-aware
+      # liveness probe would kill every pod at once during an outage; the connection validation
+      # below is what recovers the pool.
       failureThreshold: 5
     readiness:
       initialDelaySeconds: 0
-      periodSeconds: 5
-      failureThreshold: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
     startup:
       initialDelaySeconds: 10
       periodSeconds: 5
-      failureThreshold: 20
+      timeoutSeconds: 5
+      # 60 × 5s = 300s. The previous 20 (100s) was tight for a cold database plus Liquibase.
+      failureThreshold: 60
   affinity: {}
   tolerations: []
 
@@ -247,9 +365,8 @@ pepproxy:
   serviceAccount:
     create: true
     name: pep-proxy
+  # Overrides on top of defaultPodSecurityContext.
   podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
     sysctls:
       # Outbound connections (inner ASL requests to localhost, nginx upstream
       # connections) each park their ephemeral port in TIME_WAIT for 60s when
@@ -259,14 +376,31 @@ pepproxy:
       # "Safe" sysctl: https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls
       - name: net.ipv4.ip_local_port_range
         value: "10240 65535"
+  # Overrides on top of defaultContainerSecurityContext, for the nginx container
+  # and the metrics sidecar. The writable paths (/var/cache/nginx, /var/run,
+  # /tmp) are emptyDirs, so the root filesystem stays read-only.
+  containerSecurityContext: {}
   replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 1.3.3
+    # `pep_pdp_url` (nginxConf.pepInternalUrl) needs a PEP image >= 2.0.0-rc1; off by default.
+    tag: 2.0.0
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
   podLabels: {}
+  # Extra /etc/hosts entries for the PEP pod (native Kubernetes hostAliases form).
+  # Escape hatch for resolving a hostname the PEP must reach to a cluster-internal
+  # address. Prefer `nginxConf.pepInternalUrl` for the authserver — it needs no IP
+  # and no TLS considerations. If you do alias the public authserver FQDN here,
+  # point it at the ClusterIP of the *ingress controller*, not the authserver:
+  # only the ingress controller serves a certificate valid for that name.
+  # Merged with the entries from `global.enableDNSRedirect`.
+  #   hostAliases:
+  #     - ip: 10.96.1.23
+  #       hostnames:
+  #         - zeta.example.com
+  hostAliases: []
   resources:
     limits:
       memory: "2Gi"
@@ -293,7 +427,7 @@ pepproxy:
   # aslOcsp: "http://example.org/ocsp"
   #
   # change maximum validity of cached OCSP responses (default 24h per A_24624-01)
-  # alsOcspTtl: 5m
+  # aslOcspTtl: 5m
   #
   nginxConf:
     configMapName: pep-nginx-conf
@@ -305,7 +439,7 @@ pepproxy:
     aslTestmode: false
 
     # enable (true) or disable (false) no-travel enforcement
-    noTravel: false
+    noTravel: true
 
     # fachdienstUrl defines a variable that could be referenced in the `locations`
     # to avoid repeating the upstream URL. Irrelevant when using `proxyLocations`.
@@ -322,7 +456,29 @@ pepproxy:
     poppValidity: quarter
 
     # OIDC issuer (iss) of the authorization server (e.g., zeta-guard-realm).
+    # Always the public issuer: it is the `iss` the PEP expects in access tokens.
     pepIssuer: ""
+
+    # Cluster-internal address of the authserver, used *only* to fetch the OIDC
+    # discovery document and the JWKS. The chart always deploys the authserver as
+    # the `authserver` Service — the same address `pep_revocation_url` already
+    # uses. pepIssuer stays the expected `iss`; only
+    # the network path changes.
+    # Without it both fetches follow the public pepIssuer and leave the cluster
+    # through the ingress (A_27864-01 egress then needs the ingress IP allowed).
+    # Must mirror the issuer's path structure, e.g.
+    #   pepIssuer:       https://<public-host>/auth/realms/zeta-guard
+    #   pepInternalUrl:  http://authserver/auth/realms/zeta-guard
+    # Off by default. Needs a PEP image >= 2.0.0-rc1; older images do not know
+    # `pep_pdp_url` and refuse to start on it.
+    pepInternalUrl: ""
+
+    # Session revocation endpoint of the authserver (SSE block list and reports).
+    # Empty = <pepInternalUrl>/zeta-guard-revocation, or
+    # http://authserver/auth/realms/zeta-guard/zeta-guard-revocation when
+    # pepInternalUrl is unset. Set only when the authserver is reachable under
+    # another address or realm path.
+    pepRevocationUrl: ""
 
     # requiredAudience defines the audience required for a valid access token.
     requiredAudience: ""
@@ -413,8 +569,7 @@ pepproxy:
 pepproxyMetricsEnabled: false
 
 # pepproxyMetricsExporterImage is required if pepproxyMetricsEnabled is true
-# using a fixed version of the "edge" tag since the latest release 1.5.1 has vulnerabilities
-pepproxyMetricsExporterImage: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-prometheus-exporter:1.5.1-zeta1
+pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter:1.5.3@sha256:85666e7fde7e253f1c6d978f9a961245df4c9cdb7677e1866d9bb28e8f9ee41d
 
 # pepproxyTracingEnabled enables tracing for nginx
 pepproxyTracingEnabled: true
@@ -471,7 +626,10 @@ cloudnativePg:
   # sharedPreloadLibraries: [pg_stat_statements]
   # NOTE: changes here trigger a postgres restart.
   sharedPreloadLibraries: []
-  imageName: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/postgres:17.11-standard-trixie
+  # Anchored (&keycloakDbImage) so keycloak-db.cluster.imageName below stays in lockstep —
+  # the two are otherwise-independent config surfaces (see keycloak-db comment) and a plain
+  # copy would silently drift on the next image bump.
+  imageName: &keycloakDbImage europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/postgres:17.11-standard-trixie
   imagePullPolicy: ""
   resources:
     requests:
@@ -537,6 +695,10 @@ clusterIssuer: ""
 certificateAdoption:
   # needs kubectl + bash; same default as the token-renewer worker image
   image: google/cloud-sdk:549.0.0
+  # Overrides on top of defaultContainerSecurityContext. Writable root
+  # filesystem: kubectl caches discovery data under $HOME.
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
 
 # If gematikConnectionEnabled is true, the CronJob ti-sim-token-renewer-cronjob is deployed and will maintain a valid access token in the Secret ti-sim-token
 gematikConnectionEnabled: true
@@ -573,7 +735,11 @@ ingressClassName: "nginx"
 # If ingressEnabled is true, Ingresses are deployed.
 ingressEnabled: true
 ingressMasterAnnotations: { }
-ingressMinionAnnotations: { }
+ingressMinionAnnotations:
+  # setting default rate limit to comply with A_26668-02, please change these settings according to your installation
+  nginx.org/limit-req-rate: "20r/s"
+  nginx.org/limit-req-key: "${binary_remote_addr}"
+  nginx.org/limit-req-zone-size: "10m"
 
 # Render F5-NIC-specific annotations on the Ingresses. Does NOT install the NIC —
 # that is `nginx-ingress.enabled`. Set false for non-F5 ingress controllers.
@@ -585,6 +751,54 @@ nginxIngressHsm: false
 # Needs the NIC to provide the $zeta_route http-snippets (the bundled subchart ships
 # them; external NICs must add them). Disable where the NIC lacks them.
 nginxIngressLbMethod: true
+
+# Upstream cloudnative-pg/cluster chart for keycloak-db (see Chart.yaml dependencies).
+# Disabled by default: templates/db/cnpg-cluster.yaml stays authoritative until this is
+# explicitly enabled. Once enabled, this replaces the cloudnativePg.* block entirely for
+# keycloak-db (the two are not merged).
+keycloak-db:
+  enabled: false
+  # Pins the Cluster/Service/Secret names to "keycloak-db", so authserver's connection
+  # string, the egress NetworkPolicy, and the Istio PeerAuthentication (all of which
+  # select on the Cluster name) keep working unchanged.
+  fullnameOverride: keycloak-db
+  cluster:
+    instances: 1
+    imageName: *keycloakDbImage
+    imagePullPolicy: IfNotPresent
+    # Off, unlike the chart default: the operator's own service accounts are enough for
+    # normal operation. Turning it on would create a superuser Secret we don't need.
+    enableSuperuserAccess: false
+    # enablePDB: leave unset for the upstream chart's default (true); set false per
+    # stage on single-instance clusters where a PDB would block node drains.
+    storage:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: "2"
+        memory: 2Gi
+      limits:
+        # No cpu limit: avoids CFS throttling; cpu.request is the floor, DB can burst.
+        memory: 3Gi
+    postgresql:
+      parameters:
+        shared_buffers: 512MB
+        max_connections: "250"
+    initdb:
+      database: keycloak
+      owner: zeta-guard
+    # Nested under cluster, not top-level — the upstream chart only reads
+    # cluster.monitoring.*; a top-level monitoring: block is silently ignored.
+    monitoring:
+      enabled: false
+      # Upstream default (true) renders a ConfigMap of pg_stat_subscription metrics
+      # for logical-replication monitoring; keycloak-db has no subscriptions, so it
+      # would just be dead config.
+      instrumentation:
+        logicalReplication: false
+  poolers: []
+  backups:
+    enabled: false
 
 nginx-ingress:
   # Whether to install the bundled F5 NIC subchart. Set to false on stages where
@@ -627,7 +841,7 @@ nginx-ingress:
       name: nginx
     image:
       repository: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-ingress"
-      tag: 1.3.0
+      tag: 2.0.0
     service:
       # Default for standalone/cloud installs.
       type: LoadBalancer
@@ -709,7 +923,9 @@ nginx-ingress:
               "X-Envoy-External-Address"
               "X-Envoy-Internal"
               # proxy chain metadata; not an address, but nothing downstream should trust it
-              "Via";
+              "Via"
+              # client certificate of a resource server; only the ingress itself may set it (ingress-auth.yaml)
+              "ssl-client-cert";
 
           map $cookie_zeta_route $zeta_route {
               ""      $request_id;
@@ -778,31 +994,32 @@ opa:
   serviceAccountName: ""
   image:
     repository: opa
-    tag: 1.19.1-static
+    tag: 1.21.3-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
+  # --- Pod security context (opa / opa-simulation) ---
+  # Overrides on top of defaultPodSecurityContext.
+  podSecurityContext: {}
   # --- Container security context (opa / opa-simulation main container) ---
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
+  # Overrides on top of defaultContainerSecurityContext.
+  containerSecurityContext: {}
   # --- CronJob security context (opa-token-renewer, ti-sim-token-renewer,
   # ti-siem-token-renewer) ---
-  # No runAsUser here — stages that use workloadIdentityFederation.worker.image
-  # (google/cloud-sdk, runs as root by default) need an explicit runAsUser
-  # override in their own stage values file.
+  # Overrides on top of defaultContainerSecurityContext, whose runAsUser is
+  # required for workloadIdentityFederation.worker.image (google/cloud-sdk runs
+  # as root by default).
   cronjobSecurityContext:
-    allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
   # Set OPA server log level: debug|info|warn|error (default: info)
   logLevel: info
   # If enabled, OPA will log decision logs to console.
   logDecisions: false
+  # Remote decision-log upload interval in seconds, shared by active and simulation OPA.
+  # Applies when telemetryGatewayEnabled is true; independent of bundle polling.
+  decisionLogs:
+    reporting:
+      min_delay_seconds: 60
+      max_delay_seconds: 60
   # If enabled, OPA will log status updates to console.
   logStatusUpdates: false
   # If enabled (and bundle mode is on), the readiness probe uses /health?bundles=true, so
@@ -840,7 +1057,10 @@ opa:
     enabled: true
     replicaCount: 1
     bundle:
-      # Optional explicit simulation bundle resource. If empty, chart derives from active resource.
+      # Fully qualified simulation bundle resource (including the registry host). Required
+      # when bundle.enabled and simulation.enabled are true; it is not derived from
+      # opa.bundle.resource — gematik names simulation bundles differently per environment.
+      # Where gematik publishes a simulation bundle, use it here, never the production policies.
       resource: ""
       # Optional signature verification override for the simulation bundle (same keys as
       # opa.bundle.verification). If empty, the shared opa.bundle.verification applies.
@@ -887,12 +1107,13 @@ opa:
     # Default: daily at 3am, Europe/Berlin (see spec.timeZone in the CronJob template)
     schedule: "0 3 * * *"
     backoffLimit: 5
+    # kubectl (~55 MB binary) + heap must fit, else the kernel thrashes its code pages from disk instead of OOM-killing
     resources:
       limits:
-        memory: "64Mi"
+        memory: "256Mi"
       requests:
         cpu: "10m"
-        memory: "32Mi"
+        memory: "64Mi"
     # Reuses provisioningProcessor.image (now includes kubectl) and
     # provisioningProcessor.containerSecurityContext, rather than a separate,
     # generic CI tooling image that runs as root and isn't part of any vulnerability scan.
@@ -961,26 +1182,26 @@ notificationService:
   image:
     repository: notification-service
     # Tag prefix; "-rs"/"-fdv" appended per variant (e.g. main -> main-rs/main-fdv).
-    tag: 1.3.2
+    tag: 2.0.1
   # Optional per-variant pins (rs/fdv differ). A per-variant image.tag replaces
   # the shared tag verbatim (no "-<variant>" appended); a digest is appended as
   # "@<digest>". Empty -> shared image.tag + "-<variant>".
   rs:
     image:
       digest: ""
+    mtls:
+      # Application-level client-certificate authentication for the RS API.
+      enabled: true
   fdv:
     image:
       digest: ""
   imagePullPolicy: Always
   imagePullSecrets: [ ]
-  # PSS 'restricted' defaults. readOnlyRootFilesystem: true — /tmp is a writable
-  # emptyDir (see _notification-service.tpl); seccompProfile set in the template.
-  containerSecurityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
+  # Overrides on top of defaultPodSecurityContext.
+  podSecurityContext: {}
+  # Overrides on top of defaultContainerSecurityContext. The root filesystem
+  # stays read-only — /tmp is a writable emptyDir (see _notification-service.tpl).
+  containerSecurityContext: {}
   # Postgres persistence (both variants connect to the same database).
   db:
     # mode: cloudnative -> provision a dedicated CNPG Cluster (see cloudnativePg
@@ -1056,8 +1277,75 @@ notificationService:
     # Allowed notification channels (notification.channels.allowed), comma-separated.
     # No default — set at least one.
     channelsAllowed: ""
-    # HSM-backed at-rest sealing of stored notification data.
-    persistenceSealingEnabled: false
+    # Encrypt push notification payloads when dispatching them
+    # (notification.encryption.enabled).
+    encryptionEnabled: false
+  # gRPC HSM Proxy backing the at-rest sealing configured below. Every key is
+  # optional: each env var is emitted only when its value is set, so an unset
+  # value leaves the service's own default in force.
+  hsm:
+    # HSM_PROXY_ENDPOINT - host:port of the HSM Proxy, e.g. "hsm-sim:50051".
+    endpoint: ""
+    # HSM_PROXY_PLAIN_TEXT_ACCEPTED - accept an unprotected (plain-text gRPC)
+    # channel to the HSM Proxy. The HSM proxy client currently speaks plain-text
+    # gRPC only (mTLS per A_28830 is deferred), so with sealing enabled the
+    # service refuses to start unless this is true. Set it only where the network
+    # itself protects the channel, e.g. hsm-sim in a local cluster.
+    # Unset -> the service's default.
+    plainTextAccepted: null
+  # HSM-backed at-rest sealing of stored notification data. Requires hsm.endpoint.
+  # The keys come from the keychain file keychainFileName, on a volume of your
+  # choice (extraVolumes, mounted via extraVolumeMounts and
+  # keychainGenerator.extraVolumeMounts), e.g. a Secret holding the keychain. The
+  # init containers run in this order: initContainerProvideKeys (optional),
+  # keychain-generator (creates a keychain only if there is none yet),
+  # initContainerStoreKeys (optional). Both variants (rs, fdv) and all replicas
+  # must use the same keychain.
+  sealing:
+    # NOTIFICATION_PERSISTENCE_SEALING_ENABLED. Always emitted; default false.
+    enabled: false
+    # Absolute path of the keychain file (NOTIFICATION_PERSISTENCE_SEALING_KEYCHAIN_FILE).
+    keychainFileName: /keychain/keychain.json
+    # NOTIFICATION_PERSISTENCE_SEALING_ROTATION_INTERVAL - how often the service
+    # moves records of older keychain entries to the current one. Unset -> the
+    # service's default (1h).
+    rotationInterval: null
+    # Container spec of an init container that puts an existing keychain at
+    # keychainFileName. Empty -> none.
+    initContainerProvideKeys: {}
+    # Container spec of an init container that stores the keychain found at
+    # keychainFileName. Empty -> none.
+    initContainerStoreKeys: {}
+    # Init container creating the first keychain entry through the HSM Proxy
+    # when keychainFileName does not exist yet; does nothing otherwise.
+    keychainGenerator:
+      # Off only when initContainerProvideKeys always provides the keychain.
+      enabled: true
+      # HSM_PROXY_KEK_ID - KEK a new keychain is wrapped under, schema
+      # [component]-[purpose]-[algorithm]-v<N>, e.g.
+      # notification-service-keychain-kek-aesgcm-v1. Required while enabled.
+      kekId: ""
+      image:
+        # Name in the gematik registry; our own registry has it as
+        # notification-service/keychain-generator (see the umbrella values.yaml).
+        repository: notification-keychain-generator
+        # Empty -> notificationService.image.tag (without variant suffix).
+        tag: 2.0.1
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          memory: "256Mi"
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+      # Overrides on top of defaultContainerSecurityContext.
+      containerSecurityContext: {}
+      extraVolumeMounts: []
+  # Additional volumes for the notification-service pods, e.g. the keychain.
+  extraVolumes: []
+  # Additional volume mounts for the notification-service container, e.g. the
+  # keychain (read-only is enough).
+  extraVolumeMounts: []
   pushGateway:
     # Extra CA(s) trusted for the NS's outbound HTTPS to the (external) Push
     # Gateway, in addition to system defaults. Empty -> defaults only. Mounted at
@@ -1083,13 +1371,6 @@ notificationService:
       keyPassword:
         secretName: ""
         secretKey: ""
-  accessLog:
-    # Quarkus HTTP access log (quarkus.http.access-log.* -> QUARKUS_HTTP_ACCESS_LOG_*).
-    # Off by default; enable to trace requests reaching the notification-service.
-    enabled: false
-    # Log pattern (QUARKUS_HTTP_ACCESS_LOG_PATTERN). Empty -> Quarkus "common".
-    # %{i,Header-Name} captures a request header.
-    pattern: ""
   resources:
     limits:
       cpu: "500m"
@@ -1104,6 +1385,13 @@ notificationService:
   # NOTIFICATION_HISTORY_ENABLED env, discovery scopes_supported, and (via
   # terraform notification_history_enabled) the Keycloak scope.
   historyEnabled: false
+  # How long a device's message history is kept (NOTIFICATION_HISTORY_RETENTION):
+  # once it has passed after the first recorded notification, the complete
+  # history is erased; the next notification restarts the history and the
+  # timer. A_29988 exempts the history from the short processing-data retention;
+  # it follows the operator's configuration. ISO-8601 (P30D) or Quarkus shorthand
+  # (30d, 720h). null -> the service default, P30D.
+  historyRetention: null
   # RFC 9728 resource identifier for the NS (source of truth). Combined with
   # pepproxy.wellKnownBase to form the aud; well-known location, `resource`,
   # pep_require_aud and ConfigMap path all derive from it. Single leading-slash
@@ -1155,15 +1443,12 @@ provisioningProcessor:
     time: "03:00"
     # IANA timezone the time above is read in (env TZ).
     timezone: "Europe/Berlin"
+  # Overrides on top of defaultContainerSecurityContext.
   containerSecurityContext:
-    allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
-    runAsNonRoot: true
-    capabilities:
-      drop: [ "ALL" ]
   image:
     repository: provisioning-processor
-    tag: 1.3.2
+    tag: 2.0.0
   imagePullPolicy: Always
   provisioningContainer: "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning@sha256:72d1ae7329c95346a9ef82cf5baf28ec31a78ecbc761a36884a2a1056b5d6665" # "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-provisioning/zeta-guard-provisioning:latest"
   # --- CA for the provisioning container registry (Option A and B are mutually exclusive) ---
@@ -1193,6 +1478,17 @@ provisioningProcessor:
   #   name: registry-credentials
   #   usernameKey: username   # default: username
   #   tokenKey: token         # default: token
+  # Federation Master processor (env PROCESSORS_FEDERATION_MASTER_ENABLED).
+  # Extracts the TI Federation Master entity statement URL from the provisioning
+  # container's federation-master.yaml and writes it to federation-master.json.
+  # Only the authserver consumes this file (OIDC flow).
+  federationMaster:
+    enabled: false
+    # Selects which environment's URL to extract (e.g. "production", "test").
+    environment: ""
+    # Override: when set, replaces the URL extracted from the provisioning
+    # container. Use for stages that run their own sekidp-fedmaster.
+    devModeUrl: ""
   resources:
     limits:
       memory: "200Mi"
@@ -1290,8 +1586,9 @@ telemetry-gateway:
       maxUnavailable: 1
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
-    # tag: "v0.156.0"
-    digest: "sha256:697c781f9d778c0a29ed051fb5c92fe37e1b97cdbec1a51a2fb9f4a5094ef8e5"
+    # some customer scripts are based around this value even though it is ineffective. Deprecated and will be superseded by SBOM.
+    tag: "v0.157.0"
+    digest: "sha256:97bc1aa4584d7747ec1edb18cb3e68723841e001bfc620d25657e71786d12aed"
     pullPolicy: Always
   command:
     name: /otelcol/zeta-telemetry-gateway
@@ -1301,8 +1598,9 @@ telemetry-gateway:
     requests:
       cpu: "1"
       memory: "1Gi"
-  # This is the only component in this chart that pins a UID/GID: the collector
-  # needs a known non-root identity that can write the file-storage PVC below.
+  # Subchart: defaultContainerSecurityContext does not reach these values, so
+  # the UID is pinned here separately, plus a GID (the only one in this chart):
+  # the collector needs a known non-root identity that can write the file-storage PVC below.
   # OpenShift rejects both, because its SCC assigns UID and GID from the
   # namespace's allocated range — hand them over there with an explicit
   # `fsGroup: null` / `runAsUser: null`. Explicit `null`, not omission: Helm
@@ -1326,16 +1624,20 @@ telemetry-gateway:
       # WARNING metrics created by count connector are discarded by prometheus.
       # Use deltatocumulative processor to rectify metrics before sending them
       # to prometheus.
-      count/siem:
+      count/security_kpis:
+        # ADR 0001 (docs/adr/0001-reliable-daily-metrics.md): these are plain
+        # monotonic counters since collector-process-start now, not per-day
+        # buckets — no zeta-client.date attribute baked into the series
+        # itself. "Daily" is computed downstream, durably, by kpiPrometheus
+        # (increase() over a UTC-midnight-aligned range) rather than by this
+        # in-memory connector, which loses all of this on every restart.
         logs:
-          # ToDo ZETAP-1307 Attribute bei Metriken setzen: `service.name`, `service.version`
           attack.detection.count:
             description: 'Anzahl erkannte Angriffe in Kategorie (siehe A_25404-*) plus weitere breakdown in Versicherte und LE (A_25484-03)'
             conditions:
               - HasPrefix(resource.attributes["service.name"], "ZETA Guard ") and
                 log.attributes["attackDetection.capecId"] != nil
             attributes:
-              - key: zeta-client.date
               - key: attackDetection.capecId
               - key: zeta-client.user_category
                 default_value: "provider"
@@ -1346,8 +1648,6 @@ telemetry-gateway:
               - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
                 log.attributes["opa.event_type"] == "decision_log" and
                 log.attributes["zeta-client.access_via_botnet"] == true
-            attributes:
-              - key: zeta-client.date
 
           zeta_guard_kpi.country_accesses_24h:
             description: 'Anzahl von Zugriffen aus jedem Land gezählt plus weitere Zugriffe, die separat in Versicherte und LE ausgewiesen werden (A_25484-03)'
@@ -1355,7 +1655,6 @@ telemetry-gateway:
               - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
                 log.attributes["opa.event_type"] == "decision_log"
             attributes:
-              - key: zeta-client.date
               - key: zeta-client.user_category
                 default_value: "provider"
 
@@ -1365,8 +1664,8 @@ telemetry-gateway:
               - resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
                 log.attributes["event_type"] == "authn_authorization_code_invalid"
             attributes:
-              - key: zeta-client.date
               - key: zeta-client.reason
+                default_value: "none given"
 
           zeta_guard_kpi.failed_client_activations_24h:
             description: 'Anzahl fehlerhafter Clientfreischaltungen plus weitere breakdown in Versicherte und LE (A_25484-03)'
@@ -1374,8 +1673,8 @@ telemetry-gateway:
               - resource.attributes["service.name"] == "ZETA Guard PDP authorization server" and
                 log.attributes["event_type"] == "authn_client_registration_fail"
             attributes:
-              - key: zeta-client.date
               - key: zeta-client.reason
+                default_value: "none given"
               - key: zeta-client.user_category
                 default_value: "provider"
 
@@ -1386,7 +1685,6 @@ telemetry-gateway:
                 log.attributes["opa.event_type"] == "decision_log" and
                 log.attributes["zeta-client.access_via_tor"] == true
             attributes:
-              - key: zeta-client.date
               - key: zeta-client.user_category
                 default_value: "provider"
 
@@ -1397,7 +1695,6 @@ telemetry-gateway:
                 log.attributes["opa.event_type"] == "decision_log" and
                 log.attributes["zeta-client.access_via_vpn"] == true
             attributes:
-              - key: zeta-client.date
               - key: zeta-client.user_category
                 default_value: "provider"
 
@@ -1495,6 +1792,36 @@ telemetry-gateway:
           storage: file_storage
         timeout: 30s
 
+      # ADR 0001: pushes count/security_kpis's reshaped KPI counters to
+      # kpiPrometheus's OTLP receiver (metrics/security_kpis pipeline below),
+      # so kpiPrometheus can durably store them and absorb telemetry-gateway
+      # restarts via increase(). Not a "prometheus" exporter: this collector
+      # build doesn't include that component (only otlp/otlp_grpc/otlp_http/
+      # debug — confirmed by the "unknown type" error trying it), so push
+      # instead of scrape.
+      #
+      # Endpoint is kpiPrometheus's server fullname, hardcoded rather than
+      # computed: this config is rendered from inside the telemetry-gateway
+      # subchart's own context, which can't reach kpiPrometheus's
+      # `.Subcharts` entry — only zeta-guard's own root-level templates can,
+      # kpiPrometheus being zeta-guard's subchart, not telemetry-gateway's.
+      #
+      # Without `server.fullnameOverride`, `prometheus.server.fullname`
+      # derives the name from `.Chart.Name`, which for an aliased dependency
+      # is the alias itself — "kpiPrometheus", camelCase — producing
+      # `<release>-kpiPrometheus-server`. That fails at deploy time: it's not
+      # a valid Kubernetes resource name (RFC 1123 subdomain, lowercase
+      # only), so every resource keyed off it (ServiceAccount, ConfigMap,
+      # PVC, ClusterRole(Binding), Service, Deployment) is rejected. Fixed by
+      # setting `server.fullnameOverride: kpi-prometheus-server` below,
+      # static rather than release-prefixed — safe because this chart is
+      # always one release per namespace. If that fullnameOverride ever
+      # changes, update this endpoint to match.
+      otlp_http/security_kpis:
+        endpoint: "http://kpi-prometheus-server/api/v1/otlp"
+        tls:
+          insecure: true
+
     extensions:
       bearertokenauth/ti-siem:
         filename: "/etc/ti-siem/token"
@@ -1505,10 +1832,29 @@ telemetry-gateway:
         directory: /var/lib/storage/otc
 
     processors:
+      deltatocumulative:
+        max_stale: 24h
+
+      # optional tail sampling for TI-SIM
+      # see https://gemspec.gematik.de/docs/gemSpec/gemSpec_Perf/gemSpec_Perf_V2.87.0/#A_28988
+      tail_sampling/ti_sim:
+        decision_wait: 10s
+        num_traces: 50000
+        expected_new_traces_per_sec: 200
+        policies:
+          - name: errors-always
+            type: status_code
+            status_code:
+              status_codes: [ERROR]
+          - name: success-sampled
+            type: probabilistic
+            probabilistic:
+              sampling_percentage: 5
+
       transform/siem:
         error_mode: ignore
         log_statements:
-            # extract attributes from OPA decision log
+
           - context: log
             conditions:
               - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
@@ -1516,6 +1862,9 @@ telemetry-gateway:
               - resource.attributes["service.name"] == "ZETA Guard PDP policy engine (simulation)" and
                 log.attributes["opa.event_type"] == "decision_log"
             statements:
+              # removed embedded metrics from decision logs
+              - delete_key(log.body, "metrics")
+
               # A_25484-03 - Security Monitoring - Security KPIs
               - set(log.attributes["zeta-client.user_category"],
                     log.body["result"]["security"]["user_category"])
@@ -1536,14 +1885,28 @@ telemetry-gateway:
               - set(log.attributes["os.version"],
                     log.body["input"]["client_registration_data"]["device_info"]["os_version"])
 
-            # add date attribute for count connector
+          - conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine" and
+                log.attributes["opa.event_type"] == "status_update"
+              - resource.attributes["service.name"] == "ZETA Guard PDP policy engine (simulation)" and
+                log.attributes["opa.event_type"] == "status_update"
+            statements:
+              # remove embedded metrics from status updates
+              - delete_key(log.body, "metrics")
+              - delete_key(log.body["bundles"]["authz"], "metrics")
+
+            # No longer read by count/security_kpis itself (ADR 0001 — its counters
+            # are plain monotonic sums now, not date-bucketed), but still
+            # set on every record exported to SIEM directly
+            # (otlp_grpc/ti_siem), which may rely on it independently of the
+            # KPI aggregation this originally existed for. Left in place.
           - statements:
               # A_25484-03 - Security Monitoring - Security KPIs
               - set(log.attributes["zeta-client.date"],
                 FormatTime(log.time, "%F"))
 
         trace_statements:
-          # add date attribute for count connector
+            # See log_statements above — same reasoning.
           - statements:
               # A_25484-03 - Security Monitoring - Security KPIs
               - set(span.attributes["zeta-client.date"],
@@ -1629,6 +1992,18 @@ telemetry-gateway:
           match_type: strict
           services:
             - "ZETA Guard PEP HTTP proxy"
+
+      filter/security_kpis_corrected:
+        error_mode: ignore
+        metric_conditions:
+          - >-
+            not (
+              resource.attributes["service.name"] == "ZETA Guard KPI metrics helper" and
+              (
+                HasPrefix(metric.name, "attack.detection.") or
+                HasPrefix(metric.name, "zeta_guard_kpi.")
+              )
+            )
 
       filter/dienst_hersteller:
         # removes attack detection, authn_*, and policy decision logs
@@ -1738,6 +2113,7 @@ telemetry-gateway:
                 IsMatch(span.attributes["url.full"], "/v1/data/policies/zeta/authz/decision$")
               )
             )
+
       redaction/zeta_guard:
         # by default, keep all attributes
         allow_all_keys: true
@@ -1845,6 +2221,17 @@ telemetry-gateway:
             max_recv_msg_size_mib: 32
           http:
             endpoint: ${env:MY_POD_IP}:4318
+      # ADR 0001: dedicated receiver for the corrected daily-KPI value the
+      # kpi-metrics-helper CronJob pushes in (see
+      # metrics/security_kpis_corrected pipeline below). Separate from the
+      # bare `otlp` receiver above so it's cleanly routable to its own
+      # pipeline rather than mixing into whatever that one already feeds.
+      # HTTP only — the CronJob is a curl+bash script, no gRPC client needed.
+      otlp/security_kpis_corrected:
+        protocols:
+          http:
+            endpoint: ${env:MY_POD_IP}:4319
+
       prometheus:
         config:
           scrape_configs:
@@ -1879,6 +2266,7 @@ telemetry-gateway:
               scrape_interval: 5s
               static_configs:
                 - targets: [ nginx-ingress-metrics:9113 ]
+
       syslog/http_proxy:
         udp:
           listen_address: "${env:MY_POD_IP}:54526"
@@ -1886,6 +2274,39 @@ telemetry-gateway:
         location: UTC
         resource:
           "service.name": "ZETA Guard PEP HTTP proxy"
+        # With pepproxyTracingEnabled the access log line carries
+        # `trace_id=<32 hex>` and `span_id=<16 hex>` (log_format main_traced).
+        # Lift them into the log record's TraceId/SpanId so logs correlate
+        # with traces. Each ID has its own parser, so position, order and
+        # separators don't matter. Lines without a (valid) ID — untraced
+        # requests log empty IDs, error_log lines none — pass through
+        # unchanged; the message text is kept.
+        operators:
+          - type: regex_parser
+            id: pep_trace_id
+            if: 'attributes.message != nil and attributes.message contains "trace_id="'
+            parse_from: attributes.message
+            parse_to: attributes.trace_context
+            regex: '\btrace_id=(?P<trace_id>[0-9a-f]{32})\b'
+            on_error: send_quiet
+          - type: regex_parser
+            id: pep_span_id
+            if: 'attributes.message != nil and attributes.message contains "span_id="'
+            parse_from: attributes.message
+            parse_to: attributes.trace_context
+            regex: '\bspan_id=(?P<span_id>[0-9a-f]{16})\b'
+            on_error: send_quiet
+            # Only here, not on pep_trace_id: a trace block sets TraceId and
+            # SpanId together, so it must run once both are collected. It
+            # reads without deleting, hence the remove below.
+            trace:
+              trace_id:
+                parse_from: attributes.trace_context.trace_id
+              span_id:
+                parse_from: attributes.trace_context.span_id
+          - type: remove
+            if: 'attributes.trace_context != nil'
+            field: attributes.trace_context
 
     service:
       extensions:
@@ -1946,7 +2367,7 @@ telemetry-gateway:
             - redaction/zeta_guard
             - batch
           exporters:
-            - count/siem
+            - count/security_kpis
             - otlp_grpc/ti_siem
 
         metrics: null
@@ -1980,15 +2401,53 @@ telemetry-gateway:
           exporters:
             - otlp_grpc/ti_sim
 
+        # ADR 0001: count/security_kpis's own KPI counters split off into
+        # metrics/security_kpis below — this pipeline now only carries the
+        # scrape-sourced (authserver/opa/pep-proxy/nginx-ingress) metrics
+        # straight to SIEM, unchanged from before.
         metrics/ti_siem:
           receivers:
-            - count/siem
             - otlp
             - prometheus
           processors:
             - memory_limiter
             - filter/ti_siem
             - transform/siem_and_sim
+            - redaction/zeta_guard
+            - batch
+          exporters:
+            - otlp_grpc/ti_siem
+
+        # ADR 0001: count/security_kpis's raw, restart-vulnerable KPI counters. These
+        # must NOT reach SIEM directly (otlp_grpc/ti_siem is deliberately
+        # absent here) — only kpiPrometheus's durable, restart-corrected
+        # value (metrics/security_kpis_corrected below) should.
+        metrics/security_kpis:
+          receivers:
+            - count/security_kpis
+          processors:
+            - memory_limiter
+            - filter/ti_siem
+            - deltatocumulative
+            - transform/siem_and_sim
+            - redaction/zeta_guard
+            - batch
+          exporters:
+            - otlp_http/security_kpis
+
+        # ADR 0001: the durable, UTC-day-corrected value the kpi-metrics-
+        # helper CronJob pushes in, computed from kpiPrometheus's durable
+        # storage (see docs/adr/0001-reliable-daily-metrics.md, mechanism
+        # step 3). This is what actually reaches SIEM for the KPIs defined
+        # under count/security_kpis — the one place otlp_grpc/ti_siem is used for
+        # them, replacing the direct export removed from
+        # metrics/security_kpis above.
+        metrics/security_kpis_corrected:
+          receivers:
+            - otlp/security_kpis_corrected
+          processors:
+            - memory_limiter
+            - filter/security_kpis_corrected
             - redaction/zeta_guard
             - batch
           exporters:
@@ -2002,6 +2461,7 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/dienst_hersteller
+            - attributes/semantic_conventions_migration
             - transform/dienst_hersteller
             - transform/keycloak_oauth_grant
             - redaction/zeta_guard
@@ -2019,6 +2479,7 @@ telemetry-gateway:
           processors:
             - memory_limiter
             - filter/ti_sim
+            #- tail_sampling/ti_sim
             - attributes/semantic_conventions_migration
             - transform/siem_and_sim
             - redaction/zeta_guard
@@ -2037,7 +2498,7 @@ telemetry-gateway:
             - redaction/zeta_guard
             - batch
           exporters:
-            - count/siem
+            - count/security_kpis
             - otlp_grpc/ti_siem
 
   extraVolumeMounts:
@@ -2072,24 +2533,219 @@ telemetry-gateway:
       enabled: true
       containerPort: 49152
       servicePort: 49152
-      hostPort: 49152
       protocol: TCP
     opa-sim-push:
       enabled: true
       containerPort: 49153
       servicePort: 49153
-      hostPort: 49153
       protocol: TCP
     syslog:
       enabled: true
       containerPort: 54526
       servicePort: 54526
-      hostPort: 54526
       protocol: UDP
+    kpi-otlp:
+      # ADR 0001: the otlp/security_kpis_corrected receiver's HTTP port.
+      # Named "kpi-otlp", not "kpi-metrics-otlp" — k8s port names are capped
+      # at 15 characters (IANA_SVC_NAME).
+      enabled: true
+      containerPort: 4319
+      servicePort: 4319
+      protocol: TCP
     zipkin:
       enabled: false
   additionalLabels:
     app.kubernetes.io/part-of: zeta-guard
+  # Defense-in-depth label for telemetry-gateway's pods, on top of the
+  # app.kubernetes.io/name: telemetry-gateway that Helm already derives from
+  # this dependency's Chart.yaml `alias:` (which is what actually keeps this
+  # selector from also matching test-monitoring-service's own otel-collector
+  # instance — see telemetryGateway.selectorLabels in _helpers.tpl for the
+  # full explanation). `additionalLabels` above only lands on the
+  # Deployment's own metadata, not the pod template, so it can't be used for
+  # this — podLabels is what actually reaches the pods (and NetworkPolicy
+  # podSelectors).
+  podLabels:
+    app.kubernetes.io/part-of: zeta-guard
+    app.kubernetes.io/component: telemetry-gateway
+    helm.sh/chart: '{{ include "opentelemetry-collector.chart" . }}'
+
+# ---------------------------------------------------------------------------
+# Durable daily KPI metrics (ADR 0001: docs/adr/0001-reliable-daily-metrics.md)
+# ---------------------------------------------------------------------------
+# Gates the dedicated `kpiPrometheus` dependency below (Chart.yaml condition).
+# Actual storage/retention config lives directly under `kpiPrometheus:`, not
+# here — this stays a bare flag so there's exactly one place to look, not two
+# that can silently drift out of sync (a lesson this chart has already paid
+# for elsewhere).
+kpiMetricsPersistence:
+  enabled: false
+  # The kpi-metrics-helper CronJob (ADR 0001, mechanism step 3): queries
+  # kpiPrometheus and OTLP-pushes the corrected daily total to
+  # telemetry-gateway. No custom image — same convention as
+  # opa-token-renewer-cronjob/ti-siem-token-renewer-cronjob/
+  # ti-sim-token-renewer-cronjob: inline script in an off-the-shelf public
+  # image, here python3's stdlib only (no curl needed).
+  cronJob:
+    # Once daily, at 23:59 UTC — deliberately not more often: the corrected
+    # value is meant to reach SIEM exactly once per day, not be continuously
+    # re-published. 23:59 rather than 00:00 so the query's UTC-midnight-
+    # aligned range (see the implementation note in the CronJob template)
+    # covers essentially the whole day being reported, at the cost of the
+    # last minute's events (accepted, same spirit as this ADR's other
+    # accepted timing gaps). Trade-off: unlike a short interval, a single
+    # missed/failed run (see backoffLimit below) now loses that day's report
+    # entirely, with no automatic catch-up until the next day's run.
+    schedule: "59 23 * * *"
+    image:
+      repository: python
+      # tag: "3.12-slim"
+      digest: "sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+      pullPolicy: IfNotPresent
+    backoffLimit: 3
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+
+kpiPrometheus:
+  # Only Prometheus server itself — no Alertmanager, no Pushgateway, no
+  # node/kube-state-metrics scraping. This instance exists purely to durably
+  # store telemetry-gateway's reshaped count/security_kpis KPI counters.
+  #
+  # nameOverride and server.fullnameOverride below both exist for the same
+  # reason: without them, this vendored chart's helpers (`prometheus.name`,
+  # `prometheus.server.fullname`) fall back to `.Chart.Name`, which for an
+  # aliased dependency is the alias itself — "kpiPrometheus", camelCase.
+  # That's an invalid Kubernetes name/label component wherever it flows into
+  # container names or resource names (RFC 1123: lowercase only) — it broke
+  # the ServiceAccount/ConfigMap/PVC/ClusterRole(Binding)/Service/Deployment
+  # (fixed by fullnameOverride) and then the Deployment's own container names
+  # (fixed by nameOverride here). Keep both in sync with kpiPrometheus.
+  # selectorLabels in _helpers.tpl, which hardcodes the same "kpi-prometheus"
+  # value to match this chart's own generated app.kubernetes.io/name label.
+  nameOverride: kpi-prometheus
+  alertmanager:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  # kpiPrometheus is a pure OTLP push receiver (see the server.extraFlags
+  # comment below and kpi-prometheus-netpol.yaml, which restricts its
+  # egress to DNS only) — it never scrapes anything itself, so the chart's
+  # default Kubernetes service-discovery scrape jobs and the ClusterRole/
+  # ClusterRoleBinding that back them are pure unused attack surface here.
+  # Disabling rbac.create alone doesn't stop them from being *rendered*, so
+  # both have to go.
+  rbac:
+    create: false
+  # rbac.create: false above removes the ClusterRole(Binding) these jobs
+  # rely on for Kubernetes API service discovery / kubelet auth, so leaving
+  # any of them enabled would render a scrape config that can never
+  # succeed. scrapeConfigs is a map, and Helm deep-merges maps, so an empty
+  # override here would leave the chart's defaults (all enabled) in place
+  # — each job has to be listed and disabled explicitly.
+  scrapeConfigs:
+    prometheus:
+      enabled: false
+    kubernetes-api-servers:
+      enabled: false
+    kubernetes-nodes:
+      enabled: false
+    kubernetes-nodes-cadvisor:
+      enabled: false
+    kubernetes-service-endpoints:
+      enabled: false
+    kubernetes-service-endpoints-slow:
+      enabled: false
+    prometheus-pushgateway:
+      enabled: false
+    kubernetes-services:
+      enabled: false
+    kubernetes-pods:
+      enabled: false
+    kubernetes-pods-slow:
+      enabled: false
+  # Subchart: defaultPodSecurityContext / defaultContainerSecurityContext do not
+  # reach these values, so the PSS 'restricted' settings are repeated here. The
+  # chart's own pod defaults (runAsUser/runAsGroup/fsGroup 65534, runAsNonRoot)
+  # are merged in and stay; prometheus only writes to its PVC, so the root
+  # filesystem can be read-only. On OpenShift set server.securityContext
+  # runAsUser/runAsGroup/fsGroup to an explicit `null` so the SCC assigns them.
+  configmapReload:
+    prometheus:
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop: ["ALL"]
+  server:
+    # Static rather than release-prefixed because this chart is always one
+    # release per namespace.
+    fullnameOverride: kpi-prometheus-server
+    retention: 7d
+    # Pod-level (this chart's naming); merged with its runAsUser 65534 defaults.
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop: ["ALL"]
+    image:
+      # tag: "v3.13.2"
+      digest: "sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69"
+    persistentVolume:
+      size: 2Gi
+      # empty -> cluster default StorageClass, matching cloudnativePg.storage
+      # below and the file-storage PVC's own convention.
+      storageClass: ""
+    # ADR 0001: telemetry-gateway pushes count/security_kpis's KPI counters
+    # here via OTLP (otlp_http/security_kpis exporter) rather than being
+    # scraped — this collector build has no "prometheus" exporter component.
+    # The OTLP receiver is disabled by default in Prometheus and must be
+    # opted into explicitly; this is a list, not a map, so the chart's own
+    # default (web.enable-lifecycle, needed by its configmap-reload
+    # sidecar) has to be restated here too or Helm's list-replace semantics
+    # would silently drop it.
+    extraFlags:
+      - web.enable-lifecycle
+      - web.enable-otlp-receiver
+  # Self-monitoring only (ADR 0001, mechanism step 4) — no alert-delivery
+  # destination is wired up yet, deliberately; these rules exist so a broken
+  # durability path doesn't silently regress, not to page anyone yet.
+  #
+  # KpiPrometheusPvcNearFull below is currently dead: kubelet_volume_stats_*
+  # was fed by the default kubernetes-nodes scrape job, which is now
+  # disabled (see rbac/scrapeConfigs above) along with the ClusterRole it
+  # needed for kubelet service discovery/auth. Firing it again requires
+  # either a separate node-metrics source or explicitly re-enabling that one
+  # job plus its RBAC — deliberately left as-is rather than silently
+  # removing the rule, since evaluating against a permanently-absent metric
+  # just means "never fires", not a rendering error.
+  serverFiles:
+    alerting_rules.yml:
+      groups:
+        - name: kpi-prometheus-self-monitoring
+          rules:
+            - alert: KpiPrometheusPvcNearFull
+              expr: |
+                (kubelet_volume_stats_available_bytes{persistentvolumeclaim=~".*kpi-prometheus.*"}
+                  / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*kpi-prometheus.*"}) < 0.15
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "kpiPrometheus PVC is running low on space"
+                description: "Less than 15% free space remains on kpiPrometheus's PVC for 15m."
 
 # ---------------------------------------------------------------------------
 # Egress NetworkPolicies (A_27864-01)
@@ -2138,12 +2794,15 @@ networkPolicy:
     providerArtifactRegistry:
       ipBlocks: [ ]
     # A_27864-01 — OCSP/CRL for TLS TSPs per CAB Forum
+    # pep-proxy: stapling for its own TLS server cert (only when pepproxy.hsmProxyAddr is set)
     ocspCabForum:
       ipBlocks: [ ]
     # A_27864-01 — SMC-B TSP OCSP Responder
+    # authserver: revocation check of the SMC-B cert in the token exchange
     ocspSmcbTsp:
       ipBlocks: [ ]
     # A_27864-01 — OCSP Responder for TI component PKI
+    # pep-proxy: OCSP response for its own ASL signer cert (only when pepproxy.asl_enabled)
     ocspTiPki:
       ipBlocks: [ ]
     # PIP — OPA policy bundle source

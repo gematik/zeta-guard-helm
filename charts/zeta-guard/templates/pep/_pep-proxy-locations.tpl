@@ -51,6 +51,18 @@ upstream {{ include "zeta-guard.pep-upstream-name" . }} {
 {{- /* Shared per-location body. Call with (dict "root" $ "loc" <entry> "scheme" <s> "hostport" <h>). */ -}}
 {{- define "zeta-guard.pep-proxy-location-body" -}}
 {{- $loc := .loc }}
+
+## render zeta_strip_{authorization,dpop,popp} variables for location's retain.*
+## must be done before including proxy_headers.conf
+{{- if dig "retain" "authorization" false $loc }}
+set $zeta_strip_authorization 0;
+{{- end }}
+{{- if dig "retain" "dpop" false $loc }}
+set $zeta_strip_dpop 0;
+{{- end }}
+{{- if dig "retain" "popp" false $loc }}
+set $zeta_strip_popp 0;
+{{- end }}
 ## credential strips + enforcement sentinel
 include proxy_headers.conf;
 ## with an `upstream {}` block, nginx's default Host ($proxy_host) is the

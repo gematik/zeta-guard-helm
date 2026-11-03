@@ -1,0 +1,36 @@
+{{- /* vim: set ft=helm: */ -}}
+{{- if .Values.ingressEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: androiddriver
+  labels:
+    app: androiddriver
+    app.kubernetes.io/name: androiddriver
+  annotations:
+    nginx.org/mergeable-ingress-type: "minion"
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  rules:
+    # do not set host when working with local-cluster
+    - {{- if .Values.hostname }}
+      host: {{ .Values.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /androidproxy
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ if .Values.routeViaTigerProxy }}tiger-proxy{{ else }}androiddriver{{ end }}
+                port:
+                  number: 80
+          - path: /androiddriver-api
+            pathType: Prefix
+            backend:
+              service:
+                name: androiddriver
+                port:
+                  number: 80
+{{- end }}

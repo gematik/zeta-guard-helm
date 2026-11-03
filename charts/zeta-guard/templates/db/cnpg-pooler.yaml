@@ -1,4 +1,4 @@
-{{- if and (eq .Values.databaseMode "cloudnative") .Values.cloudnativePg.pooler.enabled }}
+{{- if and (eq .Values.databaseMode "cloudnative") (not (index .Values "keycloak-db" "enabled")) .Values.cloudnativePg.pooler.enabled }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler
 metadata:

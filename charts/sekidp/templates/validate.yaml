@@ -1,0 +1,7 @@
+{{- if .Values.enabled -}}
+  {{- $_ := required "sekidp.gsiServer.env.serverUrl is required when sekidp is enabled" .Values.gsiServer.env.serverUrl -}}
+  {{- $_ := required "sekidp.fedmaster.env.serverUrl is required when sekidp is enabled" .Values.fedmaster.env.serverUrl -}}
+  {{- if .Values.ingressEnabled -}}
+    {{- $_ := required "sekidp.hostname is required when sekidp ingress is enabled" .Values.hostname -}}
+  {{- end -}}
+{{- end -}}

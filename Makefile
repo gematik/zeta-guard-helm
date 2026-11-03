@@ -42,18 +42,45 @@ else
   VALUES := $(VALUES_DIR)values.$(STAGE).yaml
 endif
 SUBCHARTS := $(wildcard charts/*/Chart.yaml)
+
+# Two-release stages: a stage with
+# $(VALUES_DIR)<stage>.guard.mk runs the guard as its own release
+# (GUARD_RELEASE, default zeta-guard-<stage>) from the PUBLISHED chart
+# (GUARD_CHART @ GUARD_CHART_VERSION), while the umbrella release carries only
+# the test environment (tags.zeta-guard: false). The guard values live
+# unprefixed in $(VALUES_DIR)values-guard.<stage>.yaml.
+# The release name must be unique per cluster: the nginx-ingress subchart names
+# its ClusterRole/ClusterRoleBinding after it.
+-include $(VALUES_DIR)$(STAGE).guard.mk
+GUARD_RELEASE ?= zeta-guard-$(STAGE)
+GUARD_VALUES ?= $(VALUES_DIR)values-guard.$(STAGE).yaml
+GUARD_ENABLED := $(if $(strip $(GUARD_CHART_VERSION)),true,)
+# The Certificate objects belong to whichever release renders the guard chart.
+CERT_RELEASE := $(if $(GUARD_ENABLED),$(GUARD_RELEASE),$(RELEASE))
+# The Keycloak config (terraform/authserver) must match the guard's release, not
+# this checkout: config* targets export it from git ref GUARD_TF_REF (default:
+# the chart version tag) into GUARD_TF_DIR and run terraform there.
+GUARD_TF_REF ?= $(GUARD_CHART_VERSION)
+GUARD_TF_DIR := .guard-tf
+# Stage-specific make settings: $(VALUES_DIR)<stage>.mk, if present.
+# AUTHSERVER_EXTRA_ENV (KEY=VALUE ...) adds env vars to the keycloak container
+# that must stay out of the chart, e.g. development-only switches. `deploy`
+# (or `deploy-guard` on two-release stages) applies them after the helm upgrade
+# and unsets the ones that were removed from <stage>.mk.
+-include $(VALUES_DIR)$(STAGE).mk
+AUTHSERVER_EXTRA_ENV ?=
 # Database bootstrap mode for local convenience targets
 DB_MODE ?= cloudnative
 # Terraform config variables
-TF_PATH := terraform/authserver
+TF_PATH := $(if $(GUARD_ENABLED),$(GUARD_TF_DIR)/terraform/authserver,terraform/authserver)
 TF_VAR_config_path ?= "~/.kube/config"
 TF_VAR_use_kubernetes ?= true
 # use_kubernetes has two consumers that must agree: generate-main-and-backend.sh
-# (which decides whether the kubernetes_* blocks are generated at all) and
+# (which selects the state backend, kubernetes or local) and
 # Terraform itself. Terraform's -var-file wins over TF_VAR_* environment
 # variables, so when the stage tfvars sets use_kubernetes that value is the
 # authority and the generator has to follow it — otherwise the generated files
-# and var.use_kubernetes disagree and the check block in credentials.tf fires.
+# and var.use_kubernetes disagree and the check block in mode-assert.tf fires.
 # When the file does not set it, the exported env var below drives both.
 TF_VARS_USE_K8S := $(shell awk '$$1 == "use_kubernetes" && $$2 == "=" { v = $$3 } END { if (v == "true" || v == "false") print v }' $(TF_VARS) 2>/dev/null)
 USE_K8S := $(if $(TF_VARS_USE_K8S),$(TF_VARS_USE_K8S),$(TF_VAR_use_kubernetes))
@@ -63,6 +90,13 @@ export TF_VAR_use_kubernetes
 # When set, `make config-plan PLAN_OUT=<file>` saves the plan so it can be reviewed later
 # via `make config-show-plan PLAN_OUT=<file>`. Empty (default) = no plan file is written.
 PLAN_OUT ?=
+
+# Testdriver's KVNR/email mapping is volatile and must be seeded after a pod
+# restart when exercising the OIDC collect-email flow.
+OIDC_TEST_BASE_URL ?=
+OIDC_TEST_KVNR ?=
+OIDC_TEST_EMAIL ?=
+OIDC_TEST_INSECURE ?= false
 
 # Achelos uses hostAliases for direct OCSP mock routing when DNS redirect is
 # enabled. hostAliases require a literal IP, so keep a reserved fallback for the
@@ -88,12 +122,23 @@ ifneq ($(strip $(OCSP_SMB_KEYSTORE_FILE_B64)),)
 override HELM_EXTRA_VALUES_PARAMS += --set-file "zeta-cert-validation-mock.signing.smb.keyStore=${OCSP_SMB_KEYSTORE_FILE_B64}"
 endif
 
+ifneq ($(strip $(FIREBASE_SA_JSON)),)
+override HELM_EXTRA_VALUES_PARAMS += --set-file "push-gateway.firebaseCredentials.serviceAccountJson=${FIREBASE_SA_JSON}"
+endif
+
+ifneq ($(strip $(APNS_P8)),)
+override HELM_EXTRA_VALUES_PARAMS += --set-file "push-gateway.apnsCredentials.authKeyP8=${APNS_P8}"
+endif
+
 # achelos + achelos-2 share the same admin password, genesisHash and pepper.
 ifneq ($(filter $(STAGE),achelos achelos-2),)
 override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-guard.authserver.admin.password=$(KEYCLOAK_ACHELOS_PW)"
 override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-guard.authserver.genesisHash=4841c2142fef441daa6ee6c57db65c011935964b14e94a6c8f5ec0447b83526c"
 override HELM_EXTRA_VALUES_PARAMS += --set-string "zeta-guard.authserver.smcbHashingPepper=085c1245-dc0d-4d39-95b4-97496bec6182"
 endif
+
+override HELM_EXTRA_VALUES_PARAMS += --set-string "testdriver-oidc.browserstack.user=$(BS_USER)"
+override HELM_EXTRA_VALUES_PARAMS += --set-string "testdriver-oidc.browserstack.key=$(BS_KEY)"
 
 # add override to allow additional params, e.g. `make <cmd> HELM_EXTRA_VALUES_PARAMS=--debug`
 override HELM_EXTRA_VALUES_PARAMS += --set-file "smcb_keystore.password=${SMB_KEYSTORE_PW_FILE}" --set-file "smcb_keystore.keystore=${SMB_KEYSTORE_FILE_B64}"
@@ -116,24 +161,19 @@ endif
 
 endif
 
-# For the local-guard stage, inject the detected HOST_IP into the NetworkPolicy so that the PEP proxy
-# can reach the ingress (zeta-kind.local → HOST_IP via CoreDNS) for JWK fetches without hardcoding
-# the IP in values.local-guard.yaml. HOST_IP is auto-detected (same value used to patch CoreDNS).
-ifeq ($(STAGE),local-guard)
-  override HELM_EXTRA_VALUES_PARAMS += --set "zeta-guard.networkPolicy.egress.providerInternal.resourceServers.ipBlocks[0]=$(HOST_IP)/32"
-endif
-
 .PHONY: \
   help deps deps-update strip-remote-schemas lint template-demo yamllint \
   install-cert-manager install-metrics-server install-cnpg-operator uninstall-cnpg-operator reset-cnpg-operator \
   template template--debug render dry-run \
-  deploy deploy-debug history rollback \
+  deploy deploy-debug authserver-extra-env history rollback \
+  guard-check template-guard dry-run-guard deploy-guard status-guard print-guard-registry \
   generate-main-and-backend config-init config config-plan config-show-plan config-import \
-  status notes versions versions-debug release-versions uninstall clean \
+  status notes versions versions-debug release-versions release-history uninstall clean \
+  sbom sbom-test sbom-validate \
   dry-run-security-restricted security-restricted security-disable show-label \
   generate-asl-identity-secret \
-  renew-opa-token \
-  kind-up kind-down k3s k3s-down myip create-secrets \
+  renew-opa-token oidc-test-user \
+  kind-up kind-dns kind-down k3s k3s-down create-secrets \
   proxy-up proxy-down proxy-verify \
   trivy
 
@@ -154,6 +194,8 @@ endif
 	@printf "  %-28s %s\n" "SMB_KEYSTORE_PW_FILE" "SMCB keystore password file (required for deploy/template/render/dry-run)"
 	@printf "  %-28s %s\n" "SMB_KEYSTORE_FILE_B64" "SMCB keystore base64 file (required for deploy/template/render/dry-run)"
 	@printf "  %-28s %s\n" "TF_VAR_keycloak_password" "Keycloak admin password (config / config-plan)"
+	@printf "  %-28s %s\n" "GUARD_CHART_VERSION" "Guard chart version for two-release stages (<stage>.guard.mk; deploy-guard)"
+	@printf "  %-28s %s\n" "OIDC_TEST_BASE_URL/KVNR/EMAIL" "Testdriver OIDC user mapping (oidc-test-user)"
 	@echo
 	@printf "Vars (effective):\n RELEASE=%s\n NAMESPACE=%s\n VALUES=%s\n VALUES_DIR=%s\n STAGE=%s\n" "$(RELEASE)" "$(NAMESPACE)" "$(VALUES)" "$(VALUES_DIR)" "$(STAGE)"
 
@@ -187,6 +229,14 @@ deps: ## Vendor the subcharts' remote deps as pinned in their Chart.lock (cache-
 			rm -f "$$tgz"; \
 		fi; \
 	done
+	@# Unlike the oci:// deps above (addressed directly, no local repo state
+	@# needed), zeta-guard's prometheus dependency is a classic HTTP(S) chart
+	@# repo (Chart.yaml) — `helm dependency build --skip-refresh` below can
+	@# only resolve it against a repo already registered locally, and never
+	@# registers one itself. Fresh environments (CI runners, new clones) have
+	@# no such registration, so this has to run every time; --force-update
+	@# keeps it a no-op when already registered instead of erroring.
+	@helm repo add --force-update prometheus-community https://prometheus-community.github.io/helm-charts 1>&2
 	@helm dependency build --skip-refresh charts/test-monitoring-service 1>&2
 	@helm dependency build --skip-refresh charts/zeta-guard 1>&2
 	@$(MAKE) --no-print-directory strip-remote-schemas 1>&2
@@ -226,6 +276,8 @@ strip-remote-schemas: ## Remove vendored subchart schemas with remote $refs (off
 # Operator chart pins ("Pulled:" on install is a content-cache hit, not a
 # download). Bump to upgrade; overridable per-invocation, e.g.
 # `make install-cert-manager CERT_MANAGER_VERSION=v1.21.0`.
+# Keep in sync with the version matrix in the Produkthandbuch
+# (Anleitungen/Wie_Sie_ZETA_Guard_in_Kubernetes_konfigurieren.md).
 CERT_MANAGER_VERSION ?= v1.20.1
 CNPG_CHART_VERSION ?= 0.29.0
 
@@ -233,7 +285,7 @@ install-cert-manager: ## Install cert-manager $(CERT_MANAGER_VERSION) (cluster-w
 	@if helm list -n cert-manager --deployed -o yaml 2>/dev/null | grep -q "chart: cert-manager-$(CERT_MANAGER_VERSION)"; then \
 		printf 'cert-manager %s already deployed, skipping\n' "$(CERT_MANAGER_VERSION)"; \
 	else \
-		helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager --version $(CERT_MANAGER_VERSION) -n cert-manager --create-namespace --set crds.enabled=true; \
+		helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager --version $(CERT_MANAGER_VERSION) -n cert-manager --create-namespace --set crds.enabled=true --qps 30; \
 	fi
 
 install-metrics-server: ## Install metrics-server and patch args for local KIND kubelets
@@ -258,11 +310,13 @@ install-cnpg-operator: ## Install CloudNativePG operator $(CNPG_CHART_VERSION) i
 	@if helm list -n cnpg-system --deployed -o yaml 2>/dev/null | grep -q "chart: cloudnative-pg-$(CNPG_CHART_VERSION)"; then \
 		printf 'cloudnative-pg chart %s already deployed, skipping\n' "$(CNPG_CHART_VERSION)"; \
 	else \
-		helm upgrade --install cloudnative-pg oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg --version $(CNPG_CHART_VERSION) \
+		helm upgrade --install cloudnative-pg oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg \
+		  --version $(CNPG_CHART_VERSION) \
 		  -n cnpg-system --create-namespace \
 		  --set config.clusterWide=true \
 		  $(CNPG_SECURITY_FLAGS) \
-		  --wait --timeout 5m; \
+		  --wait --timeout 5m \
+		  --qps 30; \
 	fi
 
 reset-cnpg-operator: ## Remove CloudNativePG operator and CRDs (destructive)
@@ -293,6 +347,39 @@ template-demo: ## Render zeta-guard chart with demo values and validate YAML str
 	  --set authserver.genesisHash=dummy \
 	  --set authserver.smcbHashingPepper=dummy \
 	  | yamllint -c .yamllint.yaml -
+
+### SBOM ###
+SBOM_ARGS ?=
+SBOM_TOOL := ci/sbom/generate_sbom.py
+# The guard chart needs these four values to render at all; the dummies never reach a deployment.
+SBOM_REQUIRED := authserver.admin.password=dummy authserver.genesisHash=dummy authserver.smcbHashingPepper=dummy \
+  imageTrustCertchainSecretRef=sbom-render-only opa.simulation.bundle.resource=sbom-render-only
+SBOM_GUARD_SETS := $(foreach v,$(SBOM_REQUIRED),--set $(v))
+# digest fallback map (internal registry paths, hence under private/; optional)
+SBOM_FALLBACK := $(if $(wildcard private/sbom-digest-fallback.yaml),--digest-fallback private/sbom-digest-fallback.yaml)
+# umbrella: the guard values above plus the test drivers' required settings (no defaults in their charts)
+SBOM_UMBRELLA_REQUIRED := testdriver-oidc.oidcIdpIss=https://sbom-render-only testdriver-oidc.oidcIdpAlias=sbom-render-only \
+  testdriver-oidc.oidcBaseUri=https://sbom-render-only testdriver-smcb.smcbCertificateFileName=sbom-render-only.p12 \
+  testdriver-smcb.smcbCertificateAlias=sbom-render-only
+SBOM_UMBRELLA_SETS := $(foreach v,$(SBOM_REQUIRED),--set zeta-guard.$(v)) $(foreach v,$(SBOM_UMBRELLA_REQUIRED),--set $(v))
+sbom: ## Generate CycloneDX SBOMs: charts/zeta-guard/sbom.cdx.json and sbom.cdx.json (umbrella); SBOM_ARGS="--resolve-digests"
+	rm -f sbom-missing-images.txt
+	$(SBOM_TOOL) -c charts/zeta-guard -o charts/zeta-guard/sbom.cdx.json $(SBOM_GUARD_SETS) \
+	  --all-values ci/sbom/zeta-guard-all.yaml --missing-out sbom-missing-images.txt $(SBOM_FALLBACK) $(SBOM_ARGS)
+	# umbrella: its own optional sub-charts plus the guard's optional components (nested under zeta-guard:)
+	yq eval-all 'select(fileIndex == 0) * {"zeta-guard": select(fileIndex == 1)}' \
+	  ci/sbom/zeta-testenv-all.yaml ci/sbom/zeta-guard-all.yaml > .sbom-testenv-all.yaml
+	$(SBOM_TOOL) -c . -o sbom.cdx.json $(SBOM_UMBRELLA_SETS) \
+	  --all-values .sbom-testenv-all.yaml --missing-out sbom-missing-images.txt $(SBOM_FALLBACK) $(SBOM_ARGS) \
+	  --subchart-sbom zeta-guard=charts/zeta-guard/sbom.cdx.json
+	rm -f .sbom-testenv-all.yaml
+
+sbom-test: ## Unit tests of the SBOM generator (no network, no helm)
+	python3 -m unittest discover -s ci/sbom -p 'test_*.py'
+
+sbom-validate: ## Validate the generated SBOMs against the CycloneDX 1.6 schema (requires check-jsonschema)
+	check-jsonschema --schemafile ci/sbom/schema/bom-1.6.schema.json --base-uri "file://$(CURDIR)/ci/sbom/schema/" \
+	  charts/zeta-guard/sbom.cdx.json sbom.cdx.json
 
 ### RENDERING ###
 template: deps ## Render manifests to stdout
@@ -336,17 +423,17 @@ adopt-certificates:
 		owner=$$(kubectl get certificate -n $(NAMESPACE) $$cert \
 			-o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'); \
 		if [ -z "$$owner" ]; then \
-			printf 'Adopting pre-existing Certificate %s into release %s\n' "$$cert" "$(RELEASE)"; \
+			printf 'Adopting pre-existing Certificate %s into release %s\n' "$$cert" "$(CERT_RELEASE)"; \
 			kubectl patch certificate -n $(NAMESPACE) $$cert --type=json \
 				-p='[{"op":"remove","path":"/metadata/ownerReferences"}]' 2>/dev/null || true; \
 			kubectl annotate --overwrite certificate -n $(NAMESPACE) $$cert \
-				meta.helm.sh/release-name=$(RELEASE) \
+				meta.helm.sh/release-name=$(CERT_RELEASE) \
 				meta.helm.sh/release-namespace=$(NAMESPACE); \
 			kubectl label --overwrite certificate -n $(NAMESPACE) $$cert \
 				app.kubernetes.io/managed-by=Helm; \
-		elif [ "$$owner" != "$(RELEASE)" ]; then \
+		elif [ "$$owner" != "$(CERT_RELEASE)" ]; then \
 			printf 'ERROR: Certificate %s is owned by helm release %s, expected %s\n' \
-				"$$cert" "$$owner" "$(RELEASE)" >&2; \
+				"$$cert" "$$owner" "$(CERT_RELEASE)" >&2; \
 			exit 1; \
 		fi; \
 	done
@@ -365,7 +452,8 @@ dry-run: deps adopt-certificates ## Server-side dry-run of the real `helm upgrad
 		--set-string "zeta-guard.authserver.admin.password=__dryrun__" \
 		--set-string "zeta-guard.authserver.genesisHash=__dryrun__" \
 		--set-string "zeta-guard.authserver.smcbHashingPepper=__dryrun__" \
-		--dry-run=server
+		--dry-run=server \
+		--qps 30
 
 
 ### DEPLOYMENT ###
@@ -385,19 +473,104 @@ ifeq ($(STAGE),achelos)
 	fi
 endif
 	$(MAKE) adopt-certificates
-	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE) --rollback-on-failure --render-subchart-notes --timeout 10m
+	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE) --rollback-on-failure --render-subchart-notes --timeout 10m --qps 30
+ifeq ($(GUARD_ENABLED),)
+	$(MAKE) authserver-extra-env
+endif
 	$(MAKE) dry-run-security-restricted
 
 deploy-debug: deps adopt-certificates ## Install/upgrade the release with debug output (wait + timeout)
-	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE) --rollback-on-failure --render-subchart-notes --timeout 10m --debug
+	helm upgrade --install $(RELEASE) . -f $(VALUES) $(HELM_EXTRA_VALUES_PARAMS) $(HELM_ARGS) -n $(NAMESPACE) --rollback-on-failure --render-subchart-notes --timeout 10m --debug --qps 30
+ifeq ($(GUARD_ENABLED),)
+	$(MAKE) authserver-extra-env
+endif
+
+# Applies AUTHSERVER_EXTRA_ENV (see $(VALUES_DIR)<stage>.mk) to the keycloak
+# container of the authserver Deployment. The names it manages are recorded in
+# the Deployment annotation zeta.dev/extra-env (helm does not own it, so it
+# survives upgrades and rollbacks); a recorded name that is no longer configured
+# is unset. `kubectl set env` leaves the object untouched when nothing changes,
+# so only the first deploy or a changed set of variables rolls the pods.
+AUTHSERVER_EXTRA_ENV_NAMES := $(strip $(foreach kv,$(AUTHSERVER_EXTRA_ENV),$(firstword $(subst =, ,$(kv)))))
+authserver-extra-env:
+	@set -e; \
+	desired="$(AUTHSERVER_EXTRA_ENV_NAMES)"; \
+	if ! kubectl -n $(NAMESPACE) get deployment authserver >/dev/null 2>&1; then \
+		[ -z "$$desired" ] && exit 0; \
+		echo "ERROR: deployment/authserver not found in $(NAMESPACE)" >&2; exit 1; \
+	fi; \
+	recorded=$$(kubectl -n $(NAMESPACE) get deployment authserver -o jsonpath='{.metadata.annotations.zeta\.dev/extra-env}'); \
+	stale=; \
+	for name in $$recorded; do \
+		case " $$desired " in *" $$name "*) ;; *) stale="$$stale $$name-" ;; esac; \
+	done; \
+	[ -n "$$desired$$stale" ] || exit 0; \
+	echo "authserver extra env: set [$$desired] unset [$$stale ]"; \
+	kubectl -n $(NAMESPACE) set env deployment/authserver -c keycloak $(AUTHSERVER_EXTRA_ENV) $$stale; \
+	if [ -n "$$desired" ]; then \
+		kubectl -n $(NAMESPACE) annotate --overwrite deployment/authserver zeta.dev/extra-env="$$desired"; \
+	else \
+		kubectl -n $(NAMESPACE) annotate deployment/authserver zeta.dev/extra-env-; \
+	fi; \
+	kubectl -n $(NAMESPACE) rollout status deployment/authserver --timeout=10m
+
+### GUARD RELEASE (two-release stages, see <stage>.guard.mk) ###
+# HELM_ARGS_GUARD: unprefixed counterpart of HELM_ARGS (authserver.*, pepproxy.*), set by CI.
+# HELM_EXTRA_GUARD_PARAMS: local extras, e.g. --set-file authserver.admin.password=...
+guard-check:
+	@test -n "$(GUARD_ENABLED)" || { echo "ERROR: stage $(STAGE) is not a two-release stage ($(VALUES_DIR)$(STAGE).guard.mk with GUARD_CHART_VERSION missing)" >&2; exit 1; }
+	@test -n "$(strip $(GUARD_CHART))" || { echo "ERROR: GUARD_CHART is empty (set it in $(VALUES_DIR)$(STAGE).guard.mk)" >&2; exit 1; }
+	@test -f "$(GUARD_VALUES)" || { echo "ERROR: $(GUARD_VALUES) missing" >&2; exit 1; }
+
+template-guard: guard-check ## Render the guard release from the published chart (two-release stages)
+	helm template $(GUARD_RELEASE) $(GUARD_CHART) --version $(GUARD_CHART_VERSION) -f $(GUARD_VALUES) $(HELM_EXTRA_GUARD_PARAMS) $(HELM_ARGS_GUARD) --namespace $(NAMESPACE) \
+		--set-string "authserver.admin.password=__template__" \
+		--set-string "authserver.genesisHash=__template__" \
+		--set-string "authserver.smcbHashingPepper=__template__"
+
+dry-run-guard: guard-check adopt-certificates ## Server-side dry-run of the guard release (two-release stages)
+	helm upgrade --install $(GUARD_RELEASE) $(GUARD_CHART) --version $(GUARD_CHART_VERSION) -f $(GUARD_VALUES) $(HELM_EXTRA_GUARD_PARAMS) $(HELM_ARGS_GUARD) -n $(NAMESPACE) \
+		--set-string "authserver.admin.password=__dryrun__" \
+		--set-string "authserver.genesisHash=__dryrun__" \
+		--set-string "authserver.smcbHashingPepper=__dryrun__" \
+		--dry-run=server \
+		--qps 30
+
+# Deploy the umbrella (test env, tags.zeta-guard: false) FIRST: it owns the
+# Secrets the guard consumes (gematik-image-signer-test, zeta-authserver-dbenc).
+deploy-guard: guard-check adopt-certificates ## Install/upgrade the guard release from the published chart (two-release stages)
+	helm upgrade --install $(GUARD_RELEASE) $(GUARD_CHART) --version $(GUARD_CHART_VERSION) -f $(GUARD_VALUES) $(HELM_EXTRA_GUARD_PARAMS) $(HELM_ARGS_GUARD) -n $(NAMESPACE) --rollback-on-failure --timeout 10m --qps 30
+	$(MAKE) authserver-extra-env
+	$(MAKE) dry-run-security-restricted
+
+# helm looks credentials up by the exact host string, so "host" and "host:443" are
+# separate entries: CI must log in to the host it pulls from, not to $CI_REGISTRY.
+print-guard-registry: guard-check ## Print the OCI registry host of GUARD_CHART
+	@printf '%s\n' '$(GUARD_CHART)' | sed -e 's|^oci://||' -e 's|/.*||'
+
+status-guard: guard-check ## Show Helm release status of the guard release (two-release stages)
+	helm status $(GUARD_RELEASE) -n $(NAMESPACE)
 
 ### CONFIGURATION ###
 generate-main-and-backend: ## Generates main.tf and backend depending on k8s usage
-	cd terraform/authserver && \
+	cd $(TF_PATH) && \
 	STAGE=$(STAGE) NAMESPACE=$(NAMESPACE) TF_VAR_use_kubernetes=$(USE_K8S) TF_VAR_config_path=$(TF_VAR_config_path) \
 	./generate-main-and-backend.sh
 
-config-init: ## Run generate-main-and-backend and initialise terraform backend
+# Two-release stages: export terraform/authserver from GUARD_TF_REF (fetched from
+# origin; a local ref is the fallback for offline use) into GUARD_TF_DIR.
+guard-tf:
+ifneq ($(GUARD_ENABLED),)
+	@test -n "$(strip $(GUARD_TF_REF))" || { echo "ERROR: GUARD_TF_REF is empty (set it in $(VALUES_DIR)$(STAGE).guard.mk)" >&2; exit 1; }
+	@rm -rf $(GUARD_TF_DIR) && mkdir -p $(GUARD_TF_DIR)
+	@if git fetch -q --depth=1 origin "$(GUARD_TF_REF)" 2>/dev/null; then ref=FETCH_HEAD; \
+	elif git rev-parse -q --verify "$(GUARD_TF_REF)^{commit}" >/dev/null; then ref="$(GUARD_TF_REF)"; \
+	else echo "ERROR: git ref $(GUARD_TF_REF) not found on origin or locally" >&2; exit 1; fi; \
+	git archive "$$ref" terraform/authserver | tar -x -C $(GUARD_TF_DIR); \
+	printf 'guard-tf: terraform/authserver from %s (%s) -> %s\n' "$(GUARD_TF_REF)" "$$(git rev-parse --short "$$ref")" "$(TF_PATH)"
+endif
+
+config-init: guard-tf ## Run generate-main-and-backend and initialise terraform backend
 	$(MAKE) generate-main-and-backend
 	terraform -chdir=$(TF_PATH) init \
 		-backend-config=environments/$(STAGE).backend.hcl \
@@ -412,7 +585,7 @@ config: ## Configure deployed authserver through terraform
 	for i in 1 2 3 4 5; do \
 		terraform -chdir=$(TF_PATH) apply \
 			-parallelism=1 \
-			-var-file=../../$(TF_VARS) \
+			-var-file=$(abspath $(TF_VARS)) \
 			-auto-approve && exit 0; \
 		printf 'make config: terraform apply failed (attempt %s/5)%s\n' \
 			"$$i" "$$( [ $$i -lt 5 ] && echo ', retrying' )"; \
@@ -425,7 +598,7 @@ config-plan: ## List changes that would be made to the stage (by make config); s
 	# as a plain-text diff for review.
 	@eval "$$(bash $(TF_PATH)/scripts/kc-admin-env.sh $(NAMESPACE))" && \
 	terraform -chdir=$(TF_PATH) plan \
-    	-var-file=../../$(TF_VARS) \
+    	-var-file=$(abspath $(TF_VARS)) \
     	-var="skip_external_resources=true" \
     	$(if $(strip $(PLAN_OUT)),-out=$(PLAN_OUT))
 
@@ -443,10 +616,27 @@ config-import: ## Adopt the existing realm into the terraform state; first step 
 		echo "make config-import: keycloak_realm.zeta_realm is already in the state, nothing to do"; \
 	else \
 		terraform -chdir=$(TF_PATH) import \
-			-var-file=../../$(TF_VARS) \
+			-var-file=$(abspath $(TF_VARS)) \
 			-var="skip_external_resources=true" \
 			keycloak_realm.zeta_realm zeta-guard; \
 	fi
+
+oidc-test-user: export OIDC_TEST_EMAIL := $(OIDC_TEST_EMAIL)
+# CI passes ENVIRONMENT_URL with a trailing slash → avoid "//oidc/…" in the request path
+oidc-test-user: override OIDC_TEST_BASE_URL := $(patsubst %/,%,$(OIDC_TEST_BASE_URL))
+oidc-test-user: ## Seed the testdriver OIDC KVNR/email mapping (required after testdriver restarts)
+	@test -n "$(strip $(OIDC_TEST_BASE_URL))" || { echo "OIDC_TEST_BASE_URL is required (for example https://zeta-kind.local/td-oidc)"; exit 1; }
+	@test -n "$(strip $(OIDC_TEST_KVNR))" || { echo "OIDC_TEST_KVNR is required"; exit 1; }
+	@test -n "$$OIDC_TEST_EMAIL" || { echo "OIDC_TEST_EMAIL is required and must be unique for this KVNR"; exit 1; }
+	@command -v jq >/dev/null || { echo "jq is required to encode the OIDC user mapping"; exit 1; }
+	@printf '%s' "$(OIDC_TEST_INSECURE)" | grep -Eq '^(true|false)$$' || { echo "OIDC_TEST_INSECURE must be true or false"; exit 1; }
+	@printf '%s' "$(OIDC_TEST_BASE_URL)" | grep -Eq '^https?://[^/]+(/.*)?$$' || { echo "OIDC_TEST_BASE_URL must be an absolute HTTP(S) URL"; exit 1; }
+	@printf '%s' "$(OIDC_TEST_KVNR)" | grep -Eq '^[A-Z][0-9]{9}$$' || { echo "OIDC_TEST_KVNR must be one uppercase letter followed by nine digits"; exit 1; }
+	@payload=$$(jq -n --arg kvnr "$(OIDC_TEST_KVNR)" --arg email "$$OIDC_TEST_EMAIL" '{kvnr: $$kvnr, email: $$email}') && \
+	curl --fail-with-body --silent --show-error $(if $(filter true,$(OIDC_TEST_INSECURE)),--insecure) \
+	  --request POST "$(OIDC_TEST_BASE_URL)/oidc/kvnr-email" \
+	  --header 'Content-Type: application/json' \
+	  --data "$$payload"
 
 
 ### STATUS ###
@@ -471,6 +661,7 @@ versions-debug: ## Show deployed components with all images and digests
 	@kubectl -n $(NAMESPACE) get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.initContainerStatuses[*]}  init: {.image}{"\n"}        {.imageID}{"\n"}{end}{range .status.containerStatuses[*]}  container: {.image}{"\n"}            {.imageID}{"\n"}{end}{end}'
 
 
+# Slash-separated candidate dirs cover chart renames across tags (test-driver -> testdriver @1.3.0).
 release-versions: ## Show component image tags a release was built on, from git (usage: make release-versions TAG=1.2.2)
 	@tag="$(TAG)"; \
 	if [ -z "$$tag" ]; then \
@@ -479,19 +670,34 @@ release-versions: ## Show component image tags a release was built on, from git 
 	  exit 1; \
 	fi; \
 	zg="$$tag:charts/zeta-guard/values.yaml"; \
-	echo "=== Component image tags for $$tag (sub-chart values.yaml @ git tag) ==="; \
-	for pair in authserver:keycloak-zeta pepproxy:ngx_pep provisioning-processor:provisioning-processor keychain-generator:keychain-generator telemetry-gateway:zeta-telemetry-gateway; do \
+	tagdate=$$(git for-each-ref --format='%(creatordate:format:%Y-%m-%d %H:%M %z)' "refs/tags/$$tag"); \
+	echo "=== Component image tags for $$tag ($${tagdate:-date n/a}) (sub-chart values.yaml @ git tag) ==="; \
+	echo "--- zeta-guard ---"; \
+	for pair in authserver:keycloak-zeta pepproxy:ngx_pep nginx-ingress:nginx-ingress provisioning-processor:provisioning-processor keychain-generator:keychain-generator notification-service:notification-service telemetry-gateway:zeta-telemetry-gateway; do \
 	  name=$$(echo "$$pair" | cut -d: -f1); repo=$$(echo "$$pair" | cut -d: -f2); \
 	  v=$$(git show "$$zg" 2>/dev/null | grep -A3 "repository:.*$$repo" | grep -m1 'tag:' | sed -E 's/.*tag: *"?([^"]*)"?.*/\1/'); \
 	  printf '  %-24s %s\n' "$$name" "$${v:-n/a}"; \
 	done; \
 	v=$$(git show "$$zg" 2>/dev/null | grep -A3 'repository:.*opa' | grep -m1 'tag:' | sed -E 's/.*tag: *"?([^"]*)"?.*/\1/'); \
 	printf '  %-24s %s\n' opa "$${v:-n/a}"; \
-	for pair in testfachdienst:testfachdienst tiger-proxy:tiger-proxy testdriver:test-driver nativedriver:native-driver exauthsim:exauthsim hsm-sim:hsmsim; do \
-	  name=$$(echo "$$pair" | cut -d: -f1); dir=$$(echo "$$pair" | cut -d: -f2); \
-	  v=$$(git show "$$tag:charts/$$dir/values.yaml" 2>/dev/null | grep -m1 'tag:' | sed -E 's/.*tag: *"?([^"]*)"?.*/\1/'); \
+	v=$$(git show "$$zg" 2>/dev/null | grep 'imageName:.*postgres:' | sed -n '1p' | sed -E 's/.*postgres:"?([^" ]*)"?.*/\1/'); \
+	printf '  %-24s %s\n' keycloak-db "$${v:-n/a}"; \
+	v=$$(git show "$$zg" 2>/dev/null | grep 'imageName:.*postgres:' | sed -n '2p' | sed -E 's/.*postgres:"?([^" ]*)"?.*/\1/'); \
+	printf '  %-24s %s\n' notification-db "$${v:-n/a}"; \
+	echo "--- test-env charts ---"; \
+	for pair in infinispan:infinispan-external testfachdienst:testfachdienst tiger-proxy:tiger-proxy tiger-testsuite:tiger-testsuite testdriver:test-driver/testdriver nativedriver:native-driver/nativedriver cert-validation-mock:zeta-cert-validation-mock tls-test-tool:zeta-tls-test-tool-service; do \
+	  name=$$(echo "$$pair" | cut -d: -f1); dirs=$$(echo "$$pair" | cut -d: -f2 | tr '/' ' '); \
+	  v=""; for dir in $$dirs; do \
+	    [ -n "$$v" ] || v=$$(git show "$$tag:charts/$$dir/values.yaml" 2>/dev/null | grep -m1 'tag:' | sed -E 's/.*tag: *"?([^"]*)"?.*/\1/'); \
+	  done; \
 	  printf '  %-24s %s\n' "$$name" "$${v:-n/a}"; \
 	done
+
+release-history: ## List all release tags with date and subject, newest first
+	@echo "=== Release history (git tags) ==="; \
+	git for-each-ref --sort=-v:refname \
+	  --format='%(refname:short)|%(creatordate:format:%Y-%m-%d %H:%M %z)|%(subject)' refs/tags | \
+	awk -F'|' '$$1 ~ /^[0-9]/ {printf "  %-16s %s  %s\n", $$1, $$2, $$3}'
 
 
 ### UNINSTALL / CLEAN ###
@@ -499,6 +705,11 @@ uninstall: ## Uninstall the release from the namespace
 	# Delete CNPG Clusters first so finalizers resolve before helm uninstall, else the release sticks in `uninstalling`.
 	# notification-db has resource-policy: keep (helm won't delete it) so it MUST be removed here.
 	kubectl delete cluster.postgresql.cnpg.io keycloak-db notification-db -n $(NAMESPACE) --ignore-not-found=true --wait=true --timeout=2m || true
+ifneq ($(GUARD_ENABLED),)
+	# two-release stage: the guard release owns keycloak-db/notification-db, remove it before the umbrella
+	helm uninstall $(GUARD_RELEASE) -n $(NAMESPACE) --wait --timeout 5m || true
+	kubectl -n $(NAMESPACE) delete secret -l owner=helm,name=$(GUARD_RELEASE) --ignore-not-found=true
+endif
 	helm uninstall $(RELEASE) -n $(NAMESPACE) --wait --timeout 5m || true
 	# Safety net: drop any stuck release record so the next `helm upgrade --install` isn't blocked with "no deployed releases"
 	kubectl -n $(NAMESPACE) delete secret -l owner=helm,name=$(RELEASE) --ignore-not-found=true
@@ -509,8 +720,9 @@ uninstall: ## Uninstall the release from the namespace
 
 clean: ## Remove the generated rendered.yaml, terraform files and orphaned packaged subcharts
 	rm -f rendered.yaml
-	rm -rf $(TF_PATH)/.terraform $(TF_PATH)/terraform.tfstate* $(TF_PATH)/.terraform.lock.hcl $(TF_PATH)/main.tf $(TF_PATH)/providers.tf $(TF_PATH)/mode-assert.tf $(TF_PATH)/credentials.tf $(TF_PATH)/sekidp-secret.tf
-	@find $(TF_PATH)/environments -type f -name '*.backend.hcl' ! -name 'demo.backend.hcl' -delete
+	rm -rf $(TF_PATH)/.terraform $(TF_PATH)/terraform.tfstate* $(TF_PATH)/.terraform.lock.hcl $(TF_PATH)/main.tf $(TF_PATH)/providers.tf $(TF_PATH)/mode-assert.tf $(TF_PATH)/credentials.tf
+	@find $(TF_PATH)/environments -type f -name '*.backend.hcl' ! -name 'demo.backend.hcl' -delete 2>/dev/null || true
+	rm -rf $(GUARD_TF_DIR)
 	@for tgz in charts/*.tgz; do \
 		[ -e "$$tgz" ] || continue; \
 		name=$$(tar -tzf "$$tgz" 2>/dev/null | head -1 | cut -d/ -f1); \
@@ -550,9 +762,11 @@ generate-asl-identity-secret: ## Create/update 'asl-identity' secret from cert/k
 	  --dry-run=client -o yaml | kubectl apply -f -
 
 # Requires env vars DOCKER_USER, DOCKER_USER and DOCKER_PASSWORD to be set. (e.g. in .envrc.local)
-# Auto-detect HOST_IP (override by exporting HOST_IP if needed)
-HOST_IP ?= $(shell (ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || ip -4 route get 1 2>/dev/null | awk '{print $$7; exit}') )
 KIND_CONFIG ?= kind-local.yaml
+# In-cluster NIC Service that ingress hostnames resolve to (CoreDNS rewrite). Must match
+# zeta-guard.nginx-ingress.serviceNameOverride in the local values files.
+KIND_NIC_SERVICE ?= nginx-ingress-controller
+KIND_NIC_SERVICE_FQDN := $(KIND_NIC_SERVICE).zeta-local.svc.cluster.local
 # Auto-detect ingress hostnames from local values (ingress-related keys), fallback to zeta-kind.local.
 # Override manually only when needed, e.g. KIND_INGRESS_HOSTS="zeta-kind.local my-alias.local".
 KIND_VALUES_FILE ?= $(firstword $(wildcard $(VALUES_DIR)values.local.yaml private/values.local.yaml local-test/values.local.yaml))
@@ -566,7 +780,6 @@ KIND_INGRESS_HOSTS_AUTO := $(strip $(shell \
 	    }' "$(KIND_VALUES_FILE)" | sort -u | tr '\n' ' '; \
 	fi))
 KIND_INGRESS_HOSTS ?= $(if $(KIND_INGRESS_HOSTS_AUTO),$(KIND_INGRESS_HOSTS_AUTO),zeta-kind.local)
-KIND_INGRESS_HOSTS_ESCAPED := $(shell printf '%s' "$(KIND_INGRESS_HOSTS)" | sed 's/[\/&]/\\&/g')
 
 k3s:
 	@kubectl config current-context | grep -q k3s || (echo "current context should have k3s in its name" && exit 1)
@@ -583,20 +796,25 @@ k3s-down:
 	@kubectl config current-context | grep -q k3s || (echo "current context should have k3s in its name" && exit 1)
 	$(MAKE) uninstall stage=k3s
 
-myip: ## Print the auto-detected HOST_IP (LAN IP used for CoreDNS / NetworkPolicy)
-	@echo $(HOST_IP)
+kind-dns: ## Render the CoreDNS rewrite rules (ingress hostnames -> NIC Service) and restart CoreDNS
+	@[ -n "$(KIND_INGRESS_HOSTS)" ] || (echo "KIND_INGRESS_HOSTS must not be empty." && exit 1)
+	@rules=$$(mktemp); \
+	for h in $(KIND_INGRESS_HOSTS); do \
+		printf '        rewrite stop {\n          name exact %s $(KIND_NIC_SERVICE_FQDN)\n          answer auto\n        }\n' "$$h"; \
+	done > $$rules; \
+	awk -v f="$$rules" '/__KIND_INGRESS_REWRITES__/ { while ((getline l < f) > 0) print l; next } { print }' \
+		private/kind/custom-coredns.template.yaml | kubectl apply -f -; \
+	rm -f $$rules
+	kubectl -n kube-system rollout restart deploy/coredns
+	@echo "CoreDNS: $(KIND_INGRESS_HOSTS) -> $(KIND_NIC_SERVICE_FQDN)"
 
 kind-up: ##! Create KIND cluster, patch CoreDNS, create ns and required secrets (requires private/)
-	@[ -n "$(HOST_IP)" ] || (echo "HOST_IP not detected. Export HOST_IP=192.168.x.y and retry." && exit 1)
 	@[ -n "$(KIND_INGRESS_HOSTS)" ] || (echo "KIND_INGRESS_HOSTS must not be empty." && exit 1)
 	@[ -n "$$DOCKER_USER" ] || (echo "DOCKER_USER env var not set" && exit 1)
 	@[ -n "$$DOCKER_PASSWORD" ] || (echo "DOCKER_PASSWORD env var not set" && exit 1)
 	@[ -f "$(KIND_CONFIG)" ] || (echo "KIND_CONFIG file not found: $(KIND_CONFIG)" && exit 1)
 	kind create cluster --name zeta-local --config $(KIND_CONFIG)
-	sed -e "s/__HOST_IP__/$(HOST_IP)/g" \
-		-e "s/__KIND_INGRESS_HOSTS__/$(KIND_INGRESS_HOSTS_ESCAPED)/g" \
- 		private/kind/custom-coredns.template.yaml | kubectl apply -f -
-	kubectl -n kube-system rollout restart deploy/coredns
+	$(MAKE) kind-dns
 	kubectl create namespace zeta-local || true
 	# Disable Pod Security restrictions locally (remove any PSA labels)
 	#$(MAKE) security-restricted
@@ -604,16 +822,16 @@ kind-up: ##! Create KIND cluster, patch CoreDNS, create ns and required secrets 
 	$(MAKE) install-cert-manager
 	$(MAKE) install-metrics-server
 	$(MAKE) install-cnpg-operator
-	@echo "kind-up completed. HOST_IP=$(HOST_IP) KIND_CONFIG=$(KIND_CONFIG)"
+	@echo "kind-up completed. KIND_CONFIG=$(KIND_CONFIG)"
 
 # make sure to hide secrets from output when insecurely passing them as args, i.e. @
 create-secrets:
 	kubectl -n $(NAMESPACE) delete secret gitlab-registry-credentials-zeta-group --ignore-not-found=true
 	@echo "create secret gitlab-registry-credentials-zeta-group"
 	@kubectl -n $(NAMESPACE) create secret docker-registry gitlab-registry-credentials-zeta-group \
-	  --docker-server=$(DOCKER_REGISTRY) \
-	  --docker-username=$(DOCKER_USER) \
-	  --docker-password=$(DOCKER_PASSWORD) \
+	  --docker-server="$(DOCKER_REGISTRY)" \
+	  --docker-username="$(DOCKER_USER)" \
+	  --docker-password="$(DOCKER_PASSWORD)" \
 	  --docker-email=k8s-admin@example.com
 	kubectl -n $(NAMESPACE) delete secret opa-bearer --ignore-not-found=true
 	@echo "create secret opa-bearer"

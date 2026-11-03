@@ -12,7 +12,8 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
   - `charts/zeta-guard` (Keycloak + nginx PEP + OPA + DB)
   - `charts/test-monitoring-service`,
   - `charts/testfachdienst`,
-  - `charts/testdriver`
+  - `charts/testdriver-smcb`
+  - `charts/testdriver-oidc`
   - `charts/nativedriver`
   - `charts/tiger-testsuite` (Tiger based regression service + Workflow UI)
   - `charts/zeta-tls-test-tool-service` (optional TLS Test Tool control service)
@@ -22,6 +23,10 @@ Of particular interest is the _zeta-guard_ chart at `charts/zeta-guard`
   - `charts/mailcatcher` (optional thin local deployment of MailCatcher, an SMTP catch-all + web UI for inspecting test emails)
 
 ## Notes
+
+- `Makefile` is a development aid, not a part of the published chart, and chart
+  users will use `helm` and `terraform` directly, instead of using `make`.
+- All mentioned stages are **chart development** stages, not production stages.
 - Re-run `make deps` after changing `Chart.yaml` or any `charts/*/Chart.yaml`.
 - Commit `Chart.lock` so CI stays in sync with local dependency resolution.
 - The cloudnative-pg Operator is intentionally NOT a chart dependency here; install it once per cluster with Terraform.
@@ -87,6 +92,12 @@ Given that kubectl is using the correct context, you can install the helm chart 
 ```
 
 ### During development
+
+#### Android driver with KIND
+
+For local x86_64 emulator testing, see
+[Run the Android driver with KVM in local KIND](docs/how-to_guides/How_to_configure_androiddriver.md).
+The chart supports opt-in KVM passthrough when the KIND node has `/dev/kvm`.
 
 #### Local TLS Test Tool control service with KIND
 

@@ -95,6 +95,99 @@ zeta-guard:
 | `egress.providerInternal.resourceServers`  | Provider-internal resource servers                      |
 | `egress.providerInternal.telemetrySystems` | Provider-internal telemetry systems                     |
 
+## Why the three OCSP categories exist
+
+Each of the three categories belongs to exactly one certificate whose
+revocation status a ZETA Guard component checks via OCSP. The component takes
+the responder URL from that certificate's AIA extension (see
+[Configure IP blocks](#configure-ip-blocks)). The category only decides which
+pod may reach that responder.
+
+| Category       | Certificate checked                                            | Pod          | Active when                    | Controlling Helm values                                                  |
+|----------------|----------------------------------------------------------------|--------------|--------------------------------|--------------------------------------------------------------------------|
+| `ocspSmcbTsp`  | SMC-B certificate from the `x5c` header of the `subject_token` | `authserver` | on every SMC-B token exchange  | `authserver.provider.smcB.ocsp*`, `provisioningProcessor.tslOcspEnabled` |
+| `ocspTiPki`    | own ASL signer certificate (TI component PKI)                  | `pep-proxy`  | `pepproxy.asl_enabled: true`   | `pepproxy.aslOcsp`, `pepproxy.aslOcspTtl`                                |
+| `ocspCabForum` | own TLS server certificate (`pepproxy.hsmTlsCert`)             | `pep-proxy`  | `pepproxy.hsmProxyAddr` is set | `pepproxy.tlsConfig` (`ssl_stapling`)                                    |
+
+- **`ocspSmcbTsp`:** During the SMC-B token exchange, `authserver` checks the
+  SMC-B certificate against the OCSP responder of the issuing SMC-B TSP. Only
+  this end-entity certificate is checked. Revocation of the SMC-B CAs and the
+  trusted OCSP signers come offline from the TSL provided by the
+  `provisioning-processor`. With `provisioningProcessor.tslOcspEnabled: false`,
+  the OCSP check is skipped entirely.
+- **`ocspTiPki`:** `pep-proxy` fetches the OCSP response for its own ASL
+  signer certificate and sends it to the ZETA client in the ASL handshake
+  (message M2). The response is cached, by default for up to 24 hours
+  (`pepproxy.aslOcspTtl`, A_24624-01). `pepproxy.aslOcsp` sets a responder
+  URL that replaces the AIA URL (allow that responder's address instead), or
+  disables the check with `"off"`.
+- **`ocspCabForum`:** When `pep-proxy` terminates TLS itself (listener 8443,
+  active when `pepproxy.hsmProxyAddr` is set), nginx staples the revocation
+  status of its TLS server certificate to the handshake (`ssl_stapling on;` in
+  `pepproxy.tlsConfig`, A_26964). This certificate is usually issued by a
+  public CA under CA/Browser Forum rules (e.g. D-Trust). Which responders to
+  allow therefore depends on the CA you choose for it, and they are not on
+  gematik's URL list.
+
+> **Note:** The `pep-proxy` NetworkPolicy also allows `ocspSmcbTsp`. However,
+> `pep-proxy` currently does not check SMC-B certificates and does not use
+> this rule. Only `authserver` needs the category.
+
+> **Note:** When TLS already ends at the ingress, the ingress controller
+> staples the ingress certificate (`nginx-ingress.controller.config`). The
+> chart creates no egress NetworkPolicy for the ingress controller, and
+> `pep-proxy` does not need `ocspCabForum` in that case.
+
+## Mapping to gematik's URL list
+
+gematik lists the external endpoints ZETA Guard has to reach at runtime on the
+page
+[ZETA Guard - URL's](https://wiki.gematik.de/spaces/TI2AUSTAUSCH/pages/764644216/ZETA+Guard+-+URL+s)
+(login required; alternatively ask your gematik contact). RU DEV, RU REF and TU
+use the "RU/TU" tables, PU uses the "PU" tables. The sections of that page map
+to the egress categories as follows:
+
+| Section on the gematik page                                               | Egress category                                           | Pod                                             |
+|---------------------------------------------------------------------------|-----------------------------------------------------------|-------------------------------------------------|
+| "SMCB-CA's", column "SSP OCSP"                                            | `ocspSmcbTsp`                                             | `authserver`                                    |
+| "KOMP-CA's", column "SSP OCSP"                                            | `ocspTiPki`                                               | `pep-proxy`                                     |
+| "SMCB-CA's" and "KOMP-CA's", columns "OCSP Signer" and "OCSP AIA's"       | none, ZETA Guard does not query these endpoints           | —                                               |
+| "Telemetrie", SIM endpoint                                                | `telemetry`                                               | `authserver`, `opa`, `telemetry-gateway`        |
+| "Telemetrie", SIEM endpoints                                              | `siem`                                                    | `authserver`, `opa`, `telemetry-gateway`        |
+| "Policies" (`europe-west3-docker.pkg.dev`)                                | `artifactRegistry` or `pip`                               | `opa`, `opa-simulation`                         |
+| "Provisioning Container"                                                  | `artifactRegistry` (mirrored: `providerArtifactRegistry`) | `authserver`, `pep-proxy`                       |
+| "Google Services" (`sts.googleapis.com`, `iamcredentials.googleapis.com`) | `artifactRegistry` (Google edge ranges)                   | same as "Policies" and "Provisioning Container" |
+| "PoPP Service"                                                            | `popp`                                                    | `pep-proxy`                                     |
+| not listed                                                                | `ocspCabForum`                                            | `pep-proxy`                                     |
+
+The columns "OCSP Signer" and "OCSP AIA's" concern the certificates of the CAs
+and OCSP signers themselves. ZETA Guard takes their trust and revocation
+information offline from the TSL. The Google endpoints for Workload Identity
+Federation are within Google's published ranges. If you maintain
+`artifactRegistry` with those ranges as described under
+[Configure IP blocks](#configure-ip-blocks), they are covered.
+
+## Behaviour when an OCSP responder is unreachable (e.g. RU DEV)
+
+The OCSP responders of the SMC-B and component CAs mostly live in TI domains:
+`*.telematik-test` for RU DEV, RU REF and TU, `*.telematik` for PU. These
+names resolve only via TI DNS, and the responders are reachable only through a
+TI connection. If that connection or DNS resolution is missing, or the
+category's IP list is empty or incomplete, ZETA Guard behaves as follows:
+
+| Check                                | Behaviour                                                                                                                                                                                                                                                              | Log                                                   |
+|--------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------|
+| SMC-B certificate (`authserver`)     | With `ocspFailClosed: false` (default) the revocation status counts as undetermined and the token exchange continues. Only a "revoked" response denies it. With `ocspFailClosed: true` the token exchange is denied. The undetermined status is cached for one minute. | warning `OCSP request failed, response not available` |
+| ASL signer certificate (`pep-proxy`) | The ASL handshake continues, but M2 carries no OCSP response. `pep-proxy` retries after one minute. The ZETA client then queries the responder itself and needs access to it.                                                                                          | warning `refresh failed`                              |
+| TLS server certificate (`pep-proxy`) | nginx completes the TLS handshake without a stapled OCSP response.                                                                                                                                                                                                     | messages about `ssl_stapling` or the OCSP responder   |
+
+A blocked connection only surfaces after the connect timeout (for `authserver`
+`ocspConnectTimeoutMs`, 1 second by default), which can delay a token exchange
+accordingly. To deliberately skip OCSP in an environment without TI access,
+set `provisioningProcessor.tslOcspEnabled: false` (`authserver`) and
+`pepproxy.aslOcsp: "off"` (`pep-proxy`). This is not intended for PU
+(A_24624-01).
+
 ## Configure IP blocks
 
 Each category accepts a list of CIDR strings. Leave empty to deny external
@@ -125,17 +218,17 @@ zeta-guard:
 
 **Known IPs (gematik/D-Trust re-verified 2026-07):**
 
-| Category           | Hostname                                                 | IP                             |
-|--------------------|----------------------------------------------------------|--------------------------------|
-| `telemetry` (PU)   | `otlp.v1.bd.prod.ccs.gematik.solutions`                  | `34.117.144.61`                |
-| `artifactRegistry` | `europe-west3-docker.pkg.dev` + `storage.googleapis.com` | `goog.json` ranges — see note  |
-| `ocspCabForum`     | `ocsp.d-trust.net`                                       | `193.28.71.48`                 |
-| `ocspCabForum`     | `crl.d-trust.net`                                        | `62.96.224.138`                |
-| `ocspSmcbTsp`      | `ocsp.telematik.de`                                      | `104.247.81.99` (TI-internal)  |
-| `ocspTiPki`        | `ocsp.ti.telematik.de`                                   | `104.247.81.99` (TI-internal)  |
-| `telemetry` (RU)   | —                                                        | not yet resolved — ask gematik |
-| `siem`             | —                                                        | not yet known — ask gematik    |
-| `popp`             | —                                                        | stage-specific                 |
+| Category           | Hostname                                                         | IP                               |
+|--------------------|------------------------------------------------------------------|----------------------------------|
+| `telemetry`        | `otlp.v1.bd.prod.ccs.gematik.solutions` (all stages)             | `34.117.144.61`                  |
+| `artifactRegistry` | `europe-west3-docker.pkg.dev` + `storage.googleapis.com`         | `goog.json` ranges — see note    |
+| `ocspCabForum`     | `ocsp.d-trust.net`                                               | `193.28.71.48`                   |
+| `ocspCabForum`     | `crl.d-trust.net`                                                | `62.96.224.138`                  |
+| `ocspSmcbTsp`      | see gematik's URL list, e.g. `ocsp-smcb.tsi.tsp-smc-b.telematik` | TI-internal — resolve via TI DNS |
+| `ocspTiPki`        | see gematik's URL list, e.g. `ocsp2.komp-ca.telematik`           | TI-internal — resolve via TI DNS |
+| `siem` (non-PU)    | `otlp.siem.dev.ccs.gematik.solutions`                            | `dig +short <hostname>`          |
+| `siem` (PU)        | `otlp.siem.prod.ccs.gematik.solutions`                           | `dig +short <hostname>`          |
+| `popp`             | —                                                                | stage-specific                   |
 
 > **IP stability notes:**
 >
@@ -147,9 +240,12 @@ zeta-guard:
     to cover both hosts (2026-07): `74.125.0.0/16`, `142.250.0.0/15`,
     `192.178.0.0/15`, `172.217.0.0/16`, `216.58.192.0/19`, `209.85.128.0/17`.
     Re-check against `goog.json` before relying on them.
-> - `ocspSmcbTsp` and `ocspTiPki` share the same IP (`104.247.81.99`) as of this
-    writing, and resolve only inside the TI network. Verify against the actual
-    certificate's AIA extension before deploying to production.
+> - The `ocspSmcbTsp` and `ocspTiPki` responders live in TI domains
+    (`*.telematik`, `*.telematik-test`) and resolve only via TI DNS. The
+    hostnames per environment are on gematik's URL list (see
+    [Mapping to gematik's URL list](#mapping-to-gematiks-url-list)). Verify
+    against the actual certificate's AIA extension before deploying to
+    production.
 > - OCSP endpoints are embedded in each certificate's AIA extension and are
     authoritative. DNS-resolved IPs above are a starting point only — always
     cross-check with `openssl x509 -text`.
@@ -198,6 +294,13 @@ helm upgrade --install ... \
   --set "zeta-guard.networkPolicy.egress.providerInternal.resourceServers.ipBlocks[0]=<ip>/32"
 ```
 
+> **Note:** the ingress IP is only needed for the JWK fetch while the PEP
+> resolves the authserver over its public hostname. With
+> `pepproxy.nginxConf.pepInternalUrl` set, discovery and JWKS go to the
+> `authserver` Service instead — egress that `pep-proxy-egress` already allows —
+> so that entry can be dropped. See
+> [How to configure the authserver](How_to_configure_authserver.md).
+
 Use `providerInternal.podSelectors` to allow egress to cluster-local pods that
 the PEP proxy reaches via a Kubernetes service (ClusterIP). Because kindnet
 enforces NetworkPolicy after kube-proxy DNAT, the destination seen by the kernel
@@ -228,6 +331,11 @@ services covered by `resourceServers.ipBlocks`.
 | `authserver`        | `telemetry`, `siem`, `ocspSmcbTsp`, `artifactRegistry`, `providerArtifactRegistry`                                       |
 | `pep-proxy`         | `ocspCabForum`, `ocspSmcbTsp`, `ocspTiPki`, `popp`, `artifactRegistry`, `providerArtifactRegistry`, `providerInternal.*` |
 | `telemetry-gateway` | `telemetry`, `siem`                                                                                                      |
+
+The table shows which categories each pod's NetworkPolicy allows. `pep-proxy`
+needs `ocspTiPki` only with ASL enabled and `ocspCabForum` only when it
+terminates TLS itself. It currently does not use `ocspSmcbTsp` (see
+[Why the three OCSP categories exist](#why-the-three-ocsp-categories-exist)).
 
 > **Note:**
 >

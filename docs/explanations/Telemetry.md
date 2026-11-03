@@ -134,7 +134,11 @@ the chart already uses for OPA via `authserver.provider.smcB.opaBaseUrl`.
 The value changes **only the address** under which the telemetry-gateway is
 reached — never the destination. Telemetry must always go to the
 telemetry-gateway: the `redaction` processor and the `filter/ti_sim` /
-`filter/ti_siem` filters live in its pipelines and are not bypassable. To feed
+`filter/ti_siem` filters live in its pipelines and are not bypassable. For the
+same reason the producers offer no switch to stop or sample their export
+(gemSpec_ZETA A_27264, A_27492-01, A_26988; the security KPIs of A_25484-03
+are derived from the authserver logs). Sampling, where wanted, is a gateway
+concern (`tail_sampling/ti_sim`). To feed
 your own observability backend, add an exporter **inside** the gateway's
 `dienst_hersteller` pipelines instead of redirecting the producers. It takes
 precedence over `telemetry-gateway.fullnameOverride`. It is a hostname only; the
@@ -279,15 +283,20 @@ zeta-guard:
 
 ### OpenShift
 
-The telemetry-gateway is the only component in this chart that pins a UID and
-GID: it needs a known non-root identity that can write the file-storage volume,
-so `charts/zeta-guard/values.yaml` sets `securityContext.runAsUser: 1000` and
-`podSecurityContext.fsGroup: 1000`. OpenShift rejects both — its Security
-Context Constraints assign UID and GID from the range allocated to the
-namespace. Hand both over to the SCC:
+All containers of the zeta-guard chart run as UID 1000 by default
+(`defaultContainerSecurityContext.runAsUser`). The telemetry-gateway is a
+subchart and does not read that value, so it pins its own: it needs a known
+non-root identity that can write the file-storage volume, so
+`charts/zeta-guard/values.yaml` sets `securityContext.runAsUser: 1000` and
+`podSecurityContext.fsGroup: 1000` — the only GID in the chart. OpenShift
+rejects fixed IDs — its Security Context Constraints assign UID and GID from
+the range allocated to the namespace. Hand them over to the SCC, for the
+chart-wide default and the telemetry-gateway alike:
 
 ```yaml
 zeta-guard:
+  defaultContainerSecurityContext:
+    runAsUser: null      # SCC assigns the UID
   telemetry-gateway:
     podSecurityContext:
       fsGroup: null      # SCC assigns the GID
@@ -302,8 +311,21 @@ zeta-guard:
 > does not delete the key either (only `--set key=null` does that); it leaves
 > the key with a nil value, the manifest renders `runAsUser: null`, and
 > Kubernetes decodes that as "not set" — which is what lets the SCC assign the
-> UID. This is specific to the telemetry-gateway; for the other components the
-> chart never sets `runAsUser`, so there is nothing to clear.
+> UID.
+
+With `kpiMetricsPersistence.enabled`, the `kpiPrometheus` subchart brings the
+same problem: its own defaults pin `runAsUser`, `runAsGroup` and `fsGroup` to
+`65534` on the pod. Clear them the same way:
+
+```yaml
+zeta-guard:
+  kpiPrometheus:
+    server:
+      securityContext:   # pod level, in this subchart's naming
+        runAsUser: null
+        runAsGroup: null
+        fsGroup: null
+```
 
 `fsGroup: null` is safe on OpenShift because the SCC supplies an `fsGroup` of
 its own, so the file-storage volume is still group-writable by the assigned
@@ -328,10 +350,10 @@ TI-SIEM take its place. See
 
 In this test stack the fan-out collector tags each pipeline's copy of a span
 with
-a `gematik.zeta.kind` attribute (`dienst_hersteller`, `monitoring`, `siem`) so
-the
-three copies can be told apart in Jaeger and the other observability UIs (e.g.
-Grafana). Only the `monitoring`/`siem` copies have the semantic-conventions
+a `gematik.zeta.kind` attribute (`dienst_hersteller`, `sim`, `siem`,
+`spanmetrics`) so
+the copies can be told apart in Jaeger and the other observability UIs (e.g.
+Grafana). Only the `sim`/`siem` copies have the semantic-conventions
 migration applied; the `dienst_hersteller` copy shows the raw, pre-migration
 attribute names. This tag is a testing aid and is not part of the production
 export.

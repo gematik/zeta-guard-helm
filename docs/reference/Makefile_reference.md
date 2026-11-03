@@ -61,6 +61,13 @@ settings, or run
 - `make deploy stage=STAGE [namespace=NAMESPACE] [DB_MODE=cloudnative]` – install/upgrade the release with `--rollback-on-failure --timeout 10m`
   - Stage defaults to `local` when omitted.
   - Release name is always `zeta-testenv-<STAGE>` (not overridable).
+  - Two-release stages (a `<STAGE>.guard.mk` next to the values file defines `GUARD_CHART` and `GUARD_CHART_VERSION`): the umbrella
+    release carries only the test environment (`tags.zeta-guard: false`); the guard is deployed separately with
+    `make deploy-guard stage=STAGE` as release `zeta-guard` from the published chart, using `values-guard.<STAGE>.yaml`
+    (unprefixed guard values). Run `deploy` first (it owns the Secrets the guard consumes). Related: `template-guard`,
+    `dry-run-guard`, `status-guard`; `uninstall` removes both releases. On these stages the `config*` targets do not use
+    the checkout's `terraform/authserver`: `guard-tf` exports it from git ref `GUARD_TF_REF` (default: the chart version
+    tag; override in `<STAGE>.guard.mk`) into `.guard-tf/`, so the realm config matches the deployed guard release.
   - Namespace defaults to `zeta-<STAGE>` and can be overridden via `namespace=<ns>`.
   - `DB_MODE=cloudnative` installs the CloudNativePG operator for local environments if desired.
 - `make deploy-debug stage=STAGE [namespace=NAMESPACE] [DB_MODE=cloudnative]` – same as deploy with `--debug`
@@ -72,10 +79,8 @@ settings, or run
 - `make reset-cnpg-operator` – uninstall the operator from `cnpg-system` and
   delete CNPG CRDs (destructive)
 - `make generate-main-and-backend` – generates `main.tf`, `providers.tf`,
-  `mode-assert.tf`, backend config and (Kubernetes mode only)
-  `sekidp-secret.tf` from templates based on `TF_VAR_use_kubernetes`; the
-  Kubernetes provider is only required when `TF_VAR_use_kubernetes=true`, since
-  `sekidp-secret.tf` is then the only file with `kubernetes_*` blocks
+  `mode-assert.tf` and backend config from templates based on
+  `TF_VAR_use_kubernetes`
 - `make config-init stage=STAGE [namespace=NAMESPACE]` – runs `generate-main-and-backend` and initializes the Terraform backend
 - `make config-plan stage=STAGE [namespace=NAMESPACE] [PLAN_OUT=<file>]` – view
   incoming changes to the authserver by make config
@@ -100,7 +105,8 @@ settings, or run
   cluster and its PVCs, i.e. the realm's users. Never run it on a productive
   stage — a chart upgrade needs `helm upgrade` + `make config`, see
   [How to upgrade ZETA Guard](../how-to_guides/How_to_upgrade_ZETA_Guard.md).
-- `make kind-up [HOST_IP=<ip>] [KIND_INGRESS_HOSTS="<host1> <host2>"]` – create local kind cluster and patch CoreDNS so in-cluster clients resolve ingress hostnames to your host IP (hosts are auto-detected from local values by default)
+- `make kind-up [KIND_INGRESS_HOSTS="<host1> <host2>"]` – create local kind cluster and patch CoreDNS so in-cluster clients resolve ingress hostnames to the NIC Service (hosts are auto-detected from local values by default)
+- `make kind-dns [KIND_INGRESS_HOSTS="<host1> <host2>"]` – re-render the CoreDNS rewrite rules on a running kind cluster (e.g. after changing ingress hostnames) and restart CoreDNS
 - `make kind-down` – delete the local kind cluster
 
 ## Environment variables
@@ -134,7 +140,7 @@ All of these can be set as an environment variable or as a `make` argument (
 |----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
 | `TF_VAR_keycloak_password` | Keycloak admin password for `config` / `config-plan` / `config-import`. May be empty: the targets source `terraform/authserver/scripts/kc-admin-env.sh`, which fills it from the `authserver-admin` Secret.                                                   | *(empty)*        |
 | `TF_VAR_keycloak_username` | Keycloak admin username. Same handling as the password — and it must be set for the exported password to take precedence over the Secret.                                                                                                                     | *(empty)*        |
-| `TF_VAR_use_kubernetes`    | Terraform operating mode. `false` = local backend without Kubernetes (the generated files then contain no `kubernetes_*` block, so `terraform init` skips that provider). See [How to configure authserver](../how-to_guides/How_to_configure_authserver.md). | `true`           |
+| `TF_VAR_use_kubernetes`    | Terraform operating mode. `false` = local backend without Kubernetes. See [How to configure authserver](../how-to_guides/How_to_configure_authserver.md).                                                                                                     | `true`           |
 | `TF_VAR_config_path`       | Path to the kubeconfig used by the Kubernetes backend                                                                                                                                                                                                         | `~/.kube/config` |
 | `PLAN_OUT`                 | Plan file written by `config-plan` and rendered by `config-show-plan`                                                                                                                                                                                         | *(none)*         |
 
@@ -150,7 +156,7 @@ All of these can be set as an environment variable or as a `make` argument (
 
 | Variable             | Purpose                                                                                                           | Default           |
 |----------------------|-------------------------------------------------------------------------------------------------------------------|-------------------|
-| `HOST_IP`            | LAN IP used to patch CoreDNS / NetworkPolicy                                                                      | auto-detected     |
+| `KIND_NIC_SERVICE`   | NIC Service name the CoreDNS rewrite points to; must match `zeta-guard.nginx-ingress.serviceNameOverride`         | `nginx-ingress-controller` |
 | `KIND_CONFIG`        | KIND cluster config file                                                                                          | `kind-local.yaml` |
 | `KIND_INGRESS_HOSTS` | Ingress hostnames for the CoreDNS patch; auto-derived from the local values file, falls back to `zeta-kind.local` | auto-derived      |
 

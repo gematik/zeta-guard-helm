@@ -1,8 +1,8 @@
 global:
   imagePullSecrets: []
-  # Registry prefix (full prefix, trailing slash). Overridden by umbrella chart
-  # globals when used as a subchart.
-  registry_host: ""
+  # Registry prefix (full prefix, trailing slash). Stage values override it
+  # when used as a subchart.
+  registry_host: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/"
 
 registry_name: ""
 
@@ -30,6 +30,10 @@ imagePullSecrets: []
 service:
   apiPort: 8080
   managementPort: 8081
+
+# Optional Kubernetes startup probe. Local environments can enable this when
+# application startup is slower than the liveness-probe budget.
+startupProbe: {}
 
 # Image bundles the OTel Java agent, so standard OTEL_* env vars suffice —
 # no per-signal application config needed.
@@ -105,6 +109,14 @@ pushConfig: |
   push:
     apns: []
     firebase: []
+  
+firebaseCredentials:
+  mount: false
+  serviceAccountJson: ""
+
+apnsCredentials:
+  mount: false
+  authKeyP8: ""
 
 postgres:
   image:

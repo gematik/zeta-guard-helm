@@ -13,6 +13,9 @@ image:
 imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 
+# Retain only the newest messages to keep the test mail store bounded.
+messagesLimit: 1000
+
 # Service ports only — the container listens on fixed ports 1025 (SMTP)
 # and 1080 (web UI).
 service:
@@ -23,6 +26,29 @@ service:
 # relative to this, so it must match the reverse-proxy route's `from`
 # (e.g. tiger-proxy's /mailcatcher) or assets 404. Leave empty ("") for direct access.
 httpPath: ""
+
+# Expose the web UI/API (port 1080) directly through the cluster Ingress as a
+# NIC "mergeable minion" sharing zeta-guard's ingress-master host/TLS — for
+# stages without tiger-proxy. Requires httpPath (the Ingress routes that prefix
+# unchanged). Keep false when a tiger-proxy proxyRoutes entry serves /mailcatcher,
+# both would claim the same path. Mind the no-authentication warning in
+# docs/how-to_guides/How_to_configure_mailcatcher.md.
+ingressEnabled: false
+
+# Must match zeta-guard.authserver.hostname for this minion to merge onto the
+# shared NIC master. Leave empty for host-less local-cluster setups.
+hostname: ""
+
+ingressClassName: "nginx"
+
+# Use NIC ("nginx.org/...") mergeable-ingress annotations. Set false (with
+# openshiftIngress.enabled: true) for OpenShift Routes instead.
+nginxIngressEnabled: true
+
+# Use OpenShift's Route-backed ingress controller with TLS instead of NIC.
+openshiftIngress:
+  enabled: false
+  certName: ""
 
 # When enabled, injects a changing annotation to force pod rollouts
 # on each helm upgrade/apply even if image tag is unchanged.

@@ -19,7 +19,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: opentelemetry-collector
+              {{- include "telemetryGateway.selectorLabels" . | nindent 14 }}
       ports:
         - port: 4317
           protocol: TCP

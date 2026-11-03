@@ -1,5 +1,13 @@
 # How to upgrade ZETA Guard
 
+> This is documentation for chart developers. Published documentation for chart
+> users is [here](https://github.com/gematik/zeta-guard-helm). Chart developers
+> should maintain separate documentation for both user groups.
+
+> This documentation relies on a `Makefile`, which is not a part of the
+> published chart, and is intended for chart development only. Chart users
+> should use `helm` and `terraform` directly.
+
 An upgrade of an existing installation is `helm upgrade` for the chart followed
 by `terraform apply` for the realm configuration. **A full reinstallation is
 never
@@ -61,9 +69,8 @@ commands, all executed **from inside `terraform/authserver`**:
 | `make config-plan`   | `terraform plan -var-file=../../<values-dir>/<stage>.tfvars -var="skip_external_resources=true"`                                        |
 | `make config-import` | `terraform import -var-file=../../<values-dir>/<stage>.tfvars -var="skip_external_resources=true" keycloak_realm.zeta_realm zeta-guard` |
 
-`main.tf`, `providers.tf`, `credentials.tf` and the backend config are
-**generated** and gitignored — Terraform will not run without them. Generate
-them
+`main.tf`, `providers.tf`, `mode-assert.tf`, the backend config are
+**generated** and gitignored; Terraform will not run without them. Generate them
 first, then initialize:
 
 ```shell
@@ -141,7 +148,7 @@ With `use_kubernetes = false` the state is the file
 the machine that ran the apply — back it up yourself. Note that `make clean`
 deletes it, along with `.terraform/`, the lock file and the generated
 `main.tf` /
-`providers.tf` / `credentials.tf`; do not run it, or its equivalent `rm`,
+`providers.tf` / `mode-assert.tf`; do not run it, or its equivalent `rm`,
 between
 applies. Whoever runs the upgrade must have the same state file as whoever ran
 the
@@ -182,7 +189,10 @@ user data.
 - an admin token for the `curl` calls below. In Kubernetes mode Terraform reads
   the credentials from the `authserver-admin` Secret itself; for `curl` read
   them
-  the same way. `KC_URL` is your `keycloak_url` including `/auth`:
+  the same way. `KC_URL` is your `keycloak_url` including `/auth`. With
+  `authserver.adminHostname` set this must be the **admin** hostname — the
+  public
+  one answers `403` for `/auth/realms/master` and `/auth/admin`:
 
   ```shell
   NS=<namespace>
@@ -298,10 +308,15 @@ TF="terraform import -var-file=../../<values-dir>/<stage>.tfvars -var=skip_exter
 | `keycloak_openid_client_scope.zero_audience`                                              | `zeta-guard/<scopeId>`                         |
 | `keycloak_openid_client_scope.zeta_email_binding`                                         | `zeta-guard/<scopeId>`                         |
 | `keycloak_openid_client_scope.zeta_email_verify`                                          | `zeta-guard/<scopeId>`                         |
+| `keycloak_openid_client_scope.zeta_client_management`                                     | `zeta-guard/<scopeId>`                         |
 | `keycloak_openid_client_scope.notification_scopes["<name>"]`                              | `zeta-guard/<scopeId>`                         |
 | `keycloak_openid_client_scope.pdp_scopes["<name>"]`                                       | `zeta-guard/<scopeId>`                         |
 | `keycloak_openid_audience_protocol_mapper.pdp_audience_mapper`                            | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
 | `keycloak_generic_protocol_mapper.zeta_guard_mapper`                                      | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
+| `keycloak_openid_audience_protocol_mapper.zeta_client_management_audience_mapper`         | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
+| `keycloak_generic_protocol_mapper.zeta_guard_mapper_client_management`                    | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
+| `keycloak_openid_audience_protocol_mapper.zeta_email_verify_audience_mapper`              | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
+| `keycloak_generic_protocol_mapper.zeta_guard_mapper_email_verify`                         | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
 | `keycloak_openid_audience_protocol_mapper.notification_service_audience_mapper["<name>"]` | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
 | `keycloak_generic_protocol_mapper.zeta_guard_mapper_notification["<name>"]`               | `zeta-guard/client-scope/<scopeId>/<mapperId>` |
 | `keycloak_realm_optional_client_scopes.pdp_optional_scopes`                               | `zeta-guard`                                   |
@@ -324,9 +339,6 @@ Stages with extra features have more addresses. Import them the same way:
   see the note at `terraform/authserver/sekidp.tf`),
   `keycloak_oidc_identity_provider.zeta_sekidp_oidc[0]` and the mobile
   authentication flows and executions
-- `use_fake_sekidp_testrealm = true` — the resources in
-  `terraform/authserver/fakeSekIdp.tf`. This is a test-only realm; recreating it
-  from scratch is usually simpler than importing it.
 
 The `terraform_data.*` resources (`remove_rsa_keys`, `vau_db_enc`,
 `hsm_token_signing`, …) are local-only triggers with no Keycloak counterpart.

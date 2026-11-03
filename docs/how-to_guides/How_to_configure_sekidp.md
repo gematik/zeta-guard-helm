@@ -28,16 +28,18 @@ Both are stateless Spring Boot services with no database or broker dependency; e
 
 Both `gsi-server` and `gsi-fedmaster` are reachable from outside the cluster: this chart declares its own
 Ingress (`sekidp.ingressEnabled`), a NIC "mergeable minion" sharing the host/TLS of zeta-guard's own Ingress
-master — the same pattern `charts/testdriver` uses — exposing `gsi-server` at `/sekidp` and `gsi-fedmaster` at
-`/sekidp-fedmaster`. `gsi-fedmaster` needs to be externally reachable because authserver's `zeta-sekidp-oidc`
-identity-provider broker (`terraform/authserver/sekidp.tf`) resolves federation trust against it directly (see
-"Reaching gsi-server and Fedmaster from Keycloak" below) — it's not purely an internal implementation detail of
-`gsi-server`.
+master — the same pattern `charts/testdriver-smcb` / `charts/testdriver-oidc` uses — exposing `gsi-server` 
+at `/sekidp` and `gsi-fedmaster` at `/sekidp-fedmaster`. `gsi-fedmaster` needs to be externally reachable because
+authserver's `zeta-sekidp-oidc` identity-provider broker (`terraform/authserver/sekidp.tf`) resolves federation 
+trust against it directly (see "Reaching gsi-server and Fedmaster from Keycloak" below) — it's not purely an 
+internal implementation detail of `gsi-server`.
 
 Routing through this Ingress is independent of Tiger Proxy: `sekidp.routeViaTigerProxy` (default `false`)
 optionally hops both paths through `tiger-proxy` instead of directly to `sekidp-gsi-server`/`sekidp-fedmaster` —
 useful in stages that already run Tiger Proxy for request capture/tracing (`local` and `dev-novau` both set
-this `true` today), but not required. See "Enabling the chart and its Ingress" below.
+this `true` today), but not required. Both components serve at `/`, so the `/sekidp` and `/sekidp-fedmaster`
+prefixes are stripped before the request reaches them: by Tiger Proxy's route when hopping through it, otherwise
+by the Ingress itself (`nginx.org/rewrite-target`). See "Enabling the chart and its Ingress" below.
 
 ## Providing images
 
@@ -112,17 +114,50 @@ you route traffic to it (this chart's own Ingress, with or without the optional 
 ### Reaching gsi-server and Fedmaster from Keycloak (authserver)
 
 The `zeta-sekidp-oidc` identity-provider broker (`terraform/authserver/sekidp.tf`) resolves gsi-server
-dynamically via OIDC-Federation instead of a static `authorization_url`/`token_url`: it resolves federation
-trust against Fedmaster at `var.sekidp_fedmaster_url` (Terraform), then fetches gsi-server's own entity
+dynamically via OIDC-Federation instead of a static `authorization_url`/`token_url`: the authserver reads the
+Fedmaster URL from `/var/trust-data/federation-master.json` (provisioned by the provisioning-processor init
+container, see `provisioningProcessor.federationMaster` in `values.yaml`), then fetches gsi-server's own entity
 statement directly from `GSI_SERVER_URL` (`sekidp.gsiServer.env.serverUrl`). Both lookups are made by the
 `authserver` pod itself — `GSI_SERVER_URL` is *also* fetched by the browser (front-channel authorization
-redirect), but `sekidp_fedmaster_url`/`FEDMASTER_SERVER_URL` only ever needs to be reachable from the
-authserver pod. Either way, both must be the externally-resolvable Ingress URL (see above), not an in-cluster
-Service address — and `sekidp_fedmaster_url` must match `sekidp.fedmaster.env.serverUrl` exactly, since that's
-the issuer Fedmaster's own entity statement publishes (self-consistency check).
+redirect), but the Fedmaster URL only ever needs to be reachable from the authserver pod. Either way, both must
+be the externally-resolvable Ingress URL (see above), not an in-cluster Service address — and the Fedmaster URL
+must match `sekidp.fedmaster.env.serverUrl` exactly, since that's the issuer Fedmaster's own entity statement
+publishes (self-consistency check).
+
+Both URLs are HTTPS, so Keycloak has to trust their certificate. Behind a
+publicly trusted certificate nothing
+is needed; with the self-signed local CA (`issuers.local`) and no Tiger Proxy
+hop in between, add it to
+Keycloak's outbound truststore — otherwise the authorization request fails with
+`PKIX path building failed`:
+
+```yaml
+zeta-guard:
+  authserver:
+    additionalTrustedCAs:
+      - secretName: zeta-guard-tls
+        secretKey: ca.crt
+```
+
+### The IdP's `client_id` (`sekidp_client_id`)
+
+The `zeta-sekidp-oidc` IdP sends this realm's issuer URL as `client_id`, and
+gsi-server fetches the realm's
+entity statement from `<client_id>/.well-known/openid-federation`. By default
+Terraform derives it from
+`keycloak_url` (`<keycloak_url>/realms/zeta-guard`). That is only right as long
+as Terraform reaches Keycloak
+under its public hostname. Where `keycloak_url` points at the admin hostname
+(`authserver.adminHostname`), the
+sectoral IDP cannot reach it — set the public issuer explicitly:
+
+```hcl
+keycloak_url     = "https://admin.<host>/auth"                   # Terraform's way in
+sekidp_client_id = "https://<host>/auth/realms/zeta-guard"       # what gsi-server sees
+```
 
 This has a NetworkPolicy consequence worth flagging: with `zeta-guard.networkPolicy.enabled: true`, `authserver`'s
-egress to an Ingress-hostname URL resolves to the cluster node/`HOST_IP`, not directly to the `tiger-proxy` pod —
+egress to an Ingress-hostname URL goes to the NIC pods (on KIND via the CoreDNS rewrite to the NIC Service), not directly to the `tiger-proxy` pod —
 different from the `tiger-proxy` podSelector egress rule used for purely backend-only calls (e.g.
 `authserver.provider.smcB.opaBaseUrl`). This now applies to *both* the gsi-server and Fedmaster lookups.
 `local`/`dev`/`staging` run with NetworkPolicies disabled, so this doesn't bite yet; revisit before exercising
@@ -160,7 +195,11 @@ render with a descriptive error. To trust sekidp's **server** certificate, use
 ## Further configuration
 
 Resources, security contexts, the PodDisruptionBudget and `devMode` are configured via the chart values — see
-`charts/sekidp/values.yaml`. `service.apiPort`/`service.managementPort` on each component configure the Service
+`charts/sekidp/values.yaml`. Both components gate readiness with a `startupProbe` on the actuator readiness
+endpoint (`sekidp.<component>.probes.startup`, default 3 s period × 40 = 120 s boot budget), so a pod turns
+ready as soon as the app answers; readiness and liveness then run without an initial delay. `gsi-server`'s
+init container waits for the `sekidp-fedmaster` Service, i.e. for Fedmaster to be ready, so the two start
+times add up. `service.apiPort`/`service.managementPort` on each component configure the Service
 ports only; the containers listen on fixed ports `8085`/`8185` (gsi-server) and `8083`/`8183` (gsi-fedmaster).
 
 `gsi-server`'s container image declares a `/app/certs_trusted` volume for custom trust anchors; mount your own
@@ -210,75 +249,92 @@ An init container builds a PKCS12 truststore from the referenced/inline certific
 via `-Djavax.net.ssl.trustStore`. This is chart-managed and picks up certificate rotation (or values changes) on
 every pod restart — no manual `kubectl` steps required.
 
-`gsi-fedmaster` makes the same kind of outbound HTTPS call when resolving a federation member's entity statement
-(e.g. a relying party's issuer in `fedmaster.relyingPartyConfigs`, see below), so it has the identical
-`sekidp.fedmaster.additionalTrustedCAs` setting (same two entry forms).
+`gsi-fedmaster` makes the same kind of outbound HTTPS call when resolving a federation member's entity statement,
+so it has the identical `sekidp.fedmaster.additionalTrustedCAs` setting (same two entry forms).
 
 ### Relying parties known to this deployment
 
-`gsi-fedmaster` ships a hardcoded demo relying party (GRAS) baked into its bundled reference config — this
-chart replaces it entirely with `sekidp.fedmaster.relyingPartyConfigs`, a values-driven list rendered into a
-complete `fedmaster.relying-party-configs` config block (the app's own schema — see gsi-fedmaster's
-`application.yml`) via a chart-managed ConfigMap:
+`gsi-server` (>= 8.5.1) validates authserver's PAR (`redirect_uri`, `scope`) against a statically mounted entity
+statement instead of resolving authserver through `gsi-fedmaster`'s federation-fetch flow
+(`GSI_FEDMASTER_MODE=local`, `GSI_FEDMASTER_LOCAL_ENTITY_STATEMENT_FILE`).
+
+Set the statement as a signed JWT (`alg: HS256`; the signature itself isn't verified in local mode — the JWT
+shape is what `gsi-server`'s parser expects):
 
 ```yaml
 sekidp:
-  fedmaster:
-    relyingPartyConfigs:
-      - issuer: https://<authserver-issuer-url>
-        organizationName: authserver
-        keyConfig:
-          fileName: pubkey.pem
-          keyId: "${RP01_KEY_ID:}"
-          use: sig
-          x5cInJwks: false
+  gsiServer:
+    entityStatementAboutRp: "<base64url header>.<base64url payload>.<base64url signature>"
 ```
 
-`issuer` must exactly match the `client_id` the `zeta-sekidp-oidc` Keycloak identity provider presents
-(`terraform/authserver/sekidp.tf`), or entity-statement validation fails. `keyConfig.fileName` is resolved as a
-**classpath resource**, not a filesystem path — see below for how a real, dynamically-generated key gets onto
-the classpath at all.
+Payload shape:
 
-### Trusting authserver's entity-statement signing key (RP-01)
+```json
+{
+  "sub": "<authserver-issuer-url>",
+  "iss": "<this fedmaster's own published issuer, sekidp.fedmaster.env.serverUrl>",
+  "iat": 1730000000,
+  "exp": 4102444799,
+  "metadata": {
+    "openid_relying_party": {
+      "redirect_uris": ["<redirect-uri>", "..."],
+      "scope": "urn:telematik:display_name urn:telematik:versicherter urn:telematik:geburtsdatum openid",
+      "jwks": { "keys": [] }
+    }
+  }
+}
+```
 
-For a relying-party entry to actually verify, `gsi-fedmaster` needs the real public key authserver signs its
-entity statement with, not just trust its TLS certificate (above). That key doesn't exist until Keycloak
-generates it, which only happens when `terraform/authserver/sekidp.tf`'s `entity_statement_sig` KeyProvider
-component is created (i.e. during `make config`, after `make deploy` has already started both `authserver` and
-`sekidp-fedmaster`).
+`sub` is the IdP's `client_id` (see `sekidp_client_id` above). `scope` must
+contain every scope the IdP requests (`default_scopes` in
+`terraform/authserver/sekidp.tf`) — gsi-server rejects a PAR asking for more
+with
+`invalid_scope` ("exceeds scopes found in entity statement"). Re-issue the
+statement whenever that list changes.
+gsi-server additionally accepts only the scopes it supports itself; the
+birthdate is requested as
+`urn:telematik:geburtsdatum` and arrives as the ID-token claim `birthdate`.
 
-`gsi-fedmaster`'s key loading (`ResourceReader.getFileFromResourceAsTmpFile`) is strictly classpath-only — it
-never reads an arbitrary filesystem path, so a mounted Kubernetes Secret can't be referenced by
-`keyConfig.fileName` unless the mount point is genuinely on the JVM's runtime classpath. The `gem-sekidp` image
-build addresses this at the Dockerfile level (no Java code change): `gsi-fedmaster`'s jar is exploded at build
-time and launched via `java -cp ".../BOOT-INF/classes:.../BOOT-INF/lib/*:/public-keys" ...` instead of
-`java -jar ...`, so `/public-keys` is a real, always-present classpath entry (harmless when nothing is mounted
-there — the JVM silently ignores a nonexistent classpath entry). **Requires a `gsi-fedmaster` image built from
-a `gem-sekidp` revision with this Dockerfile change.**
+### Connecting to a real Fedmaster
 
-To close the ordering gap for the key's actual value, `make config` (with `enable_sekidp = true`) also:
-
-1. reads the newly-created key's public half and `kid` back out of Keycloak's Admin REST API
-   (`terraform/authserver/scripts/fetch-entity-statement-pubkey.sh`, run as a `data "external"` source)
-2. writes them into a `sekidp-rp01-pubkey` Secret (`kubernetes_secret_v1.sekidp_rp01_pubkey`), containing
-   `pubkey.pem` (the key itself) and `keyid` (a plain string)
-3. runs `kubectl rollout restart deployment/sekidp-fedmaster` — only when the `kid` actually changed — so the
-   new key takes effect. Kubernetes deliberately doesn't restart pods automatically when a mounted
-   Secret/ConfigMap changes, so an explicit rollout is the standard way to pick this up.
-
-On the chart side, this only needs one value:
+For a real gematik Fedmaster (RU/TU) instead of the bundled test chart, keep `charts/sekidp` disabled
+(`sekidp.enabled: false`), configure the Fedmaster URL via the provisioning-processor and register this
+authserver there as a relying party.
 
 ```yaml
-sekidp:
-  fedmaster:
-    relyingPartyKeySecretName: sekidp-rp01-pubkey
+zeta-guard:
+  provisioningProcessor:
+    federationMaster:
+      enabled: true
+      environment: "production"   # or "test" — selects the URL from the provisioning container
 ```
 
-which mounts that Secret at `/public-keys` and sets the `RP01_KEY_ID` env var (via `secretKeyRef`, `optional:
-true`) from its `keyid` key — matched by the `relyingPartyConfigs` entry's `keyId: "${RP01_KEY_ID:}"` above.
-Both the volume and the env var are optional, so the pod starts fine (falling back to whatever
-`keyConfig.fileName` resolves to, or failing that entry only, if the reference isn't present yet) even before
-`make config` has run for the first time.
+```hcl
+enable_sekidp      = true
+# sekidp_client_id = "https://<host>/auth/realms/zeta-guard"   # only if keycloak_url is the admin hostname
+```
 
-To re-trigger just this sync step without a full `make config` run:
-`terraform -chdir=terraform/authserver apply -target='terraform_data.sekidp_fedmaster_rollout[0]'`.
+What this deployment provides as a relying party, once the Terraform configuration has been applied with
+`enable_sekidp = true`:
+
+| Property             | Value                                                                                                       |
+|----------------------|-------------------------------------------------------------------------------------------------------------|
+| Issuer / `client_id` | `sekidp_client_id`, else `<keycloak_url>/realms/zeta-guard` (the `client_id` of the `zeta-sekidp-oidc` IdP) |
+| Entity statement     | `<client_id>/.well-known/openid-federation`                                                                 |
+| Signing key          | `ecdsa-generated` KeyProvider (ES256, P-256), created by the same run                                       |
+| Encryption key       | `ecdh-generated` KeyProvider (ECDH-ES), created by the same run                                             |
+| Scopes requested     | `urn:telematik:display_name urn:telematik:versicherter urn:telematik:geburtsdatum openid`                   |
+| `acr_values`         | `gematik-ehealth-loa-high`                                                                                  |
+| PKCE                 | enabled, `S256`                                                                                             |
+
+The signing key is generated by Keycloak, so recreating the realm (or replacing the `ecdsa-generated` component)
+yields a new key. The entity statement endpoint picks it up automatically.
+
+The issuer URL must be reachable *by the Fedmaster*, since it resolves the RP's entity statement from it over
+HTTPS with a publicly trusted certificate — the same requirement described in "Trusting the RP's (authserver's)
+TLS certificate" above, which a self-signed local certificate does not meet.
+
+The registration itself is a gematik process outside this repository; see
+[Registrierung eines Fachdienstes in der TI-Föderation](https://wiki.gematik.de/spaces/IDPKB/pages/544316583/Registrierung+eines+Fachdienstes+in+der+TI-F%C3%B6deration+f%C3%BCr+die+Referenzumgebung+RU+Testumgebung+TU).
+ZETA Guard does not change how it is carried out — it only determines which key and issuer you submit, and those
+are the values in the table above.

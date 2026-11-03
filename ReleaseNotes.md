@@ -2,17 +2,336 @@
 
 # Release Notes ZETA Guard Helm Charts
 
-## Release 1.3.4
+## Release 2.0.2
+
+### added:
+
+- `authserver.config.entityStatement.redirectUris` (optional) sets the
+  `redirect_uris` of the authserver's entity
+  statement statically (env `ENTITY_STATEMENT_REDIRECT_URIS`, A_25656). Empty,
+  they are still derived from the realm's
+  SekIDP clients
+- the authserver's entity statement carries `metadata.federation_entity`
+  (gemSpec_IDP_Sek, Tab. 28) with `name` and
+  `organization_name` from `authserver.config.entityStatement.clientName` and
+  `.organizationName`
+- `notificationService.sealing.*` for the keychain of the notification-service:
+  `keychainFileName` (default `/keychain/keychain.json`), `rotationInterval`, the init container
+  hooks `initContainerProvideKeys` and `initContainerStoreKeys`, and the `keychainGenerator` init
+  container (`enabled`, `kekId` required while it runs, `extraVolumeMounts`, image
+  `notification-keychain-generator`). Plus `notificationService.extraVolumes` and
+  `notificationService.extraVolumeMounts`, which carry the keychain, e.g. from a Secret. See "HSM-backed sealing" in
+  [How to configure the notification service](docs/how-to_guides/How_to_configure_notification_service.md).
 
 ### changed:
 
-- bumped authserver version to `1.3.3` to include important security hotfix.
+- **Breaking:** `notificationService.hsm.kek.dekKeyId`, `notificationService.hsm.kek.pseudonymKeyId` and
+  `notificationService.sealing.dekCacheSize` are removed; the chart fails the render when they are
+  still set. With sealing on, the chart needs a notification-service build with the keychain, and
+  records sealed by an earlier build no longer open: start from an empty database.
+- `opa-rollout-restart-cronjob`: memory limit 256Mi (was 64Mi, too small for
+  kubectl), `concurrencyPolicy: Forbid`, 5-minute `activeDeadlineSeconds`,
+  kubectl `--request-timeout`
+- token-renewer CronJobs (`opa-`, `ti-siem-`, `ti-sim-`): `concurrencyPolicy:
+  Forbid` and `activeDeadlineSeconds`, so stuck runs no longer pile up
+
+### fixed:
+
+## Release 2.0.1
+
+### added:
+
+- `notificationService.rs.mtls.enabled` (default `true`) switches the RS
+  client-certificate check; `/notification-service-rs` is blocked on the public ingress.
+
+### changed:
+
+- updates testdriver-smcb, testdriver-oidc, nativedriver and androiddriver to 2.0.1
+
+### fixed:
+
+- mailcatcher keeps only the newest 1000 messages (`messagesLimit`)
+
+## Release 2.0.0
+
+### added:
+
+- authserver adds `zeta-guard-admin-events` and `zeta-guard-notifications` (new)
+  listeners. They report client management-related events to the log and notify
+  users, respectively
+- Client management of mobile users (`/zeta/clients`, `/zeta/identity/email`) is served through the
+  PEP (scope `zeta:client-management`, DPoP, no PoPP) when `authserver.config.oidcFlowEnabled` is set;
+  tiger-proxy route included. The corresponding authserver paths under `/auth/realms/zeta-guard/zeta/`
+  are closed (Ingress / tiger-proxy → PEP → `404`). The registration's `bind-email/*` endpoints are served
+  through the PEP too (reduced binding token with scope `zeta:email-verify`), on their unchanged path.
+- New terraform vars to configure TLS, STARTTLS and auth for SMTP server.
+  Resolves ANFTI2-1040.
+- `notificationService.historyRetention` (default unset -> the service's
+  `P30D`, `NOTIFICATION_HISTORY_RETENTION`): after the first recorded
+  notification, a device's complete message history is erased once this
+  duration has passed; the next notification restarts it. Needs a
+  notification-service build with the history retention; older builds ignore
+  it.
+- Set up telemetry export from notification-service to telemetry-gateway.
+  (A_27492-02)
+- Disabled access log of notification-service to prevent logging of KVNRs and
+  Telematik-IDs. (A_29990)
+- ability to retain {authorization,dpop,popp} headers during forwarding via
+  `pepproxy.nginxConf.proxyLocations.*.retain.{authorization,dpop,popp}` (boolean), e.g.:
+
+  ```yaml
+  - path: /
+    upstream: http://fachdienst:8080
+    upstreamPath: /
+    retain:
+      authorization: true
+  ```
+- `authserver.dbEnc.automaticCryptoUpdatesEnabled` (default `false`): 
+  if enabled, automatically starts a key rotation of the VAU DB if 
+  chnages to the keychain configuration are detected. Requires 
+  `integrityChecksEnabled`.
+- `authserver.dbEnc.{futureKeychainFileName, previousKeychainFileName}`: 
+  specify the future keychain to use and the previously used keychain during a 
+  VAU DB key rotation.
+- Terraform variable `sekidp_client_id` (default empty): the `client_id` of the
+  `zeta-sekidp-oidc` IdP, i.e. the realm's public issuer. It used to be derived
+  from `keycloak_url` only, which is the admin hostname wherever Terraform goes
+  through it — gsi-server then could not fetch the realm's entity statement.
+  Set it in that case; empty keeps the previous derivation.
+  See [How to configure the SEK-IDP / Fedmaster test chart](docs/how-to_guides/How_to_configure_sekidp.md#the-idps-client_id-sekidp_client_id).
+- `mailcatcher.ingressEnabled` (default `false`): optional direct Ingress for the
+  MailCatcher web UI at `httpPath`, for stages without tiger-proxy.
+- SBOM: every chart tarball now ships a CycloneDX 1.6 inventory of its container
+  images (name, tag, digest, registry) as `sbom.cdx.json`; the umbrella tarball is
+  published as well. Structure and properties: see the user manual,
+  "SBOM der ZETA-Guard-Lieferung".
+- `authserver.dbPool.maxLifetime` (default `PT30M`): recycles every pooled JDBC
+  connection after this long, so a socket orphaned by a CloudNativePG switchover
+  cannot sit in the pool indefinitely. Keycloak's own default for PostgreSQL is
+  unlimited.
+- `authserver.db.urlProperties` (default `{ socketTimeout: 120, tcpKeepAlive:
+  true }`): pgjdbc parameters appended to `KC_DB_URL` as query parameters. Raise
+  `socketTimeout` for a release with a heavy schema migration — it bounds every
+  statement, Liquibase DDL included. `connectTimeout` and `targetServerType` are
+  rejected at render time: naming either in the URL makes Keycloak stop
+  injecting its own default for the other.
+- `timeoutSeconds` on all three `authserver.probes` (default `5`), and
+  `values.schema.json` now requires it. Left unset, Kubernetes applies its own
+  default of **1 s**. That is too tight for the readiness probe: Agroal's
+  `invalidCount` never resets, so from the first evicted connection onwards
+  Keycloak answers every readiness probe with a real database round-trip instead
+  of from pool metrics — and a 1 s budget flaps under load. The upper bound is
+  Agroal's acquisition timeout (`PT20S`).
+  See [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md#probes).
+- `authserver.dbPool.{validationQueryTimeout,backgroundValidationInterval,
+  foregroundValidationInterval,idleRemovalInterval}` and defaults for
+  `authserver.db.urlProperties` (`socketTimeout: 120`, `tcpKeepAlive: true`).
+  Together these are what makes the authserver survive a database failover.
+  See [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md#connection-resilience-and-database-failover).
+- `pepproxy.nginxConf.pepInternalUrl`: cluster-internal address of the
+  authserver, used only for OIDC discovery and the JWKS fetch. Previously both
+  followed the public `pepIssuer` and left the cluster through the ingress.
+  `pepIssuer` stays the expected `iss`, tokens are unaffected. **Off by
+  default**; set it e.g. to the `authserver` Service,
+  `http://authserver/auth/realms/zeta-guard`.
+  See [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md).
+- `pepproxy.nginxConf.pepRevocationUrl`: session revocation endpoint of the
+  authserver, previously hardcoded. Defaults to `pepInternalUrl` (or the
+  `authserver` Service) plus `/zeta-guard-revocation`.
+- `pepproxy.hostAliases`: extra `/etc/hosts` entries for the PEP pod in native
+  Kubernetes form, merged with the `global.enableDNSRedirect` entries. Supported
+  replacement for driving PEP name resolution through `global.dns.redirects`,
+  which is scoped to tiger-proxy/OCSP test routing.
+- `notificationService.hsm.*`: HSM Proxy wiring for the notification-service — All
+  optional; unset values keep the service defaults, but are only relevant if sealing is enabled.
+  Needs a notification-service build that implements the `hsm-proxy.*` properties — 1.3.0 and 1.3.2
+  ignore them, current `main` builds and future version implement them.
+- `notificationService.sealing.dekCacheSize`: how many unpacked DEKs are kept
+  in memory (`NOTIFICATION_PERSISTENCE_SEALING_DEK_CACHE_SIZE`), unset -> the
+  service default, must be 1 or larger. `sealing.enabled: true` now requires
+  `notificationService.hsm.endpoint`.
+- `notificationService.env.encryptionEnabled`: toggles encryption of push
+  notification payloads when the notification-service dispatches them.
+- Added default configuration for optional `tail_sampling` processor for TI-SIM.
+- Added disclaimers regarding the chart-development-only `Makefile`.
+- `authserver.resourceServerMtls` (default off): mTLS for resource servers
+  calling `GET /auth/realms/<realm>/zeta/userinfo/email`, which now releases the
+  verified email of a mobile user. When enabled, the master ingress requests an
+  optional client certificate on `authserver.hostname`
+  (`ssl_verify_client optional_no_ca`, prepended to any
+  `ingressMasterAnnotations."nginx.org/server-snippets"`). The authserver then
+  validates the chain against `resourceServerMtls.truststore`, or against
+  Keycloak's HTTPS truststore if that is left empty. Requires
+  `authserver.config.oidcFlowEnabled: true`. Browsers with client certificates
+  installed may show a certificate picker on that host.
+
+### changed:
+
+- **BREAKING** With `authserver.config.oidcFlowEnabled`, `provisioningProcessor.federationMaster`
+  must be enabled (with `environment`); the authserver reads the Fedmaster URL from the
+  provisioned `federation-master.json`. Terraform `sekidp_fedmaster_url` is removed.
+- updates nginx/nginx-prometheus-exporter to 1.5.3
+- updates OPA-Image to 1.21.3-static
+- Enabled `pepproxy.nginxConf.noTravel` by default as required per spec.
+  This basically fixes a session to an ip address.
+- *Action required* only relevent to users of nginx ingress: To sufficiently
+  comply with A_26668-02, we had to set a default rate limit. If you have not
+  configured your own rate limit yet, you will probably need to set values that
+  fit your installation. See
+  `ingressMinionAnnotations.nginx.org/limit-req-rate`,
+  `ingressMinionAnnotations.nginx.org/limit-req-key` and
+  `ingressMinionAnnotations.nginx.org/limit-req-zone-size`.
+- updates nginx-ingress chart to 2.8.0 (NIC 5.7.0)
+- updates keycloak-zeta, ngx_pep, nginx-ingress, provisioning-processor and notification-service to 2.0.0
+- updates keychain-generator to 2.0.10
+- updates testdriver-smcb, testdriver-oidc, nativedriver and androiddriver to 2.0.0
+- updates testfachdienst and zeta-tls-test-tool-service to 2.0.0, tiger-proxy to fork-2.0.0
+- **BREAKING** sekidp (A_26973-03): the `zeta-sekidp-oidc` IdP additionally
+  requests `urn:telematik:geburtsdatum`, so the sectoral IDP releases the
+  insured
+  person's consent-dependent `birthdate`. Re-issue
+  `sekidp.gsiServer.entityStatementAboutRp` with that scope — gsi-server rejects
+  the PAR otherwise (`invalid_scope`, "exceeds scopes found in entity
+  statement").
+  See [How to configure the SEK-IDP / Fedmaster test chart](docs/how-to_guides/How_to_configure_sekidp.md).
+- sekidp: `gsi-server` and `gsi-fedmaster` use a `startupProbe` instead of a
+  fixed 45 s `initialDelaySeconds`, configurable via `sekidp.<component>.probes`.
+  Each pod was ready ~50 s after its container started, the two in sequence;
+  now as soon as actuator answers.
+- Authserver init container `keycloak-build` is now `keycloak-copy`: it only
+  copies `/opt/keycloak` into the pod volume, the `kc.sh build` that `startup.sh`
+  runs anyway before `start --optimized` is no longer done twice (~30 s less per
+  start). Default `authserver.initContainer.resources` shrank accordingly.
+- The `/auth` ingress always sets `ssl-client-cert` to the TLS client
+  certificate (`$ssl_client_escaped_cert`), so a client can no longer send that
+  header itself. The bundled NIC also strips it in `more_clear_input_headers`.
+
+- ⚠️ `opa.simulation.bundle.resource` is now required with bundle mode and
+  simulation enabled. The `-sim` tag suffix appended to `opa.bundle.resource` is
+  gone:
+  gematik names simulation bundles differently per environment, so the derived
+  reference 404ed. See [OPA](docs/reference/OPA.md#simulation-settings).
+- `notificationService.env.persistenceSealingEnabled` moved to
+  `notificationService.sealing.enabled`, next to the new
+  `sealing.dekCacheSize`. The chart fails the render with a pointer when the
+  old path is still set.
+- The `/authorize` response redirects to the
+  SekIDP directly instead of redirecting through the cookie-bound
+  `/broker/zeta-sekidp-oidc/login`.
+- SekIDP flow: The IdP's `first_broker_login_flow_alias` is removed. Keycloak's
+  `SekIDPIdentityProvider` provisions user and Federated Identity itself on
+  first login.
+- PEP proxy access log: with `pepproxyTracingEnabled: true`, each line now ends
+  with `trace_id=<id> span_id=<id>` (OpenTelemetry trace context). Untraced
+  requests log empty IDs. With tracing disabled the format is unchanged. The
+  telemetry gateway copies them into the OTLP log record's `TraceId`/`SpanId`.
+- tiger-proxy image pinned in the umbrella and chart defaults instead of `latest`;
+  per-stage overrides dropped.
+- The Terraform variable `keycloak_namespace` is only required when
+  `use_kubernetes = true`. Local mode reads it nowhere, yet it still made
+  `terraform plan` fail with `The argument "keycloak_namespace" is required`.
+  See
+  [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md).
+- `enable_sekidp = true` no longer requires `use_kubernetes = true`.
+  See [How to configure the SEK-IDP / Fedmaster test chart](docs/how-to_guides/How_to_configure_sekidp.md).
+- gsi-server/gsi-fedmaster bumped to 8.5.1: `gsi-server` now validates authserver via a locally mounted entity
+  statement (`sekidp.gsiServer.entityStatementAboutRp`).
+  See [How to configure the SEK-IDP / Fedmaster test chart](docs/how-to_guides/How_to_configure_sekidp.md).
+- Terraform no longer writes the `sekidp-rp01-pubkey` Secret (gsi-server 8.5.1
+  gets the entity statement mounted directly, see above). The Kubernetes
+  provider and the Terraform variable `config_path` are removed with it.
+  (`sekidp-removed.tf`) drops the Secret from the state on the next
+  `make config` without touching the cluster.
+- new opt-in `keycloak-db.enabled` to provision `keycloak-db` via the upstream
+  `cloudnative-pg/cluster` chart instead of the hand-rolled template. Disabled by
+  default. Switching it on an already-running, populated cluster triggers a short
+  (~3 min on a local test), controlled database restart — no data loss, but plan a
+  maintenance window for the switch on a production stage.
+- Span attributes from outdated versions of OpenTelemetry's sematic conventions
+  will be migrated to their new attribute names across **all** trace
+  pipelines – not just the TI-SIEM- and TI-SIM-pipelines.
+- Strip embedded metrics from policy engine (OPA) logs before export to TI-SIEM.
+- updates zeta-telemetry-gateway to v0.157.0
+- `testdriver` was split into `testdriver-smcb` and `testdriver-oidc` with dedicated, prefix ingress routes (`/td-smcb` and `/td-oidc`),
+  both variant now only support their respective authentication flows which allows for testing SMCB and OIDC auth with the need to redeploy.
+- BREAKING: during testdriver split the `/oidc` route was migrated to `/td-oidc/oidc` of the `testdriver-oidc` and does not longer exists on 
+  the ingress of the `testdriver-smcb`
+- Resolves part of ANFTI2-902. Default values for VAU DB encryption are now fine
+  and can be used without further adjustments. **Action required** remove all
+  overrides of the following values if you have any:
+    - `authserver.dbEnc.columnEncryptionEnabled`
+    - `authserver.dbEnc.integrityChecksEnabled`
+    - `authserver.dbEnc.integrityRowChecksEnabled`
+    - `authserver.dbEnc.integrityTableChecksEnabled`
+    - `authserver.dbEnc.periodicRowChecksEnabled`
+    - `authserver.dbEnc.lockdownOnError`
+    - `authserver.dbEnc.shutdownOnError`
+
+  Only do this on a fresh database or one already converted with these features.
+  A database converted while they were `false` (plaintext rows, conversion
+  state `DONE`) is never re-converted: the authserver fails with
+  `Decryption failed` and crash-loops. Such stages must either keep the
+  `false` overrides or wipe the database before switching.
+
+### fixed:
+
+- `local-test/values.local.yaml`: `sekidp.gsiServer.entityStatementAboutRp`
+  re-issued with the `urn:telematik:geburtsdatum` scope and the additional
+  redirect URI `de.gematik.zeta://oidc`; the previous statement made gsi-server
+  reject the PAR with `invalid_scope`.
+- sekidp Ingress: with `sekidp.routeViaTigerProxy: false` the `/sekidp` and
+  `/sekidp-fedmaster` prefixes reached gsi-server/gsi-fedmaster unchanged, which
+  only serve at `/` — every external request (entity statements, PAR, the
+  authserver's federation lookup) answered `404`. The direct route now strips
+  the prefix like the tiger-proxy route always did. Stages routing via
+  tiger-proxy are unaffected.
+- Terraform: keycloak provider constraint raised to `>= 5.9.0`; older
+  providers fail with `The attribute client_secret is required`. A stale
+  `.terraform.lock.hcl` keeps the old version pinned — delete it and re-run
+  `terraform init`.
+- **The authserver's liveness probe now targets `/auth-mgmt/health/ready/`.**
+  `/health/live` never touches the database, so it could not observe a wedged
+  datasource — the pod stayed `Running` and needed a manual restart
+  (ANFTI2-881). The liveness probe deliberately stays on the DB-independent
+  `/health/live`: making it database-aware would fail it on every authserver pod
+  at once during an outage and restart them all, which is why the pool
+  recovering
+  on its own is the fix rather than a kubelet restart.
+- Probe defaults retuned and `timeoutSeconds: 5` set on all three. Leaving it
+  unset meant Kubernetes' **1s** default, which flaps: Agroal's `invalidCount`
+  never resets, so after the first evicted connection Keycloak performs a real
+  database check on every readiness probe instead of answering from pool
+  metrics.
+  `startup.failureThreshold` raised to 60 (300s) — the previous 100s was tight
+  for a cold database plus Liquibase.
+- with `networkPolicy.enabled: true`, egress NetworkPolicies for OPA, PEP
+  proxy, authserver, opa-simulation and the kpi-metrics-helper CronJob never
+  matched telemetry-gateway's pods, silently blocking all telemetry egress to
+  it — the podSelector used the vendored chart's literal name
+  `opentelemetry-collector`, but telemetry-gateway's Chart.yaml `alias:`
+  renders its actual pod label as `telemetry-gateway`. Selectors now match on
+  the correct label via a shared `telemetryGateway.selectorLabels` helper.
+- the three sekidp entity-statement scripts sent the Keycloak admin credentials
+  with plain `-d`, so a password containing `&`, `=`, `+`, `%` or a space failed
+  to authenticate. They now use `--data-urlencode`, like every other script in
+  `terraform/authserver/scripts/`.
+- `data.external.manage_policies` referenced `scripts/managePolicies.sh` without
+  the `${path.module}/` prefix, so it only resolved while terraform ran from
+  inside `terraform/authserver`. Now module-relative, as every other script
+  reference in the module already was.
+- When using a HSM for ASL, it is not required to provide a TLS cert for PEP
+  anymore. Fixes ANFTI2-959
+- New Terraform variables `sso_session_idle_timeout` and
+  `sso_session_max_lifespan` (default `24h`, previously Keycloak's 30m/10h) keep
+  the authserver session alive for the policy's refresh-token TTL; refreshing an
+  idle client no longer returns `400 invalid_grant` "Session not active".
+  See [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md#session-lifetime).
 
 ## Release 1.3.3
 
 ### changed:
 
-- pepproxy image `1.3.3`
+- pepproxy image `1.3.3` (hardened ASL subrequest target URL handling)
 
 ## Release 1.3.2
 
@@ -48,14 +367,15 @@
   (`NOTIFICATION_DATASOURCE_DB_KIND`, required by images >= 1.3.2), default
   `postgresql`; cloudnative mode accepts only `postgresql`.
 - [How to upgrade ZETA Guard](docs/how-to_guides/How_to_upgrade_ZETA_Guard.md):
-  the supported upgrade path (`helm upgrade` + `make config`), what protects the
-  Terraform state, and how to adopt an existing realm when the state was lost.
-  A full reinstall was never required — Terraform owns realm configuration only,
+  the supported upgrade path (`helm upgrade` plus the Terraform apply), what
+  protects the Terraform state, and how to adopt an existing realm when the
+  state was lost.
+  A full reinstallation was never required — Terraform owns realm configuration only,
   users and DCR-registered clients live in the database. Every step is given as
-  both the `make` target and the plain `terraform` command, so the guide is
-  usable without the Makefile.
+  a plain `terraform` command.
 
 ### changed:
+
 - updates notification-service to 1.3.2
 - updates keycloak-zeta and ngx_pep to 1.3.2
 - updates provisioning-processor to 1.3.2
@@ -96,6 +416,7 @@
 - OPA decision logs are no longer written to console.
 
 ### fixed:
+
 - `notificationService.<rs|fdv>.image.tag` had no effect: the documented
   per-variant tag override was ignored by the image helper (only `image.digest`
   was honored).
@@ -112,7 +433,7 @@
   already in the state and fails loudly otherwise.
 - rendering the chart with a disabled telemetry pipeline
   (`telemetry-gateway.config.service.pipelines.<name>: null`)
-  aborted with `index of untyped nil` — the opentelemetry-collector chart's
+  aborted with `index of untyped nil` — the OpenTelemetry-collector chart's
   deprecated-name auto-rewrite misses a nil guard. The rewrite is now off
   (`telemetry-gateway.rewriteDeprecatedComponentNames: false`); it only renames
   components we do not use, so rendered output is unchanged.
@@ -132,7 +453,7 @@
 ### removed
 
 - The fixed client scopes `zero:register` and `zero:manage` and their
-  authorization-server audience mapper. A terraform apply deletes them from
+  authorization-server audience mapper. A `terraform apply` deletes them from
   existing realms; clients still requesting either scope must drop it.
 
 ## Release 1.3.1
@@ -234,7 +555,7 @@
   Dienst-Hersteller stream.
 - Expose additional CloudNativePG options: `cloudnativePg.extraParameters` (
   arbitrary
-  reloadable postgres settings), `sharedPreloadLibraries`,
+  reloadable Postgres settings), `sharedPreloadLibraries`,
   `storage.storageClass`
   shortcut, and optional dedicated `walStorage` volume
 - Specific information from the policy engine's decision logs will be extracted
@@ -242,12 +563,13 @@
 - Added counter metrics for ZETA client requests.
 - New config options to configure nginx worker processes in pep.
   The defaults are the previous values.
-  |value|description|default|
-  |---|---|---|
-  |pepproxy.workerProcesses|Number of worker processes; "auto"=cpu count|auto|
-  |pepproxy.workerConnections|Max. number of connections per worker|16384|
-  |pepproxy.workerRlimitNofile|Max. number of open files, per worker. Should be
-  at least 2*workerConnections|40960|
+
+  | value                       | description                                                                   | default |
+  |-----------------------------|-------------------------------------------------------------------------------|---------|
+  | pepproxy.workerProcesses    | Number of worker processes; "auto"=cpu count                                  | auto    |
+  | pepproxy.workerConnections  | Max. number of connections per worker                                         | 16384   |
+  | pepproxy.workerRlimitNofile | Max. number of open files, per worker. Should be at least 2*workerConnections | 40960   |
+
 - Support for serving the OPA policy bundle from an operator-hosted private
   registry whose TLS certificate is issued by an internal CA. Note the
   full-CA-bundle
@@ -260,7 +582,7 @@
 - Various client-ip and forward headers are now stripped by default at NIC, and
   externalTrafficPolicy now defaults to `Local`, to preserve client IPs.
     - NIC is now a DaemonSet, so all nodes continue to accept traffic, and don't
-      request cpu resources any more
+      request cpu resources anymore
 - `opa.rolloutRestart` — optional CronJob that periodically restarts the OPA
   Deployment via `kubectl rollout restart` (default: disabled). Runs on a
   configurable `schedule` (fixed `Europe/Berlin` timezone), reusing
@@ -268,6 +590,12 @@
   chart creates its own ServiceAccount + minimal RBAC (`get`/`patch` on the
   `opa` Deployment only) unless `opa.rolloutRestart.serviceAccountName` is
   set to an externally pre-provisioned ServiceAccount.
+- `keycloak-db.enabled` (default `false`) — opt-in alternative provisioning
+  path for the `keycloak-db` CNPG cluster via the vendored upstream
+  [cloudnative-pg/cluster](https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/README.md)
+  chart, instead of the hand-rolled `Cluster` template. Mutually exclusive
+  with the existing `cloudnativePg.*` path (which stays the default). See
+  [How to manage authserver DB](docs/how-to_guides/How_to_manage_authserver_DB.md).
 
 ### changed:
 
@@ -295,6 +623,17 @@
   which denies it, so the block needs nothing but plain Ingress path routing and
   holds for **any** ingress controller — overlapping prefixes resolve
   longest-match-first.
+- with `authserver.adminHostname` set, `/auth/realms/master` is now denied with
+  `403` on the public hostname alongside `/auth/admin` — the `master` realm
+  carries the admin token endpoint (`admin-cli`, direct grant) and serves no
+  ZETA
+  traffic. Terraform and CI already reach it via the admin hostname; the
+  `zeta-guard` realm is unaffected. The authserver's Terraform configuration now
+  also pins the master realm's `frontendUrl` to the admin hostname, so the Admin
+  Console's login redirect stays off the blocked path — without it the browser
+  login would break. New tfvar `master_realm_frontend_url` overrides the derived
+  value.
+  See [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md).
 - NIC subchart install is now gated by `nginx-ingress.enabled` (was
   `nginxIngressEnabled`); annotations still gated by `nginxIngressEnabled`.
 - Only logs and metrics from resource servers are exported to TI SIM.
@@ -398,7 +737,7 @@
     meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<ns>
   kubectl -n <ns> label certificate zeta-guard-tls app.kubernetes.io/managed-by=Helm
   ```
-- non-constrained tls 1.3 ciphers (accept only
+- non-constrained tls 1.3 ciphers (accepts only
   `TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256`
   instead of all defaults) and GS-A_5322 compliance (disable
   `ssl_session_tickets`
@@ -874,7 +1213,7 @@
 
 ### added:
 
-- added support for postgres operator by documentation and makefile; also in
+- added support for Postgres operator by documentation and makefile; also in
   local test setup
 - telemetry-gateway can redact known kinds of secrets and personal information
   from logs, metrics, and traces
