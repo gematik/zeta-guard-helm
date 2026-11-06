@@ -16,7 +16,7 @@ dependencies:
   version: 0.0.1
 - name: zeta-guard
   repository: file://charts/zeta-guard
-  version: 1.2.5
+  version: 1.2.6
 - name: testdriver
   repository: file://charts/test-driver
   version: 0.0.1
