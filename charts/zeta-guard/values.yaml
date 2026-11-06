@@ -204,6 +204,13 @@ authserver:
     clientRegistrationSchedulerInterval: "PT2M"
     # Enable the OIDC client flow (env ZETA_OIDC_FLOW_ENABLED).
     oidcFlowEnabled: false
+    # Entity statement metadata (A_23034-02), only used when oidcFlowEnabled is true.
+    # Every field is optional; unset fields keep the authserver's defaults.
+    # entityStatement:
+    #   clientName: ""        # client_name and federation_entity.name
+    #   organizationName: ""  # organization_name in openid_relying_party and federation_entity
+    #   contactEmail: ""      # contacts
+    #   redirectUris: []      # redirect_uris; unset, the redirect URIs of all realm clients are published
   # Mostly for test setup purposes.
   # Adds an entry to the authserver's host file, mapping hostAlias.ip to hostAlias.name
   hostAlias: { }
@@ -262,7 +269,7 @@ pepproxy:
   replicaCount: 1
   image:
     repository: ngx_pep
-    tag: 1.3.3
+    tag: 1.3.4
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
@@ -323,6 +330,11 @@ pepproxy:
 
     # OIDC issuer (iss) of the authorization server (e.g., zeta-guard-realm).
     pepIssuer: ""
+
+    # Session revocation endpoint of the authserver (SSE block list and reports).
+    # Empty = http://authserver/auth/realms/zeta-guard/zeta-guard-revocation.
+    # Set only when the authserver is reachable under another address or realm path.
+    pepRevocationUrl: ""
 
     # requiredAudience defines the audience required for a valid access token.
     requiredAudience: ""
@@ -1290,7 +1302,8 @@ telemetry-gateway:
       maxUnavailable: 1
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
-    # tag: "v0.156.0"
+    # some customer scripts are based around this value even though it is ineffective. Deprecated and will be superseded by SBOM.
+    tag: "v0.156.0"
     digest: "sha256:697c781f9d778c0a29ed051fb5c92fe37e1b97cdbec1a51a2fb9f4a5094ef8e5"
     pullPolicy: Always
   command:

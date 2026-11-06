@@ -243,6 +243,48 @@
             "oidcFlowEnabled": {
               "type": "boolean",
               "description": "Enables the OIDC client flow in the authserver (env ZETA_OIDC_FLOW_ENABLED). Required when notificationService.enabled is true."
+            },
+            "entityStatement": {
+              "type": "object",
+              "description": "Entity statement metadata (A_23034-02). Only used when oidcFlowEnabled is true; unset fields keep the authserver's defaults.",
+              "properties": {
+                "clientName": {
+                  "type": "string",
+                  "description": "client_name in the openid_relying_party metadata and name in the federation_entity metadata (env ENTITY_STATEMENT_CLIENT_NAME).",
+                  "examples": [
+                    "zeta-guard"
+                  ]
+                },
+                "organizationName": {
+                  "type": "string",
+                  "description": "organization_name in the openid_relying_party and federation_entity metadata (env ENTITY_STATEMENT_ORGANIZATION_NAME).",
+                  "examples": [
+                    "zeta-guard"
+                  ]
+                },
+                "contactEmail": {
+                  "type": "string",
+                  "description": "Contact email address published in the entity statement contacts array (env ENTITY_STATEMENT_CONTACT_EMAIL).",
+                  "examples": [
+                    "noreply@localhost",
+                    "support@example.com"
+                  ]
+                },
+                "redirectUris": {
+                  "type": "array",
+                  "description": "redirect_uris in the openid_relying_party metadata (env ENTITY_STATEMENT_REDIRECT_URIS, comma-separated). Unset, the redirect URIs of all realm clients are published.",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "examples": [
+                    [
+                      "https://zeta-guard.example.com/auth/realms/zeta-guard/broker/zeta-sekidp-oidc/endpoint"
+                    ]
+                  ]
+                }
+              },
+              "additionalProperties": false
             }
           }
         },
@@ -1334,6 +1376,13 @@
               "description": "OIDC issuer (iss) of the authorization server used for access token validation. This is used for token validation as well as for retvrieving the JWKS and similar things.",
               "examples": [
                 "https://zeta-kind.local/auth/realms/zeta-guard"
+              ]
+            },
+            "pepRevocationUrl": {
+              "type": "string",
+              "description": "Session revocation endpoint of the authserver (SSE block list and reports). Empty uses the authserver Service default http://authserver/auth/realms/zeta-guard/zeta-guard-revocation. Set only when the authserver is reachable under another address or realm path.",
+              "examples": [
+                "http://authserver/auth/realms/zeta-guard/zeta-guard-revocation"
               ]
             },
             "poppIssuer": {

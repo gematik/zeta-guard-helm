@@ -2,6 +2,12 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.3.5
+
+### changed:
+
+- bumped pep version to `1.3.4` to include important security hotfix.
+- 
 ## Release 1.3.4
 
 ### changed:
@@ -12,7 +18,7 @@
 
 ### changed:
 
-- pepproxy image `1.3.3`
+- pepproxy image `1.3.3` (hardened ASL subrequest target URL handling)
 
 ## Release 1.3.2
 

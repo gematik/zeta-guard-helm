@@ -22,8 +22,8 @@ PROVIDER_ID="ecdh-generated"
 TOKEN_RESPONSE=$(curl "${CURL_OPTS[@]}" -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
   -d "grant_type=password" \
   -d "client_id=admin-cli" \
-  -d "username=${KC_USERNAME}" \
-  -d "password=${KC_PASSWORD}" 2>&1) || {
+  --data-urlencode "username=${KC_USERNAME}" \
+  --data-urlencode "password=${KC_PASSWORD}" 2>&1) || {
     echo "ERROR: Failed to authenticate against Keycloak at ${KC_URL}" >&2
     echo "${TOKEN_RESPONSE}" >&2
     exit 1
