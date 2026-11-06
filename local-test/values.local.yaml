@@ -383,7 +383,7 @@ zeta-guard:
       capabilities:
         drop: [ "ALL" ]
     image:
-      tag: 1.2.1
+      tag: 1.2.2
     nginxConf:
       generateConfigMap: true
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard
