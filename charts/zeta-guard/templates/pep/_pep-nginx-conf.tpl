@@ -61,7 +61,8 @@ http {
 
     pep_pdp_issuer {{ .pepIssuer }};
 
-    pep_revocation_url http://authserver/auth/realms/zeta-guard/zeta-guard-revocation;
+    ## Session revocation (SSE block list + reports) on the authserver.
+    pep_revocation_url {{ .pepRevocationUrl | default "http://authserver/auth/realms/zeta-guard/zeta-guard-revocation" }};
     ## server hosting PoPP entity statement at /.well-known/openid-federation
     ## optional if no locations use pep_require_popp
     {{- if .poppIssuer }}

@@ -177,17 +177,6 @@ zeta-tls-test-tool-service:
     nodePorts:
       serviceMgmtNodePort: 32012
 
-zetaCertValidationMockEnabled: false
-
-zeta-cert-validation-mock:
-  devMode: true
-  image:
-    tag: 1.0.0
-    repository:
-  mock:
-    mode: always_good
-    enableAdminEndpoints: true
-
 issuers:
   local:
     enabled: true

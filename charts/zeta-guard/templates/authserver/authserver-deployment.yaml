@@ -428,6 +428,26 @@ spec:
               value: "{{ .Values.authserver.config.clientRegistrationSchedulerInterval }}"
             - name: ZETA_OIDC_FLOW_ENABLED
               value: {{ .Values.authserver.config.oidcFlowEnabled | toString | quote }}
+            {{- if .Values.authserver.config.oidcFlowEnabled }}
+            {{- with .Values.authserver.config.entityStatement }}
+            {{- with .clientName }}
+            - name: ENTITY_STATEMENT_CLIENT_NAME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .organizationName }}
+            - name: ENTITY_STATEMENT_ORGANIZATION_NAME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .contactEmail }}
+            - name: ENTITY_STATEMENT_CONTACT_EMAIL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .redirectUris }}
+            - name: ENTITY_STATEMENT_REDIRECT_URIS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.authserver.hsm.enabled }}
             - name: HSM_PROXY_ENDPOINT
               value: {{ .Values.authserver.hsm.endpoint | quote }}
