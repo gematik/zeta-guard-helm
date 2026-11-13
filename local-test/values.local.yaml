@@ -214,6 +214,7 @@ testdriverCommon: &localDriver
   fachdienst_url: "https://zeta-kind.local/pep/"
   hostname: zeta-kind.local
   ingressClassName: nginx
+  PoppToken: "eyJhbGciOiJFUzI1NiIsInR5cCI6InZuZC50ZWxlbWF0aWsucG9wcCtqd3QiLCJraWQiOiJhbGlhcyJ9.eyJpYXQiOjE3OTM2MjM5NTcsInZlcnNpb24iOiIxLjAuMCIsImlzcyI6Imh0dHA6Ly90aWdlci1wcm94eS9wb3BwIiwicHJvb2ZNZXRob2QiOiJlaGMtcHJhY3RpdGlvbmVyLXVzZXIteDUwOSIsInBhdGllbnRQcm9vZlRpbWUiOjE3OTM2MjAzNTcsInBhdGllbnRJZCI6IlgxMTA2Mzk0OTEiLCJpbnN1cmVySWQiOiIxMDk1MDA5NjkiLCJhY3RvcklkIjoiMS0yMDAwMDMwMDEzOSIsImFjdG9yUHJvZmVzc2lvbk9pZCI6IjEuMi4yNzYuMC43Ni40LjMyIn0.mVn6JqtEgrO-jlYeWWlNciTIMc2zPEBNi92s_2J8eAiOORw9H6MxWBP9_iTUEIGbKsHZtOaQDimMBGoA7dI9ow"
   routeViaTigerProxy: true
   requiredOid: "1.2.276.0.76.4.328"
 
@@ -227,17 +228,15 @@ nativedriver:
   smcbCertificateFileName: smcb-certificates.p12
   smcbCertificateAlias: zeta.c_smcb_aut
 
-testdriver-oidc:
-  <<: *localDriver
-  enabled: true
-  # SekIDP (gsi-server) issuer — its signed entity statement uses the public
+oidcSekIdp: &oidcSekIdp
   # Ingress URL (sekidp.gsiServer.env.serverUrl), so OIDC_IDP_ISS must match it.
   oidcIdpIss: "https://zeta-kind.local/sekidp"
-  oidcIdpAlias: "zeta-sekidp-oidc"
-  # Demo OIDC callback on the tester's own machine (matches the redirect_uris
-  # entry in sekidp.gsiServer.entityStatementAboutRp).
-  oidcBaseUri: "http://localhost:8090/cb/demo"
-  oidcTestKvnr: "X110411675"
+  mailcatcherUrl: "https://zeta-kind.local/mailcatcher"
+
+testdriver-oidc:
+  <<: [*localDriver, *oidcSekIdp]
+  enabled: true
+  PoppToken: ""
 
 testfachdienst:
   containerSecurityContext:
@@ -360,6 +359,10 @@ tiger-testsuite:
 
 zeta-guard:
   authserver:
+    # Trust the local self-signed CA for outbound calls (e.g. sekidp-fedmaster).
+    additionalTrustedCAs:
+      - secretName: zeta-guard-tls
+        secretKey: ca.crt
     probes:
       startup:
         failureThreshold: 60
@@ -468,9 +471,12 @@ zeta-guard:
     replicaCount: 1
     aslOcsp: "http://zeta-cert-validation-mock/ocsp/asl"
     asl_enabled: false
-    hsmProxyAddr: "hsm-sim:50051"
+    hsmProxyAddr: "http://hsm-sim:50051"
+    # hsm-sim serves plain-text gRPC only
+    hsmProxyPlainTextAccepted: true
     nginxConf:
-      pepInternalUrl: ""  # chart default (off); discovery and JWKS go through the ingress
+      # Discovery and JWKS via the cluster-internal authserver (no ingress TLS/DNS).
+      pepInternalUrl: "http://authserver/auth/realms/zeta-guard"
       generateConfigMap: true
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard
       requiredAudience: https://zeta-kind.local

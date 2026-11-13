@@ -82,7 +82,7 @@ zeta-guard:
       instances: 1
       enableSuperuserAccess: false
       storage:
-        size: 10Gi
+        size: 32Gi
       resources:
         requests:
           cpu: "2"
@@ -118,6 +118,80 @@ The connection-budget guard (which fails the render if
 
 This is disabled by default; the hand-rolled template remains authoritative
 until stages have explicitly migrated.
+
+### Sizing the database volume
+
+The default data volume is `cloudnativePg.storage.size: 32Gi`. The write-ahead
+log shares this volume unless `cloudnativePg.walStorage` is set.
+
+The space is driven by the number of registered clients, not by traffic, and it
+depends on whether the installation runs in a VAU. In a VAU the authserver
+encrypts columns and checks the integrity of the stored data
+(`authserver.dbEnc.enabled: true`, default `false`). The integrity checks keep a
+row checksum table (`spree_row_checksum`) with one entry per stored row, about 35
+rows per client, and its indexes are larger than the data itself. Without a VAU
+this table does not exist.
+
+| Variant                                              | Space per registered client | Rule of thumb for the volume size                                  | Clients with 32Gi | Clients with 64Gi |
+|------------------------------------------------------|-----------------------------|--------------------------------------------------------------------|-------------------|-------------------|
+| Without VAU (`authserver.dbEnc.enabled: false`)      | about 15 KB                 | `clients × 15 KB × 1.3` (bloat, reindex) `+ 3 GB` (WAL, base data) | about 1.4 million | about 3 million   |
+| With VAU (`authserver.dbEnc.enabled: true`)          | about 50 KB                 | `clients × 50 KB × 1.3` (bloat, reindex) `+ 3 GB` (WAL, base data) | about 400,000     | about 900,000     |
+
+The figure per client includes its indexes and its share of the user data
+(mostly the `client_attributes`, `client_scope_client` and `zeta_client_data`
+tables). The Authorization Server limits registrations **per user**
+(`authserver.config.maxClients`, default 256, requirement A_25748-02), so the
+total is the number of users times the clients each of them registers.
+
+**In a VAU, start with `cloudnativePg.storage.size: 64Gi`** (about 900,000
+clients) **and a separate WAL volume** (see below): the integrity checks make the
+volume fill about three times as fast, and a full volume is expensive to
+recover from. A volume cannot be shrunk, so size it generously from the start.
+Volumes of 64Gi and above are also meant for load tests with many users.
+
+The figures come from two measurements. In a VAU test installation with 181,000
+registered clients of 46,000 users, the database was about 9.0 GB, of which the
+row checksum table took 6.3 GB, and the write-ahead log about 1.2 GB. The rest,
+about 15 KB per client, matches an earlier measurement on an installation
+without a VAU (about 10 KB per client without the user share). The shares of the
+column encryption and of the individual integrity checks
+(`integrityRowChecksEnabled`, `integrityTableChecksEnabled`) are not measured
+separately. Verify the real growth on your installation (compare
+`pg_database_size` before and after a batch of registrations).
+
+If the volume runs full, PostgreSQL stops and the pod no longer starts. Watch the
+volume usage and expand it in time. A PVC can be expanded in place when its
+StorageClass has `allowVolumeExpansion: true`: raise `cloudnativePg.storage.size`
+and upgrade the release. The data is kept. A PVC cannot be shrunk, and cloud
+providers may limit how often a disk can be resized (Azure Disk: about once every
+six hours).
+
+#### Separate volume for the write-ahead log
+
+By default the write-ahead log (WAL) lives on the data volume. PostgreSQL writes
+it sequentially and flushes every commit (`fsync`), while checkpoints write the
+data files in bursts. On one disk, a checkpoint burst can delay commits, which
+shows up as latency peaks during mass client registrations.
+
+Set `cloudnativePg.walStorage` to put the WAL on its own volume:
+
+```yaml
+cloudnativePg:
+  storage:
+    size: 64Gi
+  walStorage:
+    size: 16Gi
+    storageClass: <fast-storage-class>
+```
+
+This is recommended for production with registration peaks, with VAU database
+encryption and integrity checks enabled (additional checksum writes), and on
+storage whose IOPS depend on the volume size, as with most cloud disks. It brings
+little on fast local storage, and it adds a second PVC, so it is not the default.
+
+Decide before the first installation. Do not plan on adding `walStorage` to an
+existing cluster later. 8–16Gi is sufficient for `max_wal_size: "2GB"`. Choose a
+larger WAL volume only if your storage provides more IOPS for larger disks.
 
 ### Resetting CNPG operator and CRDs
 

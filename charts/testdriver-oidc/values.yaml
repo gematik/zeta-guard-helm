@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: testdriver-image
-  tag: 2.0.1
+  tag: 2.0.6
 imagePullPolicy: Always
 
 replicaCount: 1
@@ -45,13 +45,17 @@ openshiftIngress:
 oidcIdpIss: ""
 
 # Alias of the SekIDP identity provider broker in Keycloak (used to build the broker callback URL)
-oidcIdpAlias: ""
+oidcIdpAlias: "zeta-sekidp-oidc"
 
-# Base URI the OIDC client's redirect_uri/oidc_redirect_uri are derived from
-oidcBaseUri: ""
+# Base URI the OIDC client's redirect_uri/oidc_redirect_uri are derived from.
+# Must match the localhost:8090/cb/demo/oidc entry in sekidp.gsiServer.entityStatementAboutRp's redirect_uris.
+oidcBaseUri: "http://localhost:8090/cb/demo"
 
 # Test KVNR used to auto-fill the SekIDP login form in headless test runs
-oidcTestKvnr: ""
+oidcTestKvnr: "X110411675"
+
+# E-mail for the e-mail binding step after OIDC login (binding_mode=collect_email)
+oidcBindingEmail: "X110411675@mailgun.com"
 
 # BrowserStack App Automate configuration for the device e2e tests
 # (e.g. GET /testdriver-api/hellozeta/android). Exposed to the testdriver

@@ -92,6 +92,10 @@ spec:
             {{- with .Values.pepproxy.hsmProxyAddr }}
             - name: HSM_PROXY_ADDR
               value: {{ . }}
+            {{- if $.Values.pepproxy.hsmProxyPlainTextAccepted }}
+            - name: HSM_PROXY_ALLOW_PLAINTEXT
+              value: "1"
+            {{- end }}
             {{- end }}
             {{- with $pepProxyEnvVars }}
             {{- . | nindent 12 }}

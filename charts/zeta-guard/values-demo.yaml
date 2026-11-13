@@ -496,6 +496,12 @@ pepproxy:
   # --- HSM integration for PEP ---
   # Set to gRPC URL of HSM Proxy to enable ossl_hsm integration
   hsmProxyAddr: null
+  # Accept an unprotected (plain-text gRPC) channel to the HSM Proxy
+  # (HSM_PROXY_ALLOW_PLAINTEXT=1). Without it the PEP only connects in plain text
+  # to a loopback address and otherwise needs an https:// hsmProxyAddr; with a
+  # plain-text address to another host nginx does not start. Set it only where
+  # the network itself protects the channel, e.g. hsm-sim in a test cluster.
+  hsmProxyPlainTextAccepted: false
   # HSM key ID for the TLS listener ("store:hsm:<hsmTlsKeyId>")
   hsmTlsKeyId: tls.p256
   # Certificate matching the HSM TLS key, relative to /etc/nginx. The default is

@@ -67,6 +67,17 @@ resource "keycloak_realm_client_policy_profile" "zeta_client_policy_profile" {
     }
   }
 
+  # Authorization code flow only: rejects implicit and hybrid requests (also via PAR), even for clients registered
+  # with response_type "token". auto-configure switches the implicit flow off at registration instead of rejecting it,
+  # and must be set explicitly (Keycloak fails on a missing value).
+  executor {
+    name = "reject-implicit-grant"
+
+    configuration = {
+      auto-configure = "true"
+    }
+  }
+
   depends_on = [
     keycloak_realm.zeta_realm
   ]

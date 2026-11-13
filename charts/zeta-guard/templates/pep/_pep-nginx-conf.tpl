@@ -256,8 +256,39 @@ http {
         # the authserver trusts zeta-client-data there). The reduced binding token carries
         # zeta:email-verify in both of its states and, via the mappers on that scope, everything the
         # PEP checks; the authserver takes the caller from zeta-client-data like the routes above.
+        # Submitting an address (bind-email itself) also needs zeta:email-binding, which only the
+        # token of an identity without a verified address carries. /resend and /verify are the
+        # exceptions below, so any other spelling of the path falls under the stricter rule.
         location /auth/realms/zeta-guard/zeta/identity/bind-email {
             proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/identity/bind-email;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:email-binding zeta:email-verify";
+            pep_forward_client_data on;
+        }
+
+        location /auth/realms/zeta-guard/zeta/identity/bind-email/resend {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/identity/bind-email/resend;
+
+            include proxy_headers.conf;
+            proxy_set_header Host "authserver:80";
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            pep on;
+            pep_require_popp off;
+            pep_require_scope "zeta:email-verify";
+            pep_forward_client_data on;
+        }
+
+        location /auth/realms/zeta-guard/zeta/identity/bind-email/verify {
+            proxy_pass http://authserver-upstream/auth/realms/zeta-guard/zeta/identity/bind-email/verify;
 
             include proxy_headers.conf;
             proxy_set_header Host "authserver:80";

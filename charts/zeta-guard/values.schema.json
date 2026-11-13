@@ -1773,8 +1773,13 @@
           ],
           "description": "gRPC URL of HSM Proxy to enable ossl_hsm integration in the PEP proxy. When set, the PEP terminates TLS on port 8443 with the HSM key hsmTlsKeyId. Set to null to disable.",
           "examples": [
-            "hsm-sim:50051"
+            "https://hsm-proxy.example:50051"
           ]
+        },
+        "hsmProxyPlainTextAccepted": {
+          "type": "boolean",
+          "description": "Accept an unprotected (plain-text gRPC) channel to the HSM Proxy (HSM_PROXY_ALLOW_PLAINTEXT=1). Without it the PEP only connects in plain text to a loopback address and otherwise needs an https:// hsmProxyAddr. Set it only where the network itself protects the channel.",
+          "default": false
         },
         "hsmTlsKeyId": {
           "type": "string",

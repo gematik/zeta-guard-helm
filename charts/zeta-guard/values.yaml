@@ -150,7 +150,7 @@ authserver:
   genesisHash:
   image:
     repository: keycloak-zeta
-    tag: 2.0.1
+    tag: 2.0.2
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # authserver.podLabels is a map of labels to add to the authserver pod.
@@ -384,7 +384,7 @@ pepproxy:
   image:
     repository: ngx_pep
     # `pep_pdp_url` (nginxConf.pepInternalUrl) needs a PEP image >= 2.0.0-rc1; off by default.
-    tag: 2.0.0
+    tag: 2.0.1
   imagePullPolicy: Always
   imagePullSecrets: [ ]
   # pepproxy.podLabels is a map of labels to add to the pepproxy pod.
@@ -520,6 +520,12 @@ pepproxy:
     proxyLocations: [ ]
   # set to gRPC URL of HSM Proxy to enable ossl_hsm integration
   hsmProxyAddr: null
+  # Accept an unprotected (plain-text gRPC) channel to the HSM Proxy
+  # (HSM_PROXY_ALLOW_PLAINTEXT=1). Without it the PEP only connects in plain text
+  # to a loopback address and otherwise needs an https:// hsmProxyAddr; with a
+  # plain-text address to another host nginx does not start. Set it only where
+  # the network itself protects the channel, e.g. hsm-sim in a test cluster.
+  hsmProxyPlainTextAccepted: false
   # HSM key ID for the TLS listener ("store:hsm:<hsmTlsKeyId>")
   hsmTlsKeyId: tls.p256
   # certificate matching the HSM TLS key, relative to /etc/nginx; the default is
@@ -611,8 +617,12 @@ cloudnativePg:
   extraParameters:
     # optional: Give WAL headroom so checkpoints are paced by the timer, not
     # by pressure.
-    # NOTE: max_wal_size is a SOFT cap and by default WAL shares the 10Gi data volume —
-    # raise only together with more disk / a dedicated walStorage
+    # NOTE: max_wal_size is a SOFT cap and by default WAL shares the data volume (storage.size) —
+    # raise only together with more disk / a dedicated walStorage. Keep at least
+    # 3-4 GB of free headroom above max_wal_size, since bursts can exceed the cap.
+    # Left at the PostgreSQL defaults (max_wal_size 1GB, min_wal_size 80MB) because that
+    # suffices for normal operation; min_wal_size permanently keeps that much WAL on disk.
+    # Consider raising both for write-heavy phases (mass client registrations):
     # max_wal_size: "2GB"
     # min_wal_size: "1GB"
     # checkpoint_timeout: "900"
@@ -645,7 +655,12 @@ cloudnativePg:
   monitoring: {}
   # enablePDB: leave unset for the CNPG default; set false on single-instance stages
   storage:
-    size: 10Gi
+    # Sizing per registered client (incl. indexes): ~15 KB without VAU, ~50 KB in a VAU
+    # (authserver.dbEnc.enabled: true) → clients × 15|50 KB × 1.3 (bloat, reindex) + ~3 GB for
+    # WAL and base data. 32Gi covers ~1.4M clients without VAU, ~400k in a VAU.
+    # In a VAU start with 64Gi (~900k clients) and a separate walStorage, see below.
+    # Raise it for load-test stages with many users; volumes can be expanded online but never shrunk.
+    size: 32Gi
     # storageClass shortcut; empty → cluster default StorageClass
     storageClass: ""
     # Per-env PVC template (e.g. a specific storageClassName); empty → CNPG default
@@ -654,6 +669,12 @@ cloudnativePg:
   # lives on the data volume above (CNPG default). Set size (and optionally
   # storageClass/pvcTemplate) to split WAL onto its own disk so WAL fsync does
   # not contend with checkpoint flushes — recommended for write-heavy stages.
+  # Recommended for production with registration peaks, with VAU database
+  # encryption/integrity (extra checksum writes) and on storage whose IOPS depend
+  # on the volume size (typical for cloud disks). Little benefit on fast local
+  # storage. Decide BEFORE the first install: adding it to an existing cluster is
+  # not something to rely on. 8-16Gi is enough for max_wal_size 2GB; a larger
+  # size only makes sense if your storage grants more IOPS for it.
   # Example:
   #   walStorage:
   #     size: 16Gi
@@ -772,7 +793,7 @@ keycloak-db:
     # enablePDB: leave unset for the upstream chart's default (true); set false per
     # stage on single-instance clusters where a PDB would block node drains.
     storage:
-      size: 10Gi
+      size: 32Gi
     resources:
       requests:
         cpu: "2"
@@ -841,7 +862,7 @@ nginx-ingress:
       name: nginx
     image:
       repository: "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-ingress"
-      tag: 2.0.0
+      tag: 2.0.1
     service:
       # Default for standalone/cloud installs.
       type: LoadBalancer
@@ -1182,7 +1203,7 @@ notificationService:
   image:
     repository: notification-service
     # Tag prefix; "-rs"/"-fdv" appended per variant (e.g. main -> main-rs/main-fdv).
-    tag: 2.0.1
+    tag: 2.0.2
   # Optional per-variant pins (rs/fdv differ). A per-variant image.tag replaces
   # the shared tag verbatim (no "-<variant>" appended); a digest is appended as
   # "@<digest>". Empty -> shared image.tag + "-<variant>".
@@ -1330,7 +1351,7 @@ notificationService:
         # notification-service/keychain-generator (see the umbrella values.yaml).
         repository: notification-keychain-generator
         # Empty -> notificationService.image.tag (without variant suffix).
-        tag: 2.0.1
+        tag: 2.0.2
       imagePullPolicy: IfNotPresent
       resources:
         limits:
@@ -1587,8 +1608,8 @@ telemetry-gateway:
   image:
     repository: europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/zeta-telemetry-gateway
     # some customer scripts are based around this value even though it is ineffective. Deprecated and will be superseded by SBOM.
-    tag: "v0.157.0"
-    digest: "sha256:97bc1aa4584d7747ec1edb18cb3e68723841e001bfc620d25657e71786d12aed"
+    tag: "v0.157.1"
+    digest: "sha256:53a2acf71114d2b09935700d2e6665cbbbcbd9f8cc7c4075fcbec39196a28221"
     pullPolicy: Always
   command:
     name: /otelcol/zeta-telemetry-gateway
@@ -1639,8 +1660,8 @@ telemetry-gateway:
                 log.attributes["attackDetection.capecId"] != nil
             attributes:
               - key: attackDetection.capecId
-              - key: zeta-client.user_category
-                default_value: "provider"
+              - key: user.roles
+                default_value: "Leistungserbringer"
 
           zeta_guard_kpi.botnet_accesses_24h:
             description: 'Anzahl von Zugriffen von Botnetzen (A_25484-03)'
@@ -1656,7 +1677,7 @@ telemetry-gateway:
                 log.attributes["opa.event_type"] == "decision_log"
             attributes:
               - key: zeta-client.user_category
-                default_value: "provider"
+                default_value: "Leistungserbringer"
 
           zeta_guard_kpi.failed_authorization_codes_24h:
             description: 'Anzahl fehlerhafte Authorization Codes vom IDP (A_25484-03)'
@@ -1675,8 +1696,17 @@ telemetry-gateway:
             attributes:
               - key: zeta-client.reason
                 default_value: "none given"
-              - key: zeta-client.user_category
-                default_value: "provider"
+              - key: user.roles
+                default_value: "Leistungserbringer"
+
+          zeta_guard_kpi.impossible_travel_24h:
+            description: 'Anzahl Impossible-Travel-Zugriffe plus breakdown in Versicherte und LE (A_25484-03)'
+            conditions:
+              - resource.attributes["service.name"] == "ZETA Guard PEP HTTP proxy" and
+                log.attributes["attackDetection.type"] == "impossible_travel"
+            attributes:
+              - key: user.roles
+                default_value: "Leistungserbringer"
 
           zeta_guard_kpi.tor_accesses_24h:
             description: 'Anzahl von Zugriffen über TOR Netzwerke plus weitere breakdown in Versicherte und LE (A_25484-03)'
@@ -1686,7 +1716,7 @@ telemetry-gateway:
                 log.attributes["zeta-client.access_via_tor"] == true
             attributes:
               - key: zeta-client.user_category
-                default_value: "provider"
+                default_value: "Leistungserbringer"
 
           zeta_guard_kpi.vpn_accesses_24h:
             description: 'Anzahl von Zugriffen über VPNs plus weitere breakdown in Versicherte und LE (A_25484-03)'
@@ -1696,7 +1726,7 @@ telemetry-gateway:
                 log.attributes["zeta-client.access_via_vpn"] == true
             attributes:
               - key: zeta-client.user_category
-                default_value: "provider"
+                default_value: "Leistungserbringer"
 
         spans:
           zeta_guard_kpi.requests_by_unregister_clients.authorization_server.count:
@@ -2418,10 +2448,9 @@ telemetry-gateway:
           exporters:
             - otlp_grpc/ti_siem
 
-        # ADR 0001: count/security_kpis's raw, restart-vulnerable KPI counters. These
-        # must NOT reach SIEM directly (otlp_grpc/ti_siem is deliberately
-        # absent here) — only kpiPrometheus's durable, restart-corrected
-        # value (metrics/security_kpis_corrected below) should.
+        # ADR 0001: count/security_kpis's KPI counters. Sent to both
+        # kpiPrometheus (durable storage for restart-corrected daily totals)
+        # and directly to SIEM.
         metrics/security_kpis:
           receivers:
             - count/security_kpis
@@ -2434,6 +2463,7 @@ telemetry-gateway:
             - batch
           exporters:
             - otlp_http/security_kpis
+            - otlp_grpc/ti_siem
 
         # ADR 0001: the durable, UTC-day-corrected value the kpi-metrics-
         # helper CronJob pushes in, computed from kpiPrometheus's durable

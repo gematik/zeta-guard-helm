@@ -229,7 +229,8 @@ chart uses. Its documentation states this outright for each of them:
 | `keycloak_realm_events`                       | nothing to do — the provider's create is a `PUT` and simply overwrites |
 
 The client policy profile and its policy are **pure configuration** — a profile
-name, the `dpop-bind-enforcer` executor and the client-type conditions. They
+name, the `dpop-bind-enforcer` and `reject-implicit-grant` executors and the
+client-type conditions. They
 hold
 no user data and no client state, so deleting and recreating them is safe. Both
 endpoints replace the whole list, so an empty array clears them:

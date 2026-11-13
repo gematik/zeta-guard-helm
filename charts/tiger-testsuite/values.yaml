@@ -12,8 +12,8 @@ devMode: false
 replicaCount: 1
 
 image:
-  tag: 1.3.0
-  repository: tiger-testsuite
+  tag: latest
+  repository: tiger-testsuite/frontend
 imagePullPolicy: Always
 
 env:

@@ -7,7 +7,7 @@ registry_name: ""
 
 image:
   repository: nativedriver-image
-  tag: 2.0.1
+  tag: 2.0.6
 imagePullPolicy: Always
 
 containerPort: 8091
