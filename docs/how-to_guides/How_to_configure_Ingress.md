@@ -98,7 +98,8 @@ endpoints of mobile users and proxies them to the authserver, which acts as a re
 |---------------------------------------------------------|-------------|--------------------------|
 | `/zeta/clients`, `/zeta/clients/{id}`                   | GET, DELETE | `zeta:client-management` |
 | `/zeta/identity/email`, `.../email/verify`, `.../email/resend` | POST | `zeta:client-management` |
-| `/auth/realms/zeta-guard/zeta/identity/bind-email`, `.../resend`, `.../verify` | POST | `zeta:email-verify` (reduced binding token; public path unchanged, routed to the PEP by Ingress / tiger-proxy) |
+| `/auth/realms/zeta-guard/zeta/identity/bind-email` | POST | `zeta:email-binding` and `zeta:email-verify` (reduced binding token of an identity without a verified e-mail address; public path unchanged, routed to the PEP by Ingress / tiger-proxy) |
+| `/auth/realms/zeta-guard/zeta/identity/bind-email/resend`, `.../bind-email/verify` | POST | `zeta:email-verify` (reduced binding token; routed like `bind-email`) |
 
 **Routing**
 

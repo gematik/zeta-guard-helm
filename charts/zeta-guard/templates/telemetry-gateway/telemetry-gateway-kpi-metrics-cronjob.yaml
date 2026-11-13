@@ -119,6 +119,7 @@ spec:
                       "zeta_guard_kpi.country_accesses_24h": "zeta_guard_kpi_country_accesses_24h_total",
                       "zeta_guard_kpi.failed_authorization_codes_24h": "zeta_guard_kpi_failed_authorization_codes_24h_total",
                       "zeta_guard_kpi.failed_client_activations_24h": "zeta_guard_kpi_failed_client_activations_24h_total",
+                      "zeta_guard_kpi.impossible_travel_24h": "zeta_guard_kpi_impossible_travel_24h_total",
                       "zeta_guard_kpi.tor_accesses_24h": "zeta_guard_kpi_tor_accesses_24h_total",
                       "zeta_guard_kpi.vpn_accesses_24h": "zeta_guard_kpi_vpn_accesses_24h_total",
                       "zeta_guard_kpi.requests_by_unregister_clients.authorization_server.count": "zeta_guard_kpi_requests_by_unregister_clients_authorization_server_count_total",
@@ -138,8 +139,17 @@ spec:
                   # if a run is ever delayed past it).
                   today = midnight.strftime("%Y-%m-%d")
 
-                  def query_increase(prom_name):
-                      promql = f"sum(increase({prom_name}[{seconds_today}s]))"
+                  # A_25484-03: only the KPIs in SPLIT_BY_CATEGORY are pushed as one data point per user
+                  # role (Versicherter|Leistungserbringer|Unbekannt); every other KPI stays a single total data
+                  # point, even if its series carry the category label.
+                  # CATEGORY_LABEL is the Prometheus label of the OTLP attribute CATEGORY_ATTRIBUTE.
+                  CATEGORY_LABEL = "user_roles"
+                  CATEGORY_ATTRIBUTE = "user.roles"
+                  SPLIT_BY_CATEGORY = {"zeta_guard_kpi.impossible_travel_24h"}
+
+                  def query_increase(otel_name, prom_name):
+                      group = f" by ({CATEGORY_LABEL})" if otel_name in SPLIT_BY_CATEGORY else ""
+                      promql = f"sum{group} (increase({prom_name}[{seconds_today}s]))"
                       url = PROM_URL + "?" + urllib.parse.urlencode({"query": promql})
                       with urllib.request.urlopen(url, timeout=10) as resp:
                           body = json.load(resp)
@@ -153,9 +163,24 @@ spec:
                       # slightly beyond the observed samples), so round back
                       # to a whole number here rather than reporting e.g.
                       # 41.98 events.
-                      return round(float(result[0]["value"][1]))
+                      fractions = [
+                          (series["metric"].get(CATEGORY_LABEL), float(series["value"][1]))
+                          for series in result
+                      ]
+                      # Round the total once and hand it out to the categories by largest
+                      # remainder, so the per-category values add up to the total that a plain
+                      # sum(increase(...)) reports (rounding each category on its own can be off by
+                      # one). A single series (no category) is just round(value) as before.
+                      total = round(sum(value for _, value in fractions))
+                      counts = [int(value) for _, value in fractions]
+                      by_remainder = sorted(
+                          range(len(fractions)), key=lambda i: fractions[i][1] - counts[i], reverse=True
+                      )
+                      for i in by_remainder[:max(total - sum(counts), 0)]:
+                          counts[i] += 1
+                      return [(category, count) for (category, _), count in zip(fractions, counts)]
 
-                  def push_metric(otel_name, value):
+                  def push_metric(otel_name, points):
                       payload = {
                           "resourceMetrics": [{
                               "resource": {
@@ -175,8 +200,11 @@ spec:
                                               "asDouble": value,
                                               "attributes": [
                                                   {"key": "zeta-client.date", "value": {"stringValue": today}},
-                                              ],
-                                          }],
+                                              ] + (
+                                                  [{"key": CATEGORY_ATTRIBUTE, "value": {"stringValue": category}}]
+                                                  if category is not None else []
+                                              ),
+                                          } for category, value in points],
                                       },
                                   }],
                               }],
@@ -210,16 +238,16 @@ spec:
                       # and abort the whole loop, defeating the point of
                       # isolating one metric's failure from the rest.
                       try:
-                          value = query_increase(prom_name)
+                          points = query_increase(otel_name, prom_name)
                       except Exception as e:
                           print(f"ERROR: prometheus query failed for {prom_name}: {e}", file=sys.stderr)
                           error_count += 1
                           continue
-                      if value is None:
+                      if points is None:
                           continue  # no samples yet today - not a failure
 
                       try:
-                          status = push_metric(otel_name, value)
+                          status = push_metric(otel_name, points)
                       except urllib.error.HTTPError as e:
                           print(f"ERROR: OTLP push failed for {otel_name}: HTTP {e.code} {e.read()}", file=sys.stderr)
                           error_count += 1
@@ -229,7 +257,7 @@ spec:
                           error_count += 1
                           continue
 
-                      print(f"Pushed {otel_name}={value}, OTLP receiver returned HTTP {status}")
+                      print(f"Pushed {otel_name}={points}, OTLP receiver returned HTTP {status}")
                       sent_count += 1
 
                   if sent_count == 0:

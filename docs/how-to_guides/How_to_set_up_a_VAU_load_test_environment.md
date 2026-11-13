@@ -197,7 +197,8 @@ zeta-guard:
     replicaCount: 2               # 2× PEP
     asl_enabled: true             # ASL
     aslOcsp: "off"                # OCSP off (PEP ASL)
-    hsmProxyAddr: "hsm-sim:50051" # PEP TLS via HSM (ossl_hsm)
+    hsmProxyAddr: "http://hsm-sim:50051" # PEP TLS via HSM (ossl_hsm)
+    hsmProxyPlainTextAccepted: true      # hsm-sim serves plain-text gRPC only
 
   nginxIngressHsm: true           # HSM TLS on the NIC ingress
 

@@ -2,6 +2,64 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 2.0.4
+
+### changed:
+
+- updates the ZETA SDK test drivers (testdriver, nativedriver, android-testdriver) to 2.0.6
+- updates tiger-proxy to `fork-2.0.4` and zeta-cert-validation-mock to 2.0.4
+
+## Release 2.0.3
+
+### added:
+
+- Security KPI `zeta_guard_kpi.impossible_travel_24h` (A_25484-03): number of impossible travel
+  rejections of the PEP, broken down by `user.roles` (`Versicherter`, `Leistungserbringer`,
+  `Unbekannt`). Counted from the PEP's attack log event (`attackDetection.type=impossible_travel`),
+  which carries `user.roles` since the PEP's ZETAP-2297; needs a PEP that sets both. Country and
+  place are not part of it yet.
+
+### changed:
+
+- **BREAKING** `pepproxy.hsmProxyAddr`: the PEP's `ossl_hsm` provider now honours the scheme of
+  the address. `https://` connects with TLS and verifies the HSM Proxy's certificate; `http://`
+  or an address without a scheme is only accepted for a loopback address. With a plain-text
+  address to another host the PEP does not start. The new
+  `pepproxy.hsmProxyPlainTextAccepted: true` (`HSM_PROXY_ALLOW_PLAINTEXT=1`, default `false`)
+  restores the previous plain-text behaviour; set it only where the network itself protects the
+  channel, e.g. `hsm-sim` in a test cluster.
+- the KPI metrics helper CronJob pushes `zeta_guard_kpi.impossible_travel_24h` as one data point per
+  `user.roles` instead of a single total, so the breakdown reaches the TI-SIEM (A_25484-03). All
+  other KPIs are unchanged (one total data point). A role without events that day has no data
+  point. The rounded total is distributed to the roles (largest remainder), so the values add up
+  to the total reported before.
+- the PEP requires the scope `zeta:email-binding` in addition to `zeta:email-verify` for
+  `POST /auth/realms/zeta-guard/zeta/identity/bind-email`; `.../resend` and `.../verify` are
+  unchanged and have their own locations in the PEP configuration
+- the client policy profile `zeta_client_policy_profile` gets the executor
+  `reject-implicit-grant`: implicit and hybrid authorization requests are
+  rejected, registrations with `response_types` `token` get the implicit flow
+  switched off. See
+  [How to upgrade ZETA Guard](docs/how-to_guides/How_to_upgrade_ZETA_Guard.md)
+- default database volume `cloudnativePg.storage.size` and
+  `keycloak-db.cluster.storage.size` is 32Gi (was 10Gi), a
+  size of 10Gi might run full with many registered clients. `docs/how-to_guides/How_to_manage_authserver_DB.md`
+  now explains how to size the volume and recommends a separate WAL volume
+  (`walStorage`) for production. In a VAU (`authserver.dbEnc.enabled: true`) the
+  integrity checks need about three times the space per client, 64Gi are
+  recommended there
+- Updated telemetry attributes attached to security KPIs signifying
+  `Versicherter`, `Leistungserbringer` and `Unbekannt`.
+- updates keycloak-zeta to 2.0.2, ngx_pep and nginx-ingress to 2.0.1, notification-service and
+  notification-keychain-generator to 2.0.2
+- updates zeta-telemetry-gateway to v0.157.1
+- test environment: updates hsm_sim to 2.0.1, the test drivers to 2.0.5, tiger-proxy to `fork-2.0.3`
+  and zeta-cert-validation-mock to 2.0.3
+
+### fixed:
+
+- Reporting of security KPIs now go directly to TI SIEM in addition to prometheus. The 24h sum through prometheus is now **deprecated**.
+
 ## Release 2.0.2
 
 ### added:
@@ -34,8 +92,6 @@
   kubectl `--request-timeout`
 - token-renewer CronJobs (`opa-`, `ti-siem-`, `ti-sim-`): `concurrencyPolicy:
   Forbid` and `activeDeadlineSeconds`, so stuck runs no longer pile up
-
-### fixed:
 
 ## Release 2.0.1
 
@@ -326,6 +382,12 @@
   the authserver session alive for the policy's refresh-token TTL; refreshing an
   idle client no longer returns `400 invalid_grant` "Session not active".
   See [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md#session-lifetime).
+
+## Release 1.3.4
+
+### changed:
+
+- bumped authserver version to `1.3.3` to include important security hotfix.
 
 ## Release 1.3.3
 
@@ -752,6 +814,19 @@
 - dead values `opa.workloadIdentityFederation.sts.{audience,tokenUrl,iamUrl,scope}` and
   `…gar.host` from schema/examples — never read by any template; the schema now rejects
   unknown `sts` keys.
+
+## Release 1.2.5
+
+### fixed:
+
+- bumped authserver version to 1.2.4 to include important security hotfix.
+
+## Release 1.2.4
+
+### fixed:
+
+- bumped pep version to include important security hotfix. (with thanks to
+  Machine Spirits UG)
 
 ## Release 1.2.3
 

@@ -25,7 +25,7 @@ replicaCount: 1
 devMode: false
 
 image:
-  tag: fork-2.0.0
+  tag: fork-2.0.4
   repository: testproxy
 imagePullPolicy: Always
 
@@ -99,6 +99,8 @@ proxyConfig:
       to: http://testdriver-oidc
     - from: /proxy
       to: http://testdriver-smcb/proxy
+    - from: /nativeproxy
+      to: http://nativedriver/nativeproxy
     - from: /opa
       to: http://opa:8181
     - from: /opa-simulation

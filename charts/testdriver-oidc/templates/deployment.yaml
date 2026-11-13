@@ -82,6 +82,10 @@ spec:
               value: {{ .Values.oidcBaseUri | quote }}
             - name: OIDC_TEST_KVNR
               value: {{ .Values.oidcTestKvnr | quote }}
+            {{- with .Values.oidcBindingEmail }}
+            - name: OIDC_BINDING_EMAIL
+              value: {{ . | quote }}
+            {{- end }}
             - name: BS_HUB_URL
               value: {{ .Values.browserstack.hubUrl | quote }}
             - name: BS_ANDROID_APP_URL
