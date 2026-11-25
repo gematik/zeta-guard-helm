@@ -43,9 +43,15 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    {{- if .Values.global.enableDNSRedirect }}
-      {{- template "global.tigerDNSRedirect" . }}
-    {{- end }}
+      {{- if or .Values.pepproxy.hostAliases .Values.global.enableDNSRedirect }}
+      hostAliases:
+        {{- with .Values.pepproxy.hostAliases }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.global.enableDNSRedirect }}
+          {{- template "global.tigerDNSRedirectEntryOnly" . }}
+        {{- end }}
+      {{- end }}
       {{- if .Values.pepproxy.asl_enabled }}
       initContainers:
         - name: trust-anchor-provisioning-processor
@@ -92,6 +98,10 @@ spec:
             {{- with .Values.pepproxy.hsmProxyAddr }}
             - name: HSM_PROXY_ADDR
               value: {{ . }}
+            {{- if $.Values.pepproxy.hsmProxyPlainTextAccepted }}
+            - name: HSM_PROXY_ALLOW_PLAINTEXT
+              value: "1"
+            {{- end }}
             {{- end }}
             {{- with $pepProxyEnvVars }}
             {{- . | nindent 12 }}

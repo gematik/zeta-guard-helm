@@ -1,6 +1,8 @@
 {{- /* vim: set ft=helm: */ -}}
 {{- /* Minion of ingress-admin-master.yaml: /auth on the dedicated admin hostname,
-     including the admin REST API and console — that is the point of this hostname. */ -}}
+     including the admin REST API, the console and the master realm that issues their
+     access token — that is the point of this hostname. Nothing here is denied except
+     the revocation endpoint below; the denials live on the public hostname. */ -}}
 {{- if and .Values.ingressEnabled .Values.authserver.adminHostname .Values.nginxIngressEnabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

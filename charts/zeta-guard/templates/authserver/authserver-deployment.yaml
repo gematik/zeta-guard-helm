@@ -91,65 +91,20 @@ spec:
         - {{ tpl (toYaml .) $ | nindent 10 }}
         {{- end}}
         {{- end}}
-        - name: keycloak-build
+        # Needed because the main container runs with readOnlyRootFilesystem and mounts an emptyDir over
+        # /opt/keycloak, where startup.sh, kc.sh build and Keycloak itself write: this seeds that volume
+        # with the image's /opt/keycloak. No kc.sh build here, startup.sh builds in the main container.
+        - name: keycloak-copy
           image: "{{ include "authserver.image" . | trim }}"
           imagePullPolicy: "{{ .Values.authserver.imagePullPolicy }}"
           command:
             - /bin/sh
             - -c
           args:
-            - |
-              set -e
-              cp -r /opt/keycloak/. /work/
-              cd /work
-              ./bin/kc.sh build
-          env:
-            {{- if .Values.authserver.testmode }}
-            - name: KC_SPI_CONNECTIONS_HTTP_CLIENT_DEFAULT_DISABLE_TRUST_MANAGER
-              value: "true"
-            {{- end }}
-            {{- if .Values.provisioningProcessor.tslOcspEnabled }}
-            # Unset when OCSP is off: the app treats a missing OCSP_KEYSTORE_LOCATION as
-            # "OCSP disabled"; leaving it set fails on the absent ocsp-signers.p12 at startup.
-            - name: OCSP_KEYSTORE_LOCATION
-              value: "/var/trust-data/ocsp-signers.p12"
-            - name: OCSP_KEYSTORE_META_LOCATION
-              value: "/var/trust-data/ocsp-signers-meta.json"
-            - name: OCSP_KEYSTORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
-                  key: password
-            {{- end }}
-            - name: SMCB_KEYSTORE_LOCATION
-              value: "/var/trust-data/smcb-trust-roots.p12"
-            - name: SMCB_KEYSTORE_META_LOCATION
-              value: "/var/trust-data/smcb-trust-roots-meta.json"
-            - name: SMCB_KEYSTORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
-                  key: password
-            - name: TPM_KEYSTORE_LOCATION
-              value: "/var/trust-data/tpm-trust-roots.p12"
-            - name: TPM_KEYSTORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.authserver.truststoresSecretRef | default "pdp-truststores-pw" | quote }}
-                  key: password
-            # Periodic reload of the truststores above, so a provisioning run takes effect without restarting the pod.
-            - name: TRUSTSTORE_RELOAD_ENABLED
-              value: {{ .Values.authserver.truststoreReload.enabled | quote }}
-            - name: TRUSTSTORE_RELOAD_INTERVAL
-              value: {{ .Values.authserver.truststoreReload.interval | quote }}
-            {{- include "keycloak.buildOptions" . | nindent 12 }}
-            - name: KC_DB
-              value: "{{ include "authserver.kcDb" . }}"
+            - cp -r /opt/keycloak/. /work/
           volumeMounts:
             - name: keycloak-home
               mountPath: /work
-            - name: tmp
-              mountPath: /tmp
           {{- with .Values.authserver.initContainer.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -245,6 +200,7 @@ spec:
             - --optimized
             - --db-pool-min-size={{ .Values.authserver.dbPool.minSize }}
             - --db-pool-max-size={{ .Values.authserver.dbPool.maxSize }}
+            - --db-pool-max-lifetime={{ .Values.authserver.dbPool.maxLifetime }}
             - --http-pool-max-threads={{ .Values.authserver.httpPool.maxThreads }}
             - --hostname-strict=false
             - --proxy-headers=xforwarded
@@ -263,6 +219,10 @@ spec:
             - --http-access-log-enabled=true
           livenessProbe:
             httpGet:
+              {{- /* Deliberately DB-independent. Pointing liveness at /health/ready would let a
+                   single database outage kill every authserver pod at once, turning a recoverable
+                   incident into a restart cascade. The pool recovers on its own (see the
+                   validation settings below); it needs no help from the kubelet. */}}
               path: /auth-mgmt/health/live/ # align with KC_HTTP_MANAGEMENT_RELATIVE_PATH
               port: http-mgmt-port
               {{- if or .Values.authserver.hsm.tls.enabled .Values.authserver.tls.enabled }}
@@ -270,6 +230,7 @@ spec:
               {{- end }}
             initialDelaySeconds: {{ .Values.authserver.probes.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.authserver.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.authserver.probes.liveness.timeoutSeconds }}
             failureThreshold: {{ .Values.authserver.probes.liveness.failureThreshold }}
           readinessProbe:
             httpGet:
@@ -280,6 +241,7 @@ spec:
               {{- end }}
             initialDelaySeconds: {{ .Values.authserver.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.authserver.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.authserver.probes.readiness.timeoutSeconds }}
             failureThreshold: {{ .Values.authserver.probes.readiness.failureThreshold }}
           startupProbe:
             httpGet:
@@ -290,6 +252,7 @@ spec:
               {{- end }}
             initialDelaySeconds: {{ .Values.authserver.probes.startup.initialDelaySeconds }}
             periodSeconds: {{ .Values.authserver.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.authserver.probes.startup.timeoutSeconds }}
             failureThreshold: {{ .Values.authserver.probes.startup.failureThreshold }}
           env:
             {{- if .Values.authserver.testmode }}
@@ -366,6 +329,7 @@ spec:
                 -XX:MaxMetaspaceSize=256m
                 -XX:+UseG1GC
                 -XX:MaxGCPauseMillis=200
+                -XX:-UseBASE64Intrinsics
                 {{- with .Values.global.noProxy }}
                 -Dhttp.nonProxyHosts={{ regexReplaceAll "(^|,)\\." . "${1}*." | replace "," "|" }}
                 {{- end }}
@@ -520,13 +484,32 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.authserver.smcbHashingPepperSecretRef | default "smcb-hashing-pepper" | quote }}
                   key: pepper
+            # Agroal connection validation (ANFTI2-881). Keycloak exposes no first-class
+            # option for any of these, so they go in as plain Quarkus properties: its own
+            # KcEnvConfigSource reads only KC_/KCRAW_ names, but it does not replace Quarkus'
+            # default EnvConfigSource, which stays active alongside it.
+            # Without a validation timeout Quarkus validates with isValid(0) — no socket
+            # timeout — so the check hangs on the dead socket it is meant to detect, and the
+            # pool never recovers. Foreground validation has no Quarkus default at all, so a
+            # stale connection otherwise goes straight to a request thread.
+            # Do NOT add validation-query-sql: it replaces the timeout-aware validator with
+            # one using setQueryTimeout(), which pgjdbc implements as a cancel over a second
+            # socket — useless against a server that answers nothing.
+            - name: QUARKUS_DATASOURCE_JDBC_VALIDATION_QUERY_TIMEOUT
+              value: {{ .Values.authserver.dbPool.validationQueryTimeout | quote }}
+            - name: QUARKUS_DATASOURCE_JDBC_BACKGROUND_VALIDATION_INTERVAL
+              value: {{ .Values.authserver.dbPool.backgroundValidationInterval | quote }}
+            - name: QUARKUS_DATASOURCE_JDBC_FOREGROUND_VALIDATION_INTERVAL
+              value: {{ .Values.authserver.dbPool.foregroundValidationInterval | quote }}
+            - name: QUARKUS_DATASOURCE_JDBC_IDLE_REMOVAL_INTERVAL
+              value: {{ .Values.authserver.dbPool.idleRemovalInterval | quote }}
             # DB wiring switches by databaseMode value (cloudnative|external)
             {{- if eq .Values.databaseMode "cloudnative" }}
             # CloudNativePG-backed DB
             - name: KC_DB
               value: "postgres"
             - name: KC_DB_URL
-              value: {{ .Values.cloudnativeDbUrl | quote }}
+              value: {{ include "authserver.dbUrl" . | quote }}
             - name: KC_DB_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -544,7 +527,7 @@ spec:
             - name: KC_DB
               value: {{ .Values.authserverDb.kcDb | quote }}
             - name: KC_DB_URL
-              value: {{ .Values.authserverDb.kcDbUrl | quote }}
+              value: {{ include "authserver.dbUrl" . | quote }}
             - name: KC_DB_USERNAME
               valueFrom:
                 secretKeyRef:

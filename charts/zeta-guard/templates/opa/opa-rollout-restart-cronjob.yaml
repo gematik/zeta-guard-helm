@@ -8,8 +8,14 @@ metadata:
 spec:
   timeZone: "Europe/Berlin"
   schedule: {{ .Values.opa.rolloutRestart.schedule | quote }}
+  # never overlap, never crawl for hours (a memory-starved kubectl saturates the node's OS disk)
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 300
       backoffLimit: {{ .Values.opa.rolloutRestart.backoffLimit | default 5 }}
       template:
         metadata:
@@ -47,8 +53,8 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - >-
-                  kubectl rollout restart deployment/opa -n {{ .Release.Namespace }}
+                  kubectl --request-timeout=60s rollout restart deployment/opa -n {{ .Release.Namespace }}
                   {{- if .Values.opa.simulation.enabled }}
-                  && kubectl rollout restart deployment/opa-simulation -n {{ .Release.Namespace }}
+                  && kubectl --request-timeout=60s rollout restart deployment/opa-simulation -n {{ .Release.Namespace }}
                   {{- end }}
 {{- end }}

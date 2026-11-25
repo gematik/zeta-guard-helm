@@ -48,6 +48,8 @@ resource "terraform_data" "vau_db_enc" {
     keycloak_openid_audience_protocol_mapper.pdp_audience_mapper,
     keycloak_generic_protocol_mapper.zeta_guard_mapper,
     keycloak_realm_optional_client_scopes.pdp_optional_scopes,
+    # client-scope-sync.tf
+    terraform_data.sync_client_optional_scopes,
     # policies.tf
     data.external.manage_policies,
     # identity-providers.tf

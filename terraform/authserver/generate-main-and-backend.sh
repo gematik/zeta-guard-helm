@@ -62,12 +62,12 @@ substitute_placeholder "$PROVIDERS_TF" "KUBERNETES_PROVIDER_BLOCK" "$K8S_PROVIDE
 echo "Generated $PROVIDERS_TF (use_kubernetes=$USE_K8S)"
 
 # generate mode-assert.tf — asserts that var.use_kubernetes matches the mode the
-# files were generated for. The credentials no longer live here: they come from
-# TF_VAR_keycloak_* only (see credentials.tf), so this file holds no kubernetes_*
-# blocks and sekidp-secret.tf below is the sole source of the Kubernetes provider
-# requirement. Terraform derives provider requirements statically from resource
-# type names, so that file must be absent — not merely count = 0 — for
-# `terraform init` to skip the provider in local mode.
+# files were generated for. It holds no kubernetes_* blocks — the credentials
+# come from TF_VAR_keycloak_* only (see variables.tf), so sekidp-secret.tf below
+# is the sole source of the Kubernetes provider requirement. Terraform derives
+# provider requirements statically from resource type names, so that file must
+# be absent — not merely count = 0 — for `terraform init` to skip the provider
+# in local mode.
 cp "$MODE_ASSERT_FILE" "$MODE_ASSERT_TF"
 echo "Generated $MODE_ASSERT_TF (use_kubernetes=$USE_K8S)"
 

@@ -38,15 +38,26 @@ spec:
       http:
         paths:
           {{- if and .Values.authserver.adminHostname (not .Values.routeViaTigerProxy) }}
-          {{- /* Admin REST API and console are denied here and reachable on
-               authserver.adminHostname instead. Routed to the PEP — which answers 403 (see
-               _pep-nginx-conf.tpl) — rather than denied via a NIC location-snippet, so the
-               block also holds for standard nginx-ingress, OpenShift Routes, GKE Ingress
-               and any other controller: plain Ingress path routing is all it relies on.
-               Wins over the /auth path of the zeta-guard-auth minion because both nginx
-               and the Ingress spec resolve overlapping prefixes longest-match-first,
-               independent of declaration order. */}}
+          {{- /* Admin REST API, console and the master realm are denied here and reachable
+               on authserver.adminHostname instead. The master realm goes with them: it
+               serves no ZETA traffic (that is the zeta-guard realm) and its token endpoint
+               is where an admin access token is minted — admin-cli direct grant, as every
+               terraform/authserver/scripts/*.sh does. Leaving it public would expose the
+               admin credential surface that blocking /auth/admin is meant to close.
+               Routed to the PEP — which answers 403 (see _pep-nginx-conf.tpl) — rather than
+               denied via a NIC location-snippet, so the block also holds for standard
+               nginx-ingress, OpenShift Routes, GKE Ingress and any other controller: plain
+               Ingress path routing is all it relies on. Both win over the /auth path of the
+               zeta-guard-auth minion because both nginx and the Ingress spec resolve
+               overlapping prefixes longest-match-first, independent of declaration order. */}}
           - path: /auth/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: pep-proxy-svc
+                port:
+                  number: 80
+          - path: /auth/realms/master
             pathType: Prefix
             backend:
               service:

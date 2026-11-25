@@ -39,10 +39,12 @@ metadata:
           return 404;
       }
       {{- if .Values.authserver.adminHostname }}
-      # Admin REST API and console are reachable on authserver.adminHostname instead.
-      # Without an admin hostname they stay available here, since otherwise there would
-      # be no way to reach them at all.
-      location ~ ^/auth/admin {
+      # Admin REST API, console and the master realm are reachable on
+      # authserver.adminHostname instead. The master realm carries the admin token
+      # endpoint (admin-cli direct grant) and serves no ZETA traffic, which runs on the
+      # zeta-guard realm. Without an admin hostname they stay available here, since
+      # otherwise there would be no way to reach them at all.
+      location ~ ^/auth/(admin|realms/master)(/|$) {
           return 404;
       }
       {{- end }}

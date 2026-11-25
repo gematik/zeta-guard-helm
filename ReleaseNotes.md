@@ -2,12 +2,131 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.3.7
+
+### changed:
+
+- authserver image `1.3.5`: OpenJDK 21.0.13.1 (CVE-2026-114938)
+- pepproxy image `1.3.6`: ASL HTTP request smuggling fix (CWE-444), nginx 1.31.9
+- nginx-ingress image `1.3.6` (NIC 5.8.0)
+- keychain-generator image `2.0.4-1`: OpenJDK 27.0.1.1 (CVE-2026-114938)
+- updates nginx-ingress chart to 2.9.0 (NIC 5.8.0)
+
+## Release 1.3.6
+
+### added:
+
+- `pepproxy.nginxConf.pepInternalUrl`: cluster-internal authserver address for
+  OIDC discovery and the JWKS fetch only; `pepIssuer` stays the expected `iss`.
+  Off by default, needs a PEP image newer than 1.3.4. See
+  [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md).
+  Resolves ANFTI2-477
+- `pepproxy.hostAliases`: extra `/etc/hosts` entries for the PEP pod, merged
+  with the `global.enableDNSRedirect` entries.
+- new terraform vars `smtp_starttls`, `smtp_ssl`, `smtp_auth_username` and
+  `smtp_auth_password` to configure STARTTLS, SSL and auth for the SMTP server.
+  Resolves ANFTI2-1040
+
+### changed:
+
+- **BREAKING** `pepproxy.hsmProxyAddr`: the PEP's `ossl_hsm` provider now honours the scheme of
+  the address. `https://` connects with TLS and verifies the HSM Proxy's certificate; `http://`
+  or an address without a scheme is only accepted for a loopback address. With a plain-text
+  address to another host the PEP does not start. The new
+  `pepproxy.hsmProxyPlainTextAccepted: true` (`HSM_PROXY_ALLOW_PLAINTEXT=1`, default `false`)
+  restores the previous plain-text behaviour; set it only where the network itself protects the
+  channel, e.g. `hsm-sim` in a test cluster.
+- ⚠️ `authserver.provider.smcB.ocspFailClosed` now defaults to `true`: the SMC-B
+  token exchange is also denied when the OCSP status cannot be determined. Set
+  `false` for the previous fail-open behaviour, see
+  [SMC-B OCSP revocation check](docs/how-to_guides/How_to_configure_authserver.md#smc-b-ocsp-revocation-check).
+- Terraform can add new realm optional scopes (`pdp_scopes`, notification scopes)
+  to clients already registered via DCR. Off by default
+  (`sync_existing_client_scopes`): the sync reads every client of the realm, so
+  enable it only for realms with few clients (limit: `sync_existing_client_scopes_max_clients`)
+- ⚠️ `opa.simulation.bundle.resource` is now required with bundle mode and
+  simulation enabled. The `-sim` tag suffix appended to `opa.bundle.resource` is
+  gone:
+  gematik names simulation bundles differently per environment, so the derived
+  reference 404ed. See [OPA](docs/reference/OPA.md#simulation-settings).
+  Resolves ANFTI2-983
+- authserver image `1.3.4`, pepproxy image `1.3.5`, nginx-ingress image `1.3.5` (NIC 5.7.0)
+- testdriver and nativedriver image `1.3.4`
+- updates nginx-ingress chart to 2.8.0 (NIC 5.7.0)
+- updates OPA-Image to 1.21.3-static
+- updates nginx/nginx-prometheus-exporter to 1.5.3. Resolves ANFTI2-673
+- updates telemetry-gateway to "v0.157.1". Resolves ANFTI2-951
+- `opa-rollout-restart-cronjob`: memory limit 256Mi (was 64Mi), no overlapping runs and a 5-minute
+  `activeDeadlineSeconds`; token-renewer CronJobs get the same guards
+- pepproxy gets a default `containerSecurityContext` (nginx and metrics sidecar), overridable.
+  Resolves ANFTI2-969
+- the client policy profile `zeta_client_policy_profile` gets the executor
+  `reject-implicit-grant`: implicit and hybrid authorization requests are
+  rejected, registrations with `response_types` `token` get the implicit flow
+  switched off. See
+  [How to upgrade ZETA Guard](docs/how-to_guides/How_to_upgrade_ZETA_Guard.md)
+- authserver JVM runs with `-XX:-UseBASE64Intrinsics` (added to `JAVA_OPTS_APPEND`)
+  as mitigation for the OpenJDK vulnerability advisory of 2026-11-17
+  (CVE-2026-114938). If you
+  set `JAVA_TOOL_OPTIONS` on the authserver manually via `kubectl`, you can
+  remove the variable after the upgrade.
+- ⚠️ with `authserver.adminHostname` set, `/auth/realms/master` on the public
+  hostname now answers `403`; `terraform apply` pins the master realm's
+  `frontendUrl` to the admin hostname so the Admin Console login keeps working —
+  run it before the Helm upgrade. See
+  [How to configure authserver](docs/how-to_guides/How_to_configure_authserver.md).
+  Resolves ANFTI2-908
+- PEP proxy access log: with `pepproxyTracingEnabled: true`, each line now ends
+  with `trace_id=<id> span_id=<id>` (OpenTelemetry trace context). Untraced
+  requests log empty IDs. With tracing disabled the format is unchanged. The
+  telemetry gateway copies them into the OTLP log record's `TraceId`/`SpanId`.
+- authserver init container `keycloak-build` is now `keycloak-copy` and only
+  copies `/opt/keycloak`; `startup.sh` runs `kc.sh build` once instead of twice.
+  Default `authserver.initContainer.resources` reduced, values keys unchanged.
+  Resolves ANFTI2-976
+- The Terraform variable `keycloak_namespace` is only required when
+  `use_kubernetes = true`. Local mode reads it nowhere, yet it still made
+  `terraform plan` fail with `The argument "keycloak_namespace" is required`.
+  See
+  [How to configure the authserver](docs/how-to_guides/How_to_configure_authserver.md).
+  Resolves ANFTI2-863
+- authserver survives a database failover. Resolves ANFTI2-881. New values
+  `authserver.db.urlProperties` (pgjdbc parameters appended to `KC_DB_URL`,
+  default `socketTimeout: 120`, `tcpKeepAlive: true`) and
+  `authserver.dbPool.{maxLifetime,validationQueryTimeout,backgroundValidationInterval,foregroundValidationInterval,idleRemovalInterval}`.
+  See
+  [How to configure authserver](docs/how-to_guides/How_to_configure_authserver.md#connection-resilience-and-database-failover)
+- ⚠️ authserver probe defaults changed: liveness/readiness `periodSeconds` 10
+  (was 5), liveness `failureThreshold` 3 (was 5), startup `failureThreshold` 60
+  (was 20, i.e. up to 300s). `timeoutSeconds: 5` is set on all three probes and
+  required by `values.schema.json`; the liveness probe stays on `/health/live`.
+- ⚠️ `authserver.db.urlProperties.socketTimeout` bounds every statement,
+  Liquibase DDL included. Raise it before an upgrade with a heavy schema
+  migration, otherwise the Liquibase lock stays held.
+- with `pepproxy.hsmProxyAddr` set (ASL via HSM), the PEP TLS listener on 8443 is
+  only rendered if `pepproxy.hsmTlsCert` and `pepproxy.hsmTlsKeyId` are set. Both
+  have defaults, so it is only dropped when both are explicitly emptied.
+  Resolves ANFTI2-959
+- new terraform vars `sso_session_idle_timeout` and `sso_session_max_lifespan` (default `24h`, previously Keycloak's
+  30m/10h) keep the authserver session alive as long as the refresh token; effective after `terraform apply`.
+  Resolves ANFTI2-1013, ANFTI2-727
+- docs: the egress categories `ocspCabForum`, `ocspSmcbTsp` and `ocspTiPki` are described in
+  [How to configure NetworkPolicies](docs/how-to_guides/How_to_configure_NetworkPolicies.md).
+  Resolves ANFTI2-884
+
+### fixed:
+
+- `terraform/authserver/scripts/kc-admin-env.sh` printed Keycloak admin
+  credentials with non-ASCII characters (`£`, `€`, …) as `$'…'`, which `dash`
+  (`/bin/sh` on Debian/Ubuntu) cannot `eval`; it now prints POSIX single quotes.
+  Resolves ANFTI2-1011, ANFTI2-862
+
 ## Release 1.3.5
 
 ### changed:
 
 - bumped pep version to `1.3.4` to include important security hotfix.
-- 
+
 ## Release 1.3.4
 
 ### changed:
@@ -18,7 +137,7 @@
 
 ### changed:
 
-- pepproxy image `1.3.3` (hardened ASL subrequest target URL handling)
+- pepproxy image `1.3.3`
 
 ## Release 1.3.2
 

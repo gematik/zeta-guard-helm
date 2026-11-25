@@ -68,8 +68,8 @@ default:
         - `kubectl -n <ns> get ingress zeta-guard-pep testdriver -o yaml 
         | rg websocket-services`
     - `/auth` → `authserver` (or `tiger-proxy` when routing via Tiger)
-    - `/auth/admin` → `pep-proxy-svc`, answering `403` (only with
-      `adminHostname` set and `routeViaTigerProxy: false`)
+    - `/auth/admin` and `/auth/realms/master` → `pep-proxy-svc`, answering `403`
+      (only with `adminHostname` set and `routeViaTigerProxy: false`)
     - `/` → `pep-proxy-svc` (or `tiger-proxy` when routing via Tiger)
     - `/proxy` and `/testdriver-api` → owned by `testdriver` minion
 - TLS policy:
@@ -90,30 +90,35 @@ hostname:
 
 On the **main hostname**, `/auth` keeps routing to `authserver` via the
 `zeta-guard-auth` minion — the realm endpoints (token, nonce, registration,
-well-known) must stay reachable there. Only `/auth/admin` is peeled off: the
-`zeta-guard-pep` minion gains a `/auth/admin` path pointing at `pep-proxy-svc`,
-where a `location ~ ^/auth/admin` block returns `403`.
+well-known) must stay reachable there. Two paths are peeled off: the
+`zeta-guard-pep` minion gains a `/auth/admin` **and** a `/auth/realms/master`
+path pointing at `pep-proxy-svc`, where a
+`location ~ ^/auth/(admin|realms/master)(/|$)` block returns `403`. The `master`
+realm goes with the admin API because it carries the admin token endpoint
+(`client_id=admin-cli`, direct grant); the `zeta-guard` realm that serves all
+ZETA traffic is untouched.
 
 That works because both nginx and the Ingress specification resolve overlapping
 prefixes **longest-match-first**, independent of declaration order — so
-`/auth/admin` wins over `/auth`. Since it relies on nothing but plain Ingress
-path routing, the block holds for F5 NIC, standard nginx-ingress, OpenShift
-Routes, GKE Ingress and any other controller.
+`/auth/admin` and `/auth/realms/master` win over `/auth`. Since it relies on
+nothing but plain Ingress path routing, the block holds for F5 NIC, standard
+nginx-ingress, OpenShift Routes, GKE Ingress and any other controller.
 
 With F5 NIC a second, redundant layer exists: `zeta-guard-auth` carries a
-`nginx.org/location-snippets` annotation that returns `404` for `/auth/admin`
-nested inside its `/auth` location. It is shadowed by the longer `/auth/admin`
-prefix above, and only takes effect when that path is absent — i.e. with
+`nginx.org/location-snippets` annotation that returns `404` for the same two
+paths nested inside its `/auth` location. It is shadowed by the longer prefixes
+above, and only takes effect when those paths are absent — i.e. with
 `routeViaTigerProxy: true`.
 
 **Relationship with `routeViaTigerProxy`**
 
 When `routeViaTigerProxy: true`, both `/auth` and `/` route to tiger-proxy,
 which internally forwards `/auth → http://authserver/auth` and bypasses the PEP
-entirely. The `/auth/admin` path is therefore **not** rendered in that mode, and
-the controller-agnostic block does not apply. With F5 NIC the
-`location-snippets`
-layer still returns `404`; with any other controller `/auth/admin` stays
+entirely. The `/auth/admin` and `/auth/realms/master` paths are therefore
+**not**
+rendered in that mode, and the controller-agnostic block does not apply. With F5
+NIC the `location-snippets`
+layer still returns `404`; with any other controller both stay
 reachable on the main hostname. Tiger-proxy is a test tool only — production
 deployments use `routeViaTigerProxy: false`.
 

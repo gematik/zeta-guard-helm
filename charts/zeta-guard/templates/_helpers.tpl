@@ -352,3 +352,50 @@ The registry-ca volume itself is emitted by zeta-guard.provisioningProcessor.caV
   ports:
     {{- toYaml $dns.ports | nindent 4 }}
 {{- end -}}
+
+{{/*
+  Helper: authserver.dbUrl
+  Renders the authserver JDBC URL for the active databaseMode, with
+  authserver.db.urlProperties appended as query parameters.
+
+  This is where the pgjdbc driver settings live (socketTimeout, tcpKeepAlive). They cannot
+  be passed as QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_* environment variables:
+  that is a Map property, and an env var name cannot carry the camelCase key — it would
+  arrive as "sockettimeout" and pgjdbc would silently ignore it. In the URL the case
+  survives, and pgjdbc gives URL values priority over connection properties anyway
+  (Driver.parseURL: "priority 1 - URL values").
+
+  Deliberately NOT KC_DB_URL_PROPERTIES: Keycloak ignores that option whenever db-url is
+  set (DatabaseOptions.DB_URL_PROPERTIES), which it always is here.
+
+  A JDBC URL is an opaque URI, so urlParse leaves .host/.path empty and puts everything
+  after "jdbc:" into .opaque — but it does split off an existing query, and urlJoin puts
+  the pieces back together unchanged. Hence the existing query is merged rather than
+  replaced: setting .query outright would silently drop it.
+
+  Values are urlquery-escaped; pgjdbc decodes them again (URLCoder.decode -> URLDecoder).
+  Pairs are sorted so repeated renders are byte-stable — Go map iteration order is
+  randomised, and an unstable env value would roll the Deployment on every helm upgrade.
+*/}}
+{{- define "authserver.dbUrl" -}}
+{{- $base := ternary .Values.cloudnativeDbUrl .Values.authserverDb.kcDbUrl (eq .Values.databaseMode "cloudnative") -}}
+{{- $props := (.Values.authserver.db).urlProperties | default dict -}}
+{{- if not $props -}}
+{{- $base -}}
+{{- else -}}
+{{- range $forbidden := list "connectTimeout" "targetServerType" -}}
+{{- if hasKey $props $forbidden -}}
+{{- fail (printf "authserver.db.urlProperties.%s is not allowed: Keycloak substring-matches the JDBC URL and stops injecting its own default (db-connect-timeout=10s, db-postgres-target-server-type=primary) as soon as either name appears there. Use --db-connect-timeout for the former and leave the latter at Keycloak's default." $forbidden) -}}
+{{- end -}}
+{{- end -}}
+{{- $pairs := list -}}
+{{- range $k, $v := $props -}}
+{{- $pairs = append $pairs (printf "%s=%s" (urlquery $k) (urlquery (toString $v))) -}}
+{{- end -}}
+{{- $url := urlParse $base -}}
+{{- $query := join "&" (sortAlpha $pairs) -}}
+{{- if $url.query -}}{{- $query = printf "%s&%s" $url.query $query -}}{{- end -}}
+{{- $_ := set $url "query" $query -}}
+{{- urlJoin $url -}}
+{{- end -}}
+{{- end -}}

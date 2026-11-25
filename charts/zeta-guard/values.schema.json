@@ -169,7 +169,7 @@
           "type": "string",
           "description": "If you provide a secret with the smcb hashing pepper yourself, you can reference it here via its name. It needs the field 'pepper'.",
           "examples": [
-            "genesis-hash"
+            "smcb-hashing-pepper"
           ]
         },
         "admin": {
@@ -316,7 +316,7 @@
         },
         "initContainer": {
           "type": "object",
-          "description": "Authserver keycloak-build init container configuration.",
+          "description": "Authserver keycloak-copy init container configuration (copies /opt/keycloak into the writable volume).",
           "properties": {
             "containerSecurityContext": {
               "$ref": "#/$defs/K8sContainerSecurityContext",
@@ -618,6 +618,45 @@
               "examples": [
                 100
               ]
+            },
+            "maxLifetime": {
+              "type": "string",
+              "description": "Keycloak --db-pool-max-lifetime: ISO-8601 duration after which a pooled connection is closed and replaced, so a socket orphaned by a CloudNativePG switchover cannot sit in the pool forever. Keycloak's own default for PostgreSQL is unlimited. Use this first-class option rather than the underlying quarkus.datasource.jdbc.max-lifetime, which Keycloak warns against setting directly.",
+              "examples": [
+                "PT30M"
+              ]
+            },
+            "validationQueryTimeout": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.validation-query-timeout: bounds the pool's own connection validation. Unset, Quarkus validates with isValid(0) - no socket timeout - so validation hangs on a dead socket and the pool never recovers.",
+              "examples": [
+                "2S"
+              ]
+            },
+            "backgroundValidationInterval": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.background-validation-interval: background sweep over idle connections (Quarkus default 2M).",
+              "examples": [
+                "15S"
+              ]
+            },
+            "foregroundValidationInterval": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.foreground-validation-interval: validate on acquire once a connection has been idle longer than this. Quarkus has no default, i.e. it is off by default.",
+              "examples": [
+                "5S"
+              ]
+            },
+            "idleRemovalInterval": {
+              "type": "string",
+              "pattern": "^(PT)?[0-9]+(\\.[0-9]+)?[SsMmHhDd]$",
+              "description": "quarkus.datasource.jdbc.idle-removal-interval: reap idle connections (Quarkus default 5M). Never shrinks the pool below minSize.",
+              "examples": [
+                "1M"
+              ]
             }
           }
         },
@@ -698,9 +737,9 @@
                 },
                 "ocspFailClosed": {
                   "type": "boolean",
-                  "description": "Default false (fail-open): only a REVOKED SMC-B OCSP response denies the token exchange; undetermined status (unreachable/timeout/unknown) is allowed so the service stays operational during an OCSP outage. Set true to also deny when the status cannot be determined.",
+                  "description": "Default true (fail-closed): the token exchange is denied on a REVOKED SMC-B OCSP response and also when the status cannot be determined (unreachable/timeout/unknown). Set false (fail-open) to deny only on REVOKED, so the service stays operational during an OCSP outage.",
                   "examples": [
-                    false
+                    true
                   ]
                 }
               }
@@ -713,7 +752,7 @@
         },
         "adminHostname": {
           "type": "string",
-          "description": "When set, /auth/admin is blocked via the PEP proxy and a dedicated admin ingress is created. Terraform/CI must use this hostname for keycloak_url.",
+          "description": "When set, /auth/admin and /auth/realms/master are blocked via the PEP proxy and a dedicated admin ingress is created. The master realm carries the admin token endpoint; the zeta-guard realm is unaffected. Terraform/CI must use this hostname for keycloak_url.",
           "examples": [
             "admin.zeta-kind.local"
           ]
@@ -767,6 +806,29 @@
         "tolerations": {
           "type": "array",
           "description": "Kubernetes tolerations for authserver pod scheduling."
+        },
+        "db": {
+          "type": "object",
+          "description": "Authserver database connection behaviour (JDBC parameters and startup ordering).",
+          "properties": {
+            "urlProperties": {
+              "type": "object",
+              "description": "pgjdbc connection parameters appended to KC_DB_URL as query parameters. Driver settings live here rather than in QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_* because that is a Map property whose camelCase key an environment variable name cannot carry ('sockettimeout' is silently ignored by pgjdbc). 'connectTimeout' and 'targetServerType' are rejected: naming either in the URL makes Keycloak stop injecting its own default.",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "integer",
+                  "boolean"
+                ]
+              },
+              "examples": [
+                {
+                  "socketTimeout": 120,
+                  "tcpKeepAlive": true
+                }
+              ]
+            }
+          }
         }
       }
     },
@@ -797,7 +859,7 @@
       "type": "string",
       "description": "Container image for the nginx-prometheus-exporter sidecar. Required when pepproxyMetricsEnabled is true.",
       "examples": [
-        "europe-west3-docker.pkg.dev/gematik-pt-zeta-prod/zeta-dcr/nginx-prometheus-exporter:1.5.1-zeta1"
+        "nginx/nginx-prometheus-exporter:1.5.3@sha256:85666e7fde7e253f1c6d978f9a961245df4c9cdb7677e1866d9bb28e8f9ee41d"
       ]
     },
     "gematik": {
@@ -1373,9 +1435,16 @@
             },
             "pepIssuer": {
               "type": "string",
-              "description": "OIDC issuer (iss) of the authorization server used for access token validation. This is used for token validation as well as for retvrieving the JWKS and similar things.",
+              "description": "Public OIDC issuer (iss) of the authorization server. Always the issuer the PEP expects in access tokens. Unless pepInternalUrl is set, it is also the base URL used to fetch the OIDC discovery document and the JWKS.",
               "examples": [
                 "https://zeta-kind.local/auth/realms/zeta-guard"
+              ]
+            },
+            "pepInternalUrl": {
+              "type": "string",
+              "description": "Cluster-internal address of the authserver, used only for the OIDC discovery and JWKS fetches so that traffic stays inside the cluster instead of looping out through the ingress. Off by default (\"\"): PEP images up to 1.3.4 do not know pep_pdp_url and refuse to start on it; set it only with a newer PEP image. pepIssuer remains the expected iss. Must mirror the issuer's path structure, e.g. http://authserver/auth/realms/zeta-guard.",
+              "examples": [
+                "http://authserver/auth/realms/zeta-guard"
               ]
             },
             "pepRevocationUrl": {
@@ -1502,6 +1571,38 @@
             "type": "string"
           }
         },
+        "hostAliases": {
+          "type": "array",
+          "description": "Extra /etc/hosts entries for the PEP pod (native Kubernetes hostAliases form). Escape hatch for resolving a hostname to a cluster-internal address; prefer pepproxy.nginxConf.pepInternalUrl for the authserver. Merged with the entries generated by global.enableDNSRedirect.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "type": "string",
+                "description": "IP address the hostnames resolve to inside the pod.",
+                "examples": [
+                  "10.96.1.23"
+                ]
+              },
+              "hostnames": {
+                "type": "array",
+                "description": "Hostnames mapped to this IP.",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "zeta.example.com"
+                  ]
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "hostnames"
+            ]
+          }
+        },
         "hsmProxyAddr": {
           "type": [
             "string",
@@ -1509,8 +1610,13 @@
           ],
           "description": "gRPC URL of HSM Proxy to enable ossl_hsm integration in the PEP proxy. When set, the PEP terminates TLS on port 8443 with the HSM key hsmTlsKeyId. Set to null to disable.",
           "examples": [
-            "hsm-sim:50051"
+            "https://hsm-proxy.example:50051"
           ]
+        },
+        "hsmProxyPlainTextAccepted": {
+          "type": "boolean",
+          "description": "Accept an unprotected (plain-text gRPC) channel to the HSM Proxy (HSM_PROXY_ALLOW_PLAINTEXT=1). Without it the PEP only connects in plain text to a loopback address and otherwise needs an https:// hsmProxyAddr. Set it only where the network itself protects the channel.",
+          "default": false
         },
         "hsmTlsKeyId": {
           "type": "string",
@@ -2121,9 +2227,9 @@
               "properties": {
                 "resource": {
                   "type": "string",
-                  "description": "Bundle resource path for the simulation instance.",
+                  "description": "Fully qualified bundle resource for the simulation instance. Required when opa.bundle.enabled and opa.simulation.enabled are true; not derived from opa.bundle.resource. Where gematik publishes a simulation bundle, it must reference that bundle, never the production policies.",
                   "examples": [
-                    "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies-test/test-fachdienst-policy:latest"
+                    "europe-west3-docker.pkg.dev/gematik-pt-zeta-test/zeta-policies-tu/vsdm-policy-sim:latest"
                   ]
                 },
                 "verification": {
@@ -3389,13 +3495,16 @@
         },
         "timeoutSeconds": {
           "type": "integer",
-          "description": "Number of seconds after which the probe times out."
+          "description": "Number of seconds after which the probe times out. Required: left unset, Kubernetes applies its own default of 1s, which is too tight for the readiness probe once connection validation has evicted its first connection - Keycloak then answers every probe with a real database round-trip instead of from pool metrics. The ceiling is Agroal's acquisition timeout (PT20S)."
         },
         "successThreshold": {
           "type": "integer",
           "description": "Minimum consecutive successes for the probe to be considered successful after having failed."
         }
-      }
+      },
+      "required": [
+        "timeoutSeconds"
+      ]
     },
     "K8sPodDisruptionBudget": {
       "type": "object",

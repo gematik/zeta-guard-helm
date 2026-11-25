@@ -61,9 +61,9 @@ commands, all executed **from inside `terraform/authserver`**:
 | `make config-plan`   | `terraform plan -var-file=../../<values-dir>/<stage>.tfvars -var="skip_external_resources=true"`                                        |
 | `make config-import` | `terraform import -var-file=../../<values-dir>/<stage>.tfvars -var="skip_external_resources=true" keycloak_realm.zeta_realm zeta-guard` |
 
-`main.tf`, `providers.tf`, `credentials.tf` and the backend config are
-**generated** and gitignored — Terraform will not run without them. Generate
-them
+`main.tf`, `providers.tf`, `mode-assert.tf`, the backend config and — in
+Kubernetes mode — `sekidp-secret.tf` are **generated** and gitignored; Terraform
+will not run without them. Generate them
 first, then initialize:
 
 ```shell
@@ -141,7 +141,7 @@ With `use_kubernetes = false` the state is the file
 the machine that ran the apply — back it up yourself. Note that `make clean`
 deletes it, along with `.terraform/`, the lock file and the generated
 `main.tf` /
-`providers.tf` / `credentials.tf`; do not run it, or its equivalent `rm`,
+`providers.tf` / `mode-assert.tf`; do not run it, or its equivalent `rm`,
 between
 applies. Whoever runs the upgrade must have the same state file as whoever ran
 the
@@ -182,7 +182,10 @@ user data.
 - an admin token for the `curl` calls below. In Kubernetes mode Terraform reads
   the credentials from the `authserver-admin` Secret itself; for `curl` read
   them
-  the same way. `KC_URL` is your `keycloak_url` including `/auth`:
+  the same way. `KC_URL` is your `keycloak_url` including `/auth`. With
+  `authserver.adminHostname` set this must be the **admin** hostname — the
+  public
+  one answers `403` for `/auth/realms/master` and `/auth/admin`:
 
   ```shell
   NS=<namespace>
@@ -219,7 +222,8 @@ chart uses. Its documentation states this outright for each of them:
 | `keycloak_realm_events`                       | nothing to do — the provider's create is a `PUT` and simply overwrites |
 
 The client policy profile and its policy are **pure configuration** — a profile
-name, the `dpop-bind-enforcer` executor and the client-type conditions. They
+name, the `dpop-bind-enforcer` and `reject-implicit-grant` executors and the
+client-type conditions. They
 hold
 no user data and no client state, so deleting and recreating them is safe. Both
 endpoints replace the whole list, so an empty array clears them:
