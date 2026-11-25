@@ -53,17 +53,14 @@ services:
 
 {{/*
   Helper: opa.simBundleResource
-  Derives the simulation bundle resource string.
-  Uses opa.simulation.bundle.resource if explicitly set; otherwise appends "-sim" to the active resource.
+  The simulation bundle resource, opa.simulation.bundle.resource. Required — it is not
+  derived from opa.bundle.resource: the gematik PIP names simulation bundles differently
+  per environment (test: .../zeta-policies-tu/vsdm-policy-sim:latest, PU:
+  .../zeta-policies-sim/vsdm-policy:latest) and not for every product.
   Only call this when opa.bundle.enabled=true.
 */}}
 {{ define "opa.simBundleResource" -}}
-{{- if .Values.opa.simulation.bundle.resource -}}
-  {{- .Values.opa.simulation.bundle.resource -}}
-{{- else -}}
-  {{- $active := required "opa.bundle.resource is required when bundle.enabled=true" .Values.opa.bundle.resource -}}
-  {{- printf "%s-sim" $active -}}
-{{- end -}}
+{{- required "opa.simulation.bundle.resource is required when opa.bundle.enabled=true and opa.simulation.enabled=true: set it to the simulation policy bundle of your environment, or set opa.simulation.enabled=false" .Values.opa.simulation.bundle.resource -}}
 {{- end }}
 
 {{/*

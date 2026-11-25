@@ -7,6 +7,10 @@ resource "keycloak_realm" "zeta_realm" {
   revoke_refresh_token        = true
   refresh_token_max_reuse     = 0
 
+  # Must outlive the policy's refresh-token TTL — see variables.tf.
+  sso_session_idle_timeout = var.sso_session_idle_timeout
+  sso_session_max_lifespan = var.sso_session_max_lifespan
+
   attributes = {
     webauthn_passwordless_require_resident_key          = "NOT_SPECIFIED"
     webauthn_passwordless_user_verification_requirement = "NOT_SPECIFIED"
@@ -27,9 +31,18 @@ resource "keycloak_realm" "zeta_realm" {
   dynamic "smtp_server" {
     for_each = var.smtp_host != "" ? [1] : []
     content {
-      host = var.smtp_host
-      port = var.smtp_port
-      from = var.smtp_from
+      host     = var.smtp_host
+      port     = var.smtp_port
+      from     = var.smtp_from
+      starttls = var.smtp_starttls
+      ssl      = var.smtp_ssl
+      dynamic "auth" {
+        for_each = var.smtp_auth_username != "" ? [1] : []
+        content {
+          username = var.smtp_auth_username
+          password = var.smtp_auth_password
+        }
+      }
     }
   }
 }
@@ -41,6 +54,17 @@ resource "keycloak_realm_client_policy_profile" "zeta_client_policy_profile" {
 
   executor {
     name = "dpop-bind-enforcer"
+
+    configuration = {
+      auto-configure = "true"
+    }
+  }
+
+  # Authorization code flow only: rejects implicit and hybrid requests (also via PAR), even for clients registered
+  # with response_type "token". auto-configure switches the implicit flow off at registration instead of rejecting it,
+  # and must be set explicitly (Keycloak fails on a missing value).
+  executor {
+    name = "reject-implicit-grant"
 
     configuration = {
       auto-configure = "true"

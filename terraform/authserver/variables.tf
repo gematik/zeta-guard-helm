@@ -22,13 +22,26 @@ variable "config_path" {
   default     = "~/.kube/config"
 }
 
+# Only "" as a default — the namespace matters in Kubernetes mode alone (the
+# sekidp Secret and the fedmaster rollout in sekidp-secret.k8s.tpl, plus the
+# cluster lookup the helper scripts fall back to). Terraform itself no longer
+# reads anything from the namespace. Declaring it unconditionally required made
+# `use_kubernetes = false` fail at variable parsing, before any count = 0 gate
+# could take effect. The state backend takes its own namespace from
+# environments/<stage>.backend.hcl, not from this variable.
 variable "keycloak_namespace" {
-  description = "Namespace where Keycloak is deployed"
+  description = "Namespace where Keycloak is deployed. Required when use_kubernetes = true; unused in local mode."
   type        = string
+  default     = ""
 
   validation {
-    condition     = can(regex("^[a-z0-9][a-z0-9-]{0,62}$", var.keycloak_namespace))
+    condition     = var.keycloak_namespace == "" || can(regex("^[a-z0-9][a-z0-9-]{0,62}$", var.keycloak_namespace))
     error_message = "keycloak_namespace must be a valid Kubernetes namespace name."
+  }
+
+  validation {
+    condition     = !var.use_kubernetes || var.keycloak_namespace != ""
+    error_message = "keycloak_namespace must be set when use_kubernetes = true."
   }
 }
 
@@ -121,6 +134,36 @@ variable "audience" {
   }
 }
 
+variable "master_realm_frontend_url" {
+  description = "Browser-facing base URL of the master realm, used when Terraform reaches Keycloak at a different endpoint than the administrators' browsers do (e.g. a tunnel while the admin hostname is not publicly resolvable). Must end in /auth. Leave empty to derive it from keycloak_url whenever audience is set (see master-realm.tf)."
+  type        = string
+  default     = ""
+
+  # SET IT when `keycloak_url` is not the URL administrators open in a browser.
+  # The derivation assumes those two are the same, which holds as long as
+  # Terraform goes through the admin hostname. It stops holding exactly where the
+  # hardening guidance points: an admin hostname that does not resolve publicly
+  # forces Terraform through a tunnel or port-forward, and the derived pin would
+  # then be that tunnel — leaving the console dead for everyone else.
+  #
+  # NOT a way to relocate or hide the Admin UI. The value is a declaration, not a
+  # redirect: Keycloak only builds the URLs it advertises from it (issuer,
+  # endpoints, the console's authServerUrl). Where the UI actually answers is
+  # decided by the ingress and --hostname-admin. Pointing this at a host or path
+  # with no route to the authserver does not move the console, it breaks it,
+  # while the UI stays reachable under its real address. It is not access control.
+  #
+  # Keycloak appends the realm path to this value verbatim and does NOT add the
+  # context path, so a value without the trailing /auth produces endpoints like
+  # https://host/<wrong>/realms/master/... — the Admin Console then advertises
+  # them as its authServerUrl and its login redirect 404s. Nothing fails at apply
+  # time, the breakage only shows in the browser, so catch it here instead.
+  validation {
+    condition     = var.master_realm_frontend_url == "" || can(regex("^https?://[^/]+/auth$", var.master_realm_frontend_url))
+    error_message = "master_realm_frontend_url must be empty or of the form https://<host>/auth — Keycloak appends the realm path without adding the context path, so any other path makes the Admin Console login unreachable."
+  }
+}
+
 # Required — no default. This scope is the sole carrier of the
 # zeta-guard-accesstoken-mapper, i.e. of the claims the PEP validates on every
 # request (aud, profession_oid, client_id, ip_address, product_id,
@@ -145,6 +188,25 @@ variable "pdp_scopes" {
   validation {
     condition     = alltrue([for s in var.pdp_scopes : can(regex("^[a-zA-Z0-9_:.-]+$", s))])
     error_message = "Each pdp_scope must only contain alphanumeric characters, underscores, colons, periods, or hyphens."
+  }
+}
+
+# The sync reads every client of the realm, one admin API page at a time, so its
+# run time grows with the number of clients (see client-scope-sync.tf).
+variable "sync_existing_client_scopes" {
+  description = "Add realm optional scopes (pdp_scopes, notification scopes) that are missing on clients already registered through DCR. Runs whenever the scope list changes and reads every client of the realm, so enable it only for realms with few clients."
+  type        = bool
+  default     = false
+}
+
+variable "sync_existing_client_scopes_max_clients" {
+  description = "Upper limit for sync_existing_client_scopes: if the realm has more clients, the sync fails with exit status 3 before it reads any client."
+  type        = number
+  default     = 10000
+
+  validation {
+    condition     = var.sync_existing_client_scopes_max_clients >= 1 && floor(var.sync_existing_client_scopes_max_clients) == var.sync_existing_client_scopes_max_clients
+    error_message = "sync_existing_client_scopes_max_clients must be a positive whole number."
   }
 }
 
@@ -210,6 +272,31 @@ variable "smtp_from" {
   default     = ""
 }
 
+variable "smtp_starttls" {
+  description = "When true, enables StartTLS. Defaults to false."
+  type        = bool
+  default     = false
+}
+
+variable "smtp_ssl" {
+  description = "When true, enables SSL. Defaults to false."
+  type        = bool
+  default     = false
+}
+
+variable "smtp_auth_username" {
+  description = "(optional) The SMTP server username."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_auth_password" {
+  description = "(optional) The SMTP server password. Set via TF_VAR_smtp_auth_password. Not ephemeral: persisted in plaintext in the Terraform state (the provider has no write-only argument for it)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # Keep in sync with notificationService.wellKnownResourceSuffix in the Helm chart (not
 # wired together). Forms the NS token aud; a mismatch breaks NS token validation.
 variable "notification_service_resource_suffix" {
@@ -229,4 +316,32 @@ variable "notification_history_enabled" {
   description = "Whether the Notification Service history feature (A_29974) is enabled. When true, the notification.history.read scope is created in Keycloak. Must match notificationService.historyEnabled in the Helm chart values."
   type        = bool
   default     = false
+}
+
+# Keycloak's defaults (idle 30m, max 10h) end the user session long before the
+# refresh token the policy issues (refresh_token ttl, default 86400s), so a
+# refresh after 30 minutes of inactivity failed with "Session not active". Both
+# limits must be at least the largest refresh-token TTL the policy hands out
+# (A_28527); the authserver caps every refresh token at the session's end, so
+# the session — not the token — bounds re-authentication (A_25662).
+variable "sso_session_idle_timeout" {
+  description = "Realm SSO session idle timeout as a Go duration (e.g. \"24h\"). Must be at least the largest refresh-token TTL issued by the policy, otherwise the session ends before the refresh token expires."
+  type        = string
+  default     = "24h"
+
+  validation {
+    condition     = can(regex("^([0-9]+(h|m|s))+$", var.sso_session_idle_timeout))
+    error_message = "sso_session_idle_timeout must be a duration such as \"24h\" or \"1h30m\"."
+  }
+}
+
+variable "sso_session_max_lifespan" {
+  description = "Realm SSO session max lifespan as a Go duration (e.g. \"24h\"). Must be at least the largest refresh-token TTL issued by the policy, otherwise the session ends before the refresh token expires."
+  type        = string
+  default     = "24h"
+
+  validation {
+    condition     = can(regex("^([0-9]+(h|m|s))+$", var.sso_session_max_lifespan))
+    error_message = "sso_session_max_lifespan must be a duration such as \"24h\" or \"1h30m\"."
+  }
 }

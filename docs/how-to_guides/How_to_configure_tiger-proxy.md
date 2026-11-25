@@ -104,8 +104,18 @@ global:
 
 This section is used to:
 - assign a static ClusterIP to the Tiger proxy `Service` when Tiger proxy is deployed
-- add `hostAliases` to the `template.spec.hostAliases` key of the PEP, PDP and testdriver deployments
+- add `hostAliases` to the `template.spec.hostAliases` key of the PEP,
+  authserver and testdriver deployments
 - add the matching OCSP proxy routes to the Tiger proxy configuration when Tiger proxy is deployed
+
+This section is meant for test setups: every entry in `global.dns.redirects` is
+mapped to the *same* IP (`tigerStaticClusterIP`), which is either the Tiger
+proxy
+or the OCSP mock. Do not use it to steer unrelated name resolution — to give the
+PEP its own `/etc/hosts` entries use `pepproxy.hostAliases`, and to reach the
+authserver in-cluster use `pepproxy.nginxConf.pepInternalUrl` (see
+[How to configure the authserver](How_to_configure_authserver.md)). Both are
+merged with the entries generated here.
 
 `Service.spec.clusterIP` is immutable after Kubernetes creates the Service. If `tiger-proxy` already exists,
 set `global.dns.tigerStaticClusterIP` to the current `tiger-proxy` Service IP, or deploy through the Makefile

@@ -2,7 +2,7 @@ apiVersion: v2
 name: zeta-guard
 description: ZETA Guard
 type: application
-version: 1.3.5
+version: 1.3.7
 # Hard lower bound for the whole chart: Kubernetes 1.32, i.e. OpenShift 4.19 or newer. Sidecar init containers
 # (restartPolicy: Always), which the provisioning processor relies on, are GA from 1.29 — but the supported
 # platform baseline is 1.32, so that is what is declared here.
@@ -10,7 +10,7 @@ kubeVersion: ">=1.32.0-0"
 dependencies:
   - name: nginx-ingress
     # F5 NGINX Ingress Controller (NIC)
-    version: 2.5.0
+    version: 2.9.0
     repository: oci://ghcr.io/nginx/charts
     condition: nginx-ingress.enabled
   - name: opentelemetry-collector

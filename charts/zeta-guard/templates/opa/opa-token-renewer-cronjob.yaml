@@ -9,8 +9,14 @@ metadata:
 spec:
   timeZone: "Europe/Berlin"
   schedule: {{ $wif.tokenRenewer.schedule | quote }}
+  # never overlap, never crawl (stuck jobs otherwise pile up on a sick node)
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 240
       backoffLimit: {{ default 5 $wif.tokenRenewer.backoffLimit }}
       template:
         metadata:

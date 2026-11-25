@@ -12,11 +12,14 @@ metadata:
   labels:
     {{- include "opa.labels" . | nindent 4 }}
 spec:
+  concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 2
   schedule: "*/30 * * * *"
+  startingDeadlineSeconds: 1800
   successfulJobsHistoryLimit: 2
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 240
       backoffLimit: 5
       template:
         metadata:

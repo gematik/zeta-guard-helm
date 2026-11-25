@@ -37,6 +37,31 @@ zeta-guard:
 This creates a Cluster resource (kind: Cluster, apiVersion: postgresql.cnpg.io/v1)
 named `keycloak-db` and wires Keycloak to it.
 
+#### What a primary switchover or pod recreate does to the authserver
+
+Losing the primary is not a clean disconnect. Deleting the primary **pod**
+destroys its network namespace while the `keycloak-db-rw` ClusterIP stays valid,
+so kube-proxy's existing conntrack entries keep routing to an IP that no longer
+answers and nothing sends a TCP reset — the connection blackholes rather than
+failing. This is why a graceful database *restart* recovers by itself while a
+*pod recreate* used to hang the authserver until someone restarted it.
+
+The authserver now handles this on its own: a bounded socket timeout and bounded
+connection validation let the pool evict and rebuild its connections. See
+[How to configure the authserver](How_to_configure_authserver.md#connection-resilience-and-database-failover)
+for the settings and for how to verify the behaviour with the `agroal_*`
+metrics.
+
+> **If the authserver fails to start with a Liquibase lock error**, a schema
+> migration was killed mid-flight (the socket timeout applies to DDL too) and
+> the
+> changelog lock is still held; the next start waits 30 minutes before failing.
+> Release it:
+>
+> ```sql
+> UPDATE databasechangeloglock SET locked = false, lockgranted = NULL, lockedby = NULL;
+> ```
+
 ### Resetting CNPG operator and CRDs
 
 If you need to remove the operator and all CNPG CRDs before a clean re-install, run:

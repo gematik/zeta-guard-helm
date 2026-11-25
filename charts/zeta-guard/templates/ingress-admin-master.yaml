@@ -1,9 +1,17 @@
 {{- /* vim: set ft=helm: */ -}}
 {{- /* Separate TLS-terminating ingress for the Keycloak admin hostname.
      /auth on this hostname routes directly to authserver (no PEP, no admin block),
-     allowing Terraform and CI/CD runners to reach the admin REST API.
-     IP-based access restriction must be configured at the infrastructure layer
-     (e.g. Cloud Armor, NetworkPolicy, firewall rules). */ -}}
+     so everything the public hostname denies lives here: the admin REST API for
+     Terraform and CI/CD runners, the Admin Console, and the master realm that
+     issues their access token. With F5 NIC this resource carries only TLS and the
+     global annotations — the path routing comes from the zeta-guard-admin-auth
+     minion (ingress-admin.yaml); without NIC the rule below provides it.
+
+     This hostname is protected by nothing but TLS. The split moves the admin
+     surface off the public hostname, it does not close it: IP-based access
+     restriction must be configured at the infrastructure layer (e.g. Cloud Armor,
+     NetworkPolicy, firewall rules), and Keycloak's brute-force detection ships
+     disabled on the master realm. */ -}}
 {{- if and .Values.ingressEnabled .Values.authserver.adminHostname }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

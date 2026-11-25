@@ -64,7 +64,7 @@ authserver:
   # --- Image ---
   image:
     repository: keycloak-zeta
-    tag: 1.3.1
+    tag: 1.3.5
   imagePullPolicy: Always
   imagePullSecrets: [ ]
 
@@ -76,8 +76,10 @@ authserver:
   hostname: "zeta-demo.example"
   wellKnownAuthServerPath: /
   # Separate hostname for the Keycloak admin console and admin REST API.
-  # When set, /auth/admin is blocked via the PEP proxy and a dedicated admin
-  # ingress is created. Terraform and CI/CD runners must use this hostname.
+  # When set, /auth/admin and /auth/realms/master are blocked via the PEP proxy
+  # and a dedicated admin ingress is created. The master realm carries the admin
+  # token endpoint; the zeta-guard realm stays reachable on the main hostname.
+  # Terraform and CI/CD runners must use this hostname.
   # IP-based access restriction must be configured at the infrastructure layer
   # (e.g. Cloud Armor, NetworkPolicy, firewall rules).
   adminHostname: "admin.zeta-demo.example"
@@ -112,10 +114,10 @@ authserver:
       # HTTP timeouts for the SMC-B OCSP revocation check
       ocspConnectTimeoutMs: 1000
       ocspReadTimeoutMs: 3000
-      # Default false (fail-open): only a REVOKED response denies; undetermined status
-      # (unreachable/timeout/unknown) is allowed so the service stays operational during
-      # an OCSP outage. Set true to also deny when the status cannot be determined.
-      ocspFailClosed: false
+      # Default true (fail-closed): deny on REVOKED and when the status cannot be
+      # determined (unreachable/timeout/unknown). Set false (fail-open) to deny only on
+      # REVOKED, so the service stays operational during an OCSP outage.
+      ocspFailClosed: true
 
   # --- Client registration / session TTLs ---
   config:
@@ -172,7 +174,7 @@ authserver:
     keychainGenerator:
       image:
         repository: keychain-generator
-        tag: 2.0.4
+        tag: 2.0.4-1
       imagePullPolicy: IfNotPresent
 
   # --- Additional trusted CAs ---
@@ -253,12 +255,37 @@ authserver:
   # Mounted via container.extraVolumeMounts above.
   extraVolumes: []
 
+  # --- Database connection (pgjdbc driver parameters) ---
+  # Appended to KC_DB_URL as query parameters. Driver settings belong here rather than in
+  # QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_*: that is a Map property and an
+  # environment variable name cannot carry its camelCase key — it would arrive as
+  # "sockettimeout", which pgjdbc silently ignores.
+  # socketTimeout is in SECONDS and bounds every read, including Liquibase DDL.
+  # "connectTimeout" and "targetServerType" are rejected at render time: naming either in
+  # the URL makes Keycloak stop injecting its own default for the other.
+  db:
+    urlProperties:
+      socketTimeout: 120
+      tcpKeepAlive: true
+
   # --- Database connection pool ---
   # replicaCount × maxSize (+ ~25 reserve) must stay ≤ cloudnativePg.parameters.maxConnections (100 here).
   # Enforced at render time by templates/db/cnpg-cluster.yaml.
   dbPool:
     minSize: 10
     maxSize: 75
+    # Recycle pooled connections, so a socket orphaned by a database failover cannot sit in
+    # the pool forever. Keycloak leaves this unlimited for PostgreSQL.
+    maxLifetime: PT30M
+    # Agroal connection validation, rendered as QUARKUS_DATASOURCE_JDBC_* environment
+    # variables because Keycloak exposes no option for any of them. Without a validation
+    # timeout the pool validates with isValid(0) — no socket timeout — and hangs on the very
+    # connection it is meant to detect as dead. Foreground validation has no Quarkus default,
+    # i.e. it is off unless set.
+    validationQueryTimeout: 2S
+    backgroundValidationInterval: 15S
+    foregroundValidationInterval: 5S
+    idleRemovalInterval: 1M
 
   # --- HTTP thread pool ---
   httpPool:
@@ -279,18 +306,27 @@ authserver:
   testmode: false
 
   # --- Probe thresholds ---
+  # Do not leave timeoutSeconds unset: Kubernetes then assumes 1s. Once connection validation
+  # has evicted its first connection, Agroal's invalidCount never resets, so Keycloak performs
+  # a real database check on every readiness probe instead of answering from pool metrics — and
+  # 1s flaps under load. The ceiling is Agroal's acquisition timeout (PT20S).
+  # Liveness deliberately targets the database-independent /health/live: a database-aware
+  # liveness probe would fail on every authserver pod at once during an outage.
   probes:
     liveness:
       initialDelaySeconds: 0
       periodSeconds: 15
+      timeoutSeconds: 5
       failureThreshold: 5
     readiness:
       initialDelaySeconds: 30
       periodSeconds: 10
+      timeoutSeconds: 5
       failureThreshold: 5
     startup:
       initialDelaySeconds: 30
       periodSeconds: 10
+      timeoutSeconds: 5
       failureThreshold: 20
 
   # --- Host alias (test setup: add /etc/hosts entry) ---
@@ -332,7 +368,7 @@ pepproxy:
   # --- Image ---
   image:
     repository: ngx_pep
-    tag: 1.3.0
+    tag: 1.3.6
   imagePullPolicy: Always
   imagePullSecrets: [ ]
 
@@ -375,7 +411,7 @@ pepproxy:
   # Specify an override OCSP URL or "off" to disable stapling:
   # aslOcsp: "http://example.org/ocsp"
   # Change maximum validity of cached OCSP responses (default 24h per A_24624-01):
-  # alsOcspTtl: 5m
+  # aslOcspTtl: 5m
   # HSM-backed ASL signer key as store URI, e.g. "store:hsm:asl-signer.p256".
   # Replaces the signer-key file from the asl-identity secret; requires hsmProxyAddr.
   asl_hsm_key: null
@@ -410,8 +446,15 @@ pepproxy:
     #                      defaults to seconds when no unit is given, e.g. "1d"
     poppValidity: quarter
 
-    # OIDC issuer (iss) of the authorization server
-    pepIssuer: "http://authserver/auth/realms/zeta-guard"
+    # Public OIDC issuer (iss) of the authorization server. Must match the issuer
+    # Keycloak advertises, i.e. be derived from authserver.hostname above.
+    pepIssuer: "https://zeta-demo.example/auth/realms/zeta-guard"
+
+    # Cluster-internal address used only for OIDC discovery and the JWKS fetch,
+    # so that traffic does not loop out through the ingress. Off by default;
+    # needs a PEP image newer than 1.3.4, e.g.
+    # "http://authserver/auth/realms/zeta-guard".
+    pepInternalUrl: ""
 
     # Audience required for a valid access token
     requiredAudience: "test"
@@ -450,6 +493,12 @@ pepproxy:
   # --- HSM integration for PEP ---
   # Set to gRPC URL of HSM Proxy to enable ossl_hsm integration
   hsmProxyAddr: null
+  # Accept an unprotected (plain-text gRPC) channel to the HSM Proxy
+  # (HSM_PROXY_ALLOW_PLAINTEXT=1). Without it the PEP only connects in plain text
+  # to a loopback address and otherwise needs an https:// hsmProxyAddr; with a
+  # plain-text address to another host nginx does not start. Set it only where
+  # the network itself protects the channel, e.g. hsm-sim in a test cluster.
+  hsmProxyPlainTextAccepted: false
   # HSM key ID for the TLS listener ("store:hsm:<hsmTlsKeyId>")
   hsmTlsKeyId: tls.p256
   # Certificate matching the HSM TLS key, relative to /etc/nginx. The default is
@@ -467,6 +516,10 @@ pepproxy:
   podLabels: {}
   podAnnotations: {}
 
+  # --- Host aliases (extra /etc/hosts entries for the PEP pod) ---
+  # Prefer nginxConf.pepInternalUrl for reaching the authserver in-cluster.
+  hostAliases: []
+
   # --- Scheduling ---
   affinity: {}
   tolerations: [ ]
@@ -477,11 +530,8 @@ pepproxy:
 
 # --- PEP-Proxy feature toggles (top-level) ---
 
-# Enable metrics endpoint (requires pepproxyMetricsExporterImage)
+# Enable metrics endpoint (nginx-prometheus-exporter sidecar, image: pepproxyMetricsExporterImage chart default)
 pepproxyMetricsEnabled: true
-
-# nginx-prometheus-exporter image (required when pepproxyMetricsEnabled is true)
-pepproxyMetricsExporterImage: nginx/nginx-prometheus-exporter@sha256:0bf30a7c0ec24554a87063905f505a4ae4ea49043eab68f03660474512ba5fc8
 
 # Enable tracing for nginx
 pepproxyTracingEnabled: true
@@ -664,7 +714,7 @@ opa:
   replicaCount: 1
   image:
     repository: opa
-    tag: 1.19.1-static
+    tag: 1.21.3-static
   imagePullPolicy: IfNotPresent
   imagePullSecrets: [ ]
 
@@ -759,7 +809,8 @@ opa:
     enabled: true
     replicaCount: 1
     bundle:
-      # Optional explicit simulation bundle resource. If empty, the chart derives from active resource.
+      # Simulation bundle resource. Required when bundle.enabled and simulation.enabled
+      # are true; it is not derived from bundle.resource.
       resource: ""
       # Optional signature-verification override for the simulation bundle only
       # (same keys as opa.bundle.verification). Empty → the shared one applies.

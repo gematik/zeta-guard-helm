@@ -75,6 +75,7 @@ variable:
 - Keycloak admin credentials are provided explicitly:
     - `TF_VAR_keycloak_username` (required)
     - `TF_VAR_keycloak_password` (required)
+- `keycloak_namespace` can be left unset — nothing in local mode reads it
 - Terraform state is stored locally in `terraform.tfstate` (not in the cluster)
 
 Both variables are required in **both** modes and are *ephemeral*, so they must
@@ -173,14 +174,17 @@ with its default — copy it as a starting point. Key variables include:
 ```hcl
 # Required — no defaults
 keycloak_url        = "https://.../auth"  # URL of the Keycloak instance
-keycloak_namespace  = "zeta-demo"         # Kubernetes namespace where Keycloak runs
 audience_scope_name = "zero:audience"     # Name of the audience scope (see the note below)
 
+# Required in Kubernetes mode, unused in local mode
+keycloak_namespace  = "zeta-demo"         # Kubernetes namespace where Keycloak runs
+
 # Optional — shown with their defaults
-# insecure_tls   = false  # Set to true if using self-signed certificates
-# use_kubernetes = true   # Set to false for local mode (no K8s backend)
-# audience       = ""     # Explicit audience value; empty derives it from keycloak_url
-# pdp_scopes     = []     # Additional PDP scopes, e.g. ["zero:read", "practitionerAccount.crud"]
+# insecure_tls                = false  # Set to true if using self-signed certificates
+# use_kubernetes              = true   # Set to false for local mode (no K8s backend)
+# audience                    = ""     # Explicit audience value; empty derives it from keycloak_url
+# pdp_scopes                  = []     # Additional PDP scopes, e.g. ["zero:read", "practitionerAccount.crud"]
+# sync_existing_client_scopes = false  # Also add new scopes to existing DCR clients; reads every client
 ```
 
 ### Complete variable reference
@@ -189,25 +193,28 @@ Variables marked **required** have no default; an apply without them fails.
 
 #### Connection and state
 
-| Variable                  | Type   | Default              | Description                                                                                                                                                          |
-|---------------------------|--------|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `keycloak_url`            | string | **required**         | External URL of the Keycloak instance, including the `/auth` path. With Admin API protection, point this at the admin hostname and set `audience` to the public one. |
-| `keycloak_namespace`      | string | **required**         | Kubernetes namespace the authserver is deployed in                                                                                                                   |
-| `use_kubernetes`          | bool   | `true`               | Store state in a Kubernetes Secret and read admin credentials from the cluster. `false` = local state file, credentials must be passed explicitly.                   |
-| `config_path`             | string | `"~/.kube/config"`   | Path to the kubeconfig; only used when `use_kubernetes = true`                                                                                                       |
-| `keycloak_admin_secret`   | string | `"authserver-admin"` | Name of the Secret holding the Keycloak admin credentials                                                                                                            |
-| `keycloak_username`       | string | `""`                 | Keycloak admin username. Ephemeral, required in both modes. Set via `TF_VAR_keycloak_username` — never in a tfvars file.                                             |
-| `keycloak_password`       | string | `""`                 | Keycloak admin password. Ephemeral, required in both modes. Set via `TF_VAR_keycloak_password` — never in a tfvars file.                                             |
-| `insecure_tls`            | bool   | `false`              | Skip TLS verification — enable for self-signed certificates (e.g. local KIND)                                                                                        |
-| `skip_external_resources` | bool   | `false`              | Skip the external scripts that would otherwise run on `terraform plan`                                                                                               |
+| Variable                    | Type   | Default              | Description                                                                                                                                                                                                                                                                                       |
+|-----------------------------|--------|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `keycloak_url`              | string | **required**         | External URL of the Keycloak instance, including the `/auth` path. With Admin API protection, point this at the admin hostname and set `audience` to the public one.                                                                                                                              |
+| `keycloak_namespace`        | string | `""`                 | Kubernetes namespace the authserver is deployed in. Required when `use_kubernetes = true`; unused in local mode.                                                                                                                                                                                  |
+| `master_realm_frontend_url` | string | `""`                 | Browser-facing base URL of the **master** realm, so the Admin Console's login stays on the admin hostname. Set it when Terraform reaches Keycloak at a different endpoint than administrators' browsers do. Must end in `/auth`. Empty derives it from `keycloak_url` whenever `audience` is set. |
+| `use_kubernetes`            | bool   | `true`               | Store state in a Kubernetes Secret and read admin credentials from the cluster. `false` = local state file, credentials must be passed explicitly.                                                                                                                                                |
+| `config_path`               | string | `"~/.kube/config"`   | Path to the kubeconfig; only used when `use_kubernetes = true`                                                                                                                                                                                                                                    |
+| `keycloak_admin_secret`     | string | `"authserver-admin"` | Name of the Secret holding the Keycloak admin credentials                                                                                                                                                                                                                                         |
+| `keycloak_username`         | string | `""`                 | Keycloak admin username. Ephemeral, required in both modes. Set via `TF_VAR_keycloak_username` — never in a tfvars file.                                                                                                                                                                          |
+| `keycloak_password`         | string | `""`                 | Keycloak admin password. Ephemeral, required in both modes. Set via `TF_VAR_keycloak_password` — never in a tfvars file.                                                                                                                                                                          |
+| `insecure_tls`              | bool   | `false`              | Skip TLS verification — enable for self-signed certificates (e.g. local KIND)                                                                                                                                                                                                                     |
+| `skip_external_resources`   | bool   | `false`              | Skip the external scripts that would otherwise run on `terraform plan`                                                                                                                                                                                                                            |
 
 #### Scopes and audience
 
-| Variable              | Type         | Default      | Description                                                                                                                                              |
-|-----------------------|--------------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `audience_scope_name` | string       | **required** | Name of the audience scope. It carries the protocol mappers that inject the claims the PEP validates — see the note below.                               |
-| `audience`            | string       | `""`         | Explicit audience value for the mappers. Empty derives it from `keycloak_url` (minus `/auth`). Required when `keycloak_url` points at an admin hostname. |
-| `pdp_scopes`          | list(string) | `[]`         | Additional PDP scopes, created as realm optional scopes. They carry **no** claim mapper, so they cannot replace the audience scope.                      |
+| Variable                                  | Type         | Default      | Description                                                                                                                                                                                                                                                                                                                               |
+|-------------------------------------------|--------------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `audience_scope_name`                     | string       | **required** | Name of the audience scope. It carries the protocol mappers that inject the claims the PEP validates — see the note below.                                                                                                                                                                                                                |
+| `audience`                                | string       | `""`         | Explicit audience value for the mappers. Empty derives it from `keycloak_url` (minus `/auth`). Required when `keycloak_url` points at an admin hostname.                                                                                                                                                                                  |
+| `pdp_scopes`                              | list(string) | `[]`         | Additional PDP scopes, created as realm optional scopes. A new scope reaches clients registered afterwards; clients already registered through DCR get it only with `sync_existing_client_scopes`. A removed scope is deleted and disappears from all clients. They carry **no** claim mapper, so they cannot replace the audience scope. |
+| `sync_existing_client_scopes`             | bool         | `false`      | Also add new realm optional scopes (`pdp_scopes`, notification scopes) to clients already registered through DCR. Runs on every apply that changes the scope list and reads every client of the realm, which takes hours with millions of clients. Enable it only for realms with few clients.                                            |
+| `sync_existing_client_scopes_max_clients` | number       | `10000`      | Upper limit for `sync_existing_client_scopes`. With more clients in the realm the apply fails with `exit status 3` before any client is read.                                                                                                                                                                                             |
 
 #### Identity providers
 
@@ -232,11 +239,15 @@ Variables marked **required** have no default; an apply without them fails.
 
 #### Email binding (OTP delivery)
 
-| Variable    | Type   | Default | Description                                                                                                 |
-|-------------|--------|---------|-------------------------------------------------------------------------------------------------------------|
-| `smtp_host` | string | `""`    | SMTP host for the realm's `smtpServer` config (e.g. MailCatcher). Empty omits the block entirely.           |
-| `smtp_port` | string | `"25"`  | SMTP port                                                                                                   |
-| `smtp_from` | string | `""`    | Sender address. Required by Keycloak whenever `smtp_host` is set — a missing or invalid `from` is rejected. |
+| Variable             | Type   | Default | Description                                                                                                                                                                                                                                         |
+|----------------------|--------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `smtp_host`          | string | `""`    | SMTP host for the realm's `smtpServer` config (e.g. MailCatcher). Empty omits the block entirely.                                                                                                                                                   |
+| `smtp_port`          | string | `"25"`  | SMTP port                                                                                                                                                                                                                                           |
+| `smtp_from`          | string | `""`    | Sender address. Required by Keycloak whenever `smtp_host` is set — a missing or invalid `from` is rejected.                                                                                                                                         |
+| `smtp_starttls`      | bool   | `false` | Enables STARTTLS                                                                                                                                                                                                                                    |
+| `smtp_ssl`           | bool   | `false` | Enables SSL/TLS (implicit TLS, usually port 465)                                                                                                                                                                                                    |
+| `smtp_auth_username` | string | `""`    | SMTP username. Empty disables SMTP authentication.                                                                                                                                                                                                  |
+| `smtp_auth_password` | string | `""`    | SMTP password, used together with `smtp_auth_username`. Set via `TF_VAR_smtp_auth_password`, not in a tfvars file. **Persisted in the Terraform state** — the provider has no write-only argument for it; restrict read access to the state Secret. |
 
 #### Notification Service
 
@@ -265,11 +276,27 @@ See [HSM Token Signing](#hsm-token-signing) for the full procedure.
 |------------------|------|---------|----------------------------------------------------------------------------------------------------------------------------|
 | `use_vau_db_enc` | bool | `false` | Apply client-side encryption to this realm. Recommended only when running in a trusted execution environment (German VAU). |
 
+#### Session lifetime
+
+The refresh-token TTL comes from the policy decision (`ttl.refresh_token`,
+A_28527), but the authserver caps every
+refresh token at the end of the user session behind it. Rotation does not extend
+that session past the first refresh
+token's expiry (A_25662). Set both limits to at least the largest refresh-token
+TTL your policy issues — shorter values
+end the session early, and the client has to run a full token exchange again.
+
+| Variable                   | Type   | Default | Description                                                      |
+|----------------------------|--------|---------|------------------------------------------------------------------|
+| `sso_session_idle_timeout` | string | `"24h"` | Realm SSO session idle timeout as a Go duration (e.g. `"1h30m"`) |
+| `sso_session_max_lifespan` | string | `"24h"` | Realm SSO session max lifespan as a Go duration                  |
+
 ### Validations
 
 The following validations are enforced:
 
-- `keycloak_namespace`, `keycloak_url` and `audience_scope_name` are required
+- `keycloak_namespace` (when `use_kubernetes = true`), `keycloak_url` and 
+  `audience_scope_name` are required
   and have no default — an apply without them fails
 - `keycloak_namespace` must be a valid Kubernetes namespace name
 - `keycloak_url` must start with `http://` or `https://`
@@ -280,6 +307,8 @@ The following validations are enforced:
   colons, periods, or hyphens
 - `keycloak_username` and `keycloak_password` must both be non-empty, in both
   modes
+- `sso_session_idle_timeout` and `sso_session_max_lifespan` must be durations
+  such as `"24h"` or `"1h30m"`
 
 > **Important — the audience scope carries the access-token claims the PEP
 requires.**
@@ -498,7 +527,13 @@ No additional tools (openssl, keytool, Java) are required.
 ## Protecting the Keycloak Admin API
 
 The Keycloak Admin REST API and Admin Console (`/auth/admin/*`) must not be
-publicly accessible. ZETA Guard supports protecting it via a dedicated admin
+publicly accessible, and neither must the `master` realm
+(`/auth/realms/master/*`): it carries the admin token endpoint — an admin access
+token is minted there with `client_id=admin-cli` via direct grant — so leaving
+it
+public would re-open the credential surface that blocking `/auth/admin` closes.
+The `master` realm serves no ZETA traffic; everything productive runs on the
+`zeta-guard` realm. ZETA Guard supports protecting both via a dedicated admin
 hostname.
 
 ### How it works
@@ -506,20 +541,68 @@ hostname.
 When `authserver.adminHostname` is set, the chart activates two-part
 protection:
 
-1. **`/auth/admin` is routed to the PEP proxy, which denies it** — the
-   `zeta-guard-pep` minion gains a `/auth/admin` path pointing at
-   `pep-proxy-svc`, where a `location ~ ^/auth/admin` block returns
-   `403 Forbidden` before the request reaches Keycloak. Every other `/auth/*`
-   path (token exchange, nonce, registration, well-known) keeps routing straight
-   to the authserver via the `zeta-guard-auth` minion and never touches the PEP.
+1. **`/auth/admin` and `/auth/realms/master` are routed to the PEP proxy, which
+   denies them** — the `zeta-guard-pep` minion gains a `/auth/admin` and a
+   `/auth/realms/master` path pointing at `pep-proxy-svc`, where a
+   `location ~ ^/auth/(admin|realms/master)(/|$)` block returns `403 Forbidden`
+   before the request reaches Keycloak. The `(/|$)` suffix keeps the `403` on
+   segment boundaries, matching the Ingress `pathType: Prefix` that routes
+   there,
+   so a realm whose name merely starts with `master` is not denied — it still
+   reaches the PEP (the controller turns the Ingress path into a plain nginx
+   prefix, which is not segment-aware) and answers `401` for want of a token,
+   exactly as `/auth/admin` has always behaved for e.g. `/auth/administration`.
+   Every other `/auth/*` path (token exchange, nonce, registration,
+   well-known, and the whole `zeta-guard` realm) keeps routing straight to the
+   authserver via the `zeta-guard-auth` minion and never touches the PEP.
 
 2. **Separate admin ingress** — a dedicated ingress is created for the admin
    hostname that routes `/auth` directly to the authserver, bypassing the PEP
    proxy block. Terraform and CI/CD runners use this hostname exclusively.
 
+Terraform adds a third piece: it pins the **master realm's frontend URL** to the
+admin hostname (`terraform/authserver/master-realm.tf`, applied on the next
+`terraform apply`). The Admin Console is an OIDC client of the master realm and
+derives its `authServerUrl` from that realm's frontend URL, which by default
+follows Keycloak's `--hostname` — the public hostname. Without the pin the
+console's login redirect would land on the now-blocked
+`/auth/realms/master/protocol/openid-connect/auth` and the browser login would
+break. The pin is derived automatically whenever `audience` is set (the marker
+that `keycloak_url` points at the admin hostname). Only the master realm is
+touched — the `zeta-guard` realm keeps the public issuer every access token
+carries.
+
+#### When `master_realm_frontend_url` is required
+
+The derivation equates two things that are only usually the same: the URL
+**Terraform** talks to, and the URL **administrators open in a browser**. Set
+the variable where they diverge. The case to expect is the one the hardening
+guidance itself creates: an admin hostname that deliberately does not resolve
+publicly forces Terraform through a tunnel or port-forward, and the derived pin
+would then be that tunnel — leaving the console dead for every other browser.
+
+```hcl
+keycloak_url              = "https://localhost:8443/auth"
+audience                  = "https://zeta.example.com"
+master_realm_frontend_url = "https://admin.example.com/auth"
+```
+
+**What it cannot do: relocate or hide the Admin UI.** The value is a
+declaration, not a redirect. Keycloak only builds the URLs it *advertises* from
+it — the issuer, the realm endpoints, and the `authServerUrl` the console uses.
+Where the UI actually answers is decided by the ingress and `--hostname-admin`.
+Pointing this at a host or path with no route to the authserver therefore does
+not move the console, it breaks it, while the UI stays reachable at its real
+address. It is not an access control.
+
+The value must end in `/auth`: Keycloak appends the realm path verbatim and does
+**not** add the context path, so any other path yields endpoints the console
+advertises but cannot reach. A validation rejects such a value at plan time —
+without it the mistake would surface only as a failing browser login.
+
 The split relies on overlapping prefixes being resolved **longest-match-first**,
 which both nginx and the Ingress specification guarantee regardless of
-declaration order: `/auth/admin` wins over `/auth`.
+declaration order: `/auth/admin` and `/auth/realms/master` win over `/auth`.
 
 This approach is ingress-controller-agnostic: it works with F5 NIC, standard
 nginx-ingress, OpenShift Routes, GKE Ingress and any other ingress solution,
@@ -537,13 +620,15 @@ zeta-guard:
   authserver:
     hostname: "zeta.example.com"
     # Separate hostname for Keycloak admin access.
-    # When set, /auth/admin is blocked on the main hostname via the PEP proxy,
-    # and a dedicated admin ingress is created for this hostname.
+    # When set, /auth/admin and /auth/realms/master are blocked on the main
+    # hostname via the PEP proxy, and a dedicated admin ingress is created for
+    # this hostname.
     adminHostname: "admin.zeta.example.com"
 ```
 
 Update `keycloak_url` in the corresponding `*.tfvars` to point to the admin
-hostname:
+hostname — Terraform authenticates against the `master` realm, which the main
+hostname no longer serves:
 
 ```hcl
 keycloak_url = "https://admin.zeta.example.com/auth"
@@ -551,20 +636,22 @@ keycloak_url = "https://admin.zeta.example.com/auth"
 
 To **disable** the feature again, remove `adminHostname` (or set it to `""`) in
 the values file and run `make deploy stage=<env>`. The admin ingress, the
-`/auth/admin` Ingress path and the PEP proxy location block are removed
-automatically on the next Helm upgrade — `/auth/admin` then stays reachable on
-the main hostname, since otherwise there would be no way to reach it at all.
+`/auth/admin` and `/auth/realms/master` Ingress paths and the PEP proxy location
+block are removed automatically on the next Helm upgrade — both then stay
+reachable on the main hostname, since otherwise there would be no way to reach
+them at all.
 
 ### Limitation: tiger-proxy environments
 
-When `routeViaTigerProxy: true`, the `/auth/admin` Ingress path is **not**
-rendered: tiger-proxy forwards `/auth → http://authserver/auth` internally and
-bypasses the PEP entirely, so routing the path there would not block anything.
-With F5 NIC the `location-snippets` layer on `zeta-guard-auth` still returns
-`404`; with any other ingress controller `/auth/admin` stays reachable on the
-main hostname. This is expected — tiger-proxy is a test tool and is never used
-in production. Set `routeViaTigerProxy: false` (the default for production) to
-activate the controller-agnostic admin API block.
+When `routeViaTigerProxy: true`, the `/auth/admin` and `/auth/realms/master`
+Ingress paths are **not** rendered: tiger-proxy forwards
+`/auth → http://authserver/auth` internally and bypasses the PEP entirely, so
+routing the paths there would not block anything. With F5 NIC the
+`location-snippets` layer on `zeta-guard-auth` still returns `404`; with any
+other ingress controller both stay reachable on the main hostname. This is
+expected — tiger-proxy is a test tool and is never used in production. Set
+`routeViaTigerProxy: false` (the default for production) to activate the
+controller-agnostic admin API block.
 
 ### Local development (KIND)
 
@@ -646,14 +733,13 @@ zeta-guard:
         requests:
           cpu: "4"
           memory: "4Gi"
-    initContainer:
+    initContainer:  # keycloak-copy, only copies the image's /opt/keycloak
       resources:
         limits:
-          cpu: "2"
-          memory: "1Gi"
+          memory: "256Mi"
         requests:
-          cpu: "500m"
-          memory: "512Mi"
+          cpu: "100m"
+          memory: "64Mi"
   provisioningProcessor:
     resources:
       limits:
@@ -734,17 +820,40 @@ zeta-guard:
     probes:
       liveness:
         initialDelaySeconds: 0
-        periodSeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
         failureThreshold: 5
       readiness:
-        initialDelaySeconds: 30
+        initialDelaySeconds: 0
         periodSeconds: 10
-        failureThreshold: 5
+        timeoutSeconds: 5
+        failureThreshold: 3
       startup:
-        initialDelaySeconds: 30
-        periodSeconds: 10
-        failureThreshold: 20
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        timeoutSeconds: 5
+        failureThreshold: 60
 ```
+
+**Why liveness stays DB-independent.** Keycloak's `/health/live` never touches
+the database, and it deliberately stays that way. Pointing liveness at
+`/health/ready` would make a single database outage fail the probe on *every*
+authserver pod simultaneously, so the kubelet would restart them all at once and
+the CrashLoopBackOff ramp would then delay recovery after the database came
+back — one recoverable incident turned into a restart cascade. Liveness is for
+an unresponsive JVM; database availability is readiness' job, and taking a pod
+out of the Service endpoints is the correct response to it. What actually
+recovers a wedged datasource is the connection validation described under
+*Connection resilience* below, which needs no help from the kubelet.
+
+> **⚠️ Do not leave `timeoutSeconds` unset.** Kubernetes defaults it to **1 s**,
+> which is too tight here. Agroal's `invalidCount` is a monotonic counter that
+> never resets, so once connection validation has evicted its first connection,
+> Keycloak takes the *blocking* `DataSourceHealthCheck` branch on **every**
+> readiness probe — opening a connection and validating it — instead of
+> answering
+> from pool metrics. Under load a 1 s timeout flaps. The ceiling is Agroal's
+> acquisition timeout (`PT20S`), so 5 s is a safe middle ground.
 
 ### CloudNativePG database connection
 
@@ -758,6 +867,37 @@ zeta-guard:
   cloudnativeDbSecretName: "keycloak-db-app"
   cloudnativeDbSchema: "public"
 ```
+
+Extra JDBC parameters are appended to that URL via `authserver.db.urlProperties`
+(this works the same way for `databaseMode: external` and
+`authserverDb.kcDbUrl`):
+
+```yaml
+zeta-guard:
+  authserver:
+    db:
+      urlProperties:
+        socketTimeout: 600
+```
+
+This is where the pgjdbc driver settings live. They cannot be passed as
+`QUARKUS_DATASOURCE_JDBC_ADDITIONAL_JDBC_PROPERTIES_*` environment variables:
+that is a Map property, and an environment variable name cannot carry the
+camelCase key — it would arrive as `sockettimeout`, which pgjdbc silently
+ignores. In the URL the case survives, and pgjdbc gives URL values priority over
+connection properties anyway.
+
+> **⚠️ `connectTimeout` and `targetServerType` are rejected here** and the chart
+> fails the render if you set them. Keycloak injects both itself
+> (`db-connect-timeout` default `10s`, `db-postgres-target-server-type` default
+> `primary`) but *skips* that injection as soon as it finds either name already
+> in
+> the URL — so naming one silently drops the other. Use `--db-connect-timeout`
+> for
+> the former and leave the latter alone. For the same reason, do not use
+> `KC_DB_URL_PROPERTIES`: Keycloak ignores it whenever `db-url` is set, which
+> the
+> chart always does.
 
 ### Database connection pool and scaling
 
@@ -858,6 +998,72 @@ via `cloudnativePg.pooler`) in front of the database so application connections
 are multiplexed onto a small number of backends.
 
 ---
+
+### Connection resilience and database failover
+
+Losing the PostgreSQL primary is not a clean disconnect. Deleting the
+CloudNativePG primary **pod** destroys its network namespace while the
+`keycloak-db-rw` ClusterIP stays valid, so kube-proxy's existing conntrack
+entries keep routing to an IP that no longer answers. Nothing sends a TCP reset,
+so every packet is simply dropped — a *blackhole*, not an error. That is why a
+graceful database restart recovers by itself (the sockets are closed, pgjdbc
+raises `08006` immediately) while a pod recreate used to hang the authserver
+until an operator restarted it.
+
+The chart carries the defence — these are the values that provide it:
+
+| Values key                            | Rendered as                                              | Default | Why                                                                                                                                                   |
+|---------------------------------------|----------------------------------------------------------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `db.urlProperties.socketTimeout`      | `?socketTimeout=` on `KC_DB_URL`                         | `120`   | Seconds. The only bound on a blocking read — and the only bound on the authentication exchange of a *replacement* connection.                         |
+| `db.urlProperties.tcpKeepAlive`       | `&tcpKeepAlive=` on `KC_DB_URL`                          | `true`  | Detects some dead peers earlier, though not a frozen server.                                                                                          |
+| `dbPool.validationQueryTimeout`       | `QUARKUS_DATASOURCE_JDBC_VALIDATION_QUERY_TIMEOUT`       | `2S`    | Without it Agroal validates with `isValid(0)` — no timeout — and the validation hangs on the very socket it should detect.                            |
+| `dbPool.foregroundValidationInterval` | `QUARKUS_DATASOURCE_JDBC_FOREGROUND_VALIDATION_INTERVAL` | `5S`    | Validate on acquire when a connection has been idle longer than this. Quarkus has no default, i.e. stale connections go straight to a request thread. |
+| `dbPool.backgroundValidationInterval` | `QUARKUS_DATASOURCE_JDBC_BACKGROUND_VALIDATION_INTERVAL` | `15S`   | Sweeps idle connections (Quarkus default is 2 minutes).                                                                                               |
+| `dbPool.idleRemovalInterval`          | `QUARKUS_DATASOURCE_JDBC_IDLE_REMOVAL_INTERVAL`          | `1M`    | Trims the burst tail; never shrinks the pool below `dbPool.minSize`.                                                                                  |
+
+> **Why plain `QUARKUS_*` variables work.** Keycloak exposes no option for any
+> of the validation settings. Its own `KcEnvConfigSource` reads only `KC_`- and
+> `KCRAW_`-prefixed names, but it does not replace Quarkus' default
+> `EnvConfigSource` — both are registered, so Quarkus properties Keycloak does
+> not map are configurable this way. Note the failure mode: a **misspelled name
+> is silently ignored**. To prove one is read, give it a value that cannot be
+> converted; Keycloak then refuses to start with `SRCFG00039` naming the
+> property.
+
+Two further settings complete it:
+
+- **`authserver.dbPool.maxLifetime`** (default `PT30M`) recycles every pooled
+  connection periodically, so a socket orphaned by a switchover cannot be parked
+  indefinitely. Set through Keycloak's own `--db-pool-max-lifetime`: it maps to
+  `quarkus.datasource.jdbc.max-lifetime`, and setting that Quarkus name directly
+  makes Keycloak log `Please use the first-class option ... instead`.
+
+> **⚠️ `socketTimeout` also applies to schema migrations.** Any statement
+> running
+> longer than 120 s is killed with SQLSTATE `08006`, **Liquibase DDL
+included** —
+> and a migration killed mid-flight leaves `DATABASECHANGELOGLOCK` held, after
+> which the next start waits 30 minutes before failing. If you expect a heavy
+> migration, raise it for that release via
+> `authserver.db.urlProperties.socketTimeout`. To release a stuck lock:
+>
+> ```sql
+> UPDATE databasechangeloglock SET locked = false, lockgranted = NULL, lockedby = NULL;
+> ```
+
+Verify the behaviour with the `agroal_*` counters on the management port: during
+an outage `agroal_invalid_count` and `agroal_destroy_count` must rise (the pool
+evicted the dead connections) and `agroal_creation_count` must rise again once
+the database returns (it built fresh ones rather than reusing the old).
+
+> **Note.** `cloudnativePg.instances: 1` makes every primary replacement a full
+> outage. Raising it to 3 gives automatic failover — but it also makes primary
+> changes routine rather than exceptional, so the connection resilience above is
+> a
+> **prerequisite** for that to deliver availability instead of repeated long
+> outages. PgBouncer (`cloudnativePg.pooler`) is not a substitute: the socket to
+> a
+> pooler pod blackholes in exactly the same way.
 
 ## ECC-Only Key Configuration
 
@@ -991,7 +1197,7 @@ zeta-guard:
       smcB:
         ocspConnectTimeoutMs: 1000    # connect timeout of the OCSP request (ms)
         ocspReadTimeoutMs: 3000       # read timeout of the OCSP request (ms)
-        ocspFailClosed: false         # deny only on REVOKED; allow undetermined status (fail-open)
+        ocspFailClosed: true          # also deny when the status cannot be determined (fail-closed)
 ```
 
 This sets
@@ -1002,17 +1208,99 @@ This sets
 |-------------------------------------------------|-----------------------------------------------------|---------|
 | `authserver.provider.smcB.ocspConnectTimeoutMs` | Connect timeout of the SMC-B OCSP request (ms)      | `1000`  |
 | `authserver.provider.smcB.ocspReadTimeoutMs`    | Read timeout of the SMC-B OCSP request (ms)         | `3000`  |
-| `authserver.provider.smcB.ocspFailClosed`       | Also deny when the OCSP status cannot be determined | `false` |
+| `authserver.provider.smcB.ocspFailClosed`       | Also deny when the OCSP status cannot be determined | `true`  |
 
-By default (`ocspFailClosed: false`) the check is **fail-open**: only a
-positively `REVOKED` certificate is rejected (`invalid_token`); any undetermined
-result — OCSP responder unreachable, timeout, or status `unknown` — 
-is **allowed** so token issuance keeps working during an OCSP responder outage 
-or maintenance window. Set `ocspFailClosed: true` to **fail-closed**, i.e. also 
-reject when the revocation status cannot be determined (stricter, in line with 
-TUC_PKI_006, gemSpec_PKI). A `REVOKED` certificate is always rejected regardless
-of this setting; and when no OCSP signer truststore is configured the check is
-disabled entirely (test environments only).
+By default (`ocspFailClosed: true`) the check is **fail-closed**: the token
+exchange is rejected (`invalid_token`) for a `REVOKED` certificate and also when
+the revocation status cannot be determined — OCSP responder unreachable,
+timeout, or status `unknown` (in line with TUC_PKI_006, gemSpec_PKI). The
+authserver therefore needs a working connection to the SMC-B OCSP responders,
+see [NetworkPolicies](How_to_configure_NetworkPolicies.md). Set
+`ocspFailClosed: false` to **fail-open**, i.e. reject only a `REVOKED`
+certificate and allow an undetermined status, so token issuance keeps working
+during an OCSP responder outage or maintenance window. A `REVOKED` certificate
+is always rejected regardless of this setting; and when no OCSP signer
+truststore is configured the check is disabled entirely (test environments
+only).
+
+---
+
+## Cluster-internal PEP → authserver communication
+
+The PEP validates access tokens against the authserver's JWKS. It finds that
+JWKS by fetching `<pepIssuer>/.well-known/openid-configuration` and then the
+`jwks_uri` the discovery document advertises.
+
+Because `pepIssuer` must be the **public** issuer — it is the `iss` the PEP
+expects in every access token — both fetches would follow the public hostname.
+They would then leave the cluster and come back in through the load balancer and
+ingress, even though the authserver runs next to the PEP. In a multi-cluster
+setup this can even cross sites.
+
+`pepInternalUrl` keeps that traffic inside the cluster. The chart always deploys
+the authserver as the `authserver` Service — the same address
+`pep_revocation_url` already uses. The value is **off by default** (`""`); set
+it once the PEP image knows `pep_pdp_url`:
+
+```yaml
+zeta-guard:
+  pepproxy:
+    nginxConf:
+      # public — stays the expected `iss` of the access tokens
+      pepIssuer: "https://<public-host>/auth/realms/zeta-guard"
+      # internal — adjust only for a non-standard realm path
+      pepInternalUrl: "http://authserver/auth/realms/zeta-guard"
+```
+
+This renders the `pep_pdp_url` directive into the PEP's nginx config. Discovery
+is then fetched over the in-cluster Service, and the `jwks_uri` advertised by
+the authserver is rewritten from the public issuer prefix onto
+`pepInternalUrl`.
+
+Notes:
+
+- `pepInternalUrl` must mirror the issuer's **path structure** — the rewrite
+  substitutes the issuer prefix. If the advertised `jwks_uri` does not sit under
+  `pepIssuer`, the PEP fetches it as advertised and logs a warning.
+- Token validation is unchanged and the issuer check stays strict. Reached over
+  the internal Service, Keycloak would otherwise derive the scheme from the
+  request and advertise `http://…` where the PEP expects `https://…`. The PEP
+  therefore presents the public issuer's origin (`Host`, `X-Forwarded-Proto`,
+  `X-Forwarded-Host`) on these two fetches, so the authserver renders its
+  frontend URLs exactly as it does for public traffic.
+- The internal hop can be plain HTTP to the `authserver` Service, so no
+  certificate valid for the public hostname is needed.
+- Requires a PEP image newer than 1.3.4. Older images fail to start with
+  `unknown directive "pep_pdp_url"` — leave `pepInternalUrl` empty with those.
+- With `networkPolicy.enabled: true` the required egress (PEP → authserver pod,
+  port 8080) is already part of `pep-proxy-egress`. Once `pepInternalUrl` is in
+  use, the ingress IP in
+  `networkPolicy.egress.providerInternal.resourceServers.ipBlocks` is no longer
+  needed for the JWK fetch — see
+  [How to configure NetworkPolicies](How_to_configure_NetworkPolicies.md).
+
+### Alternative: host aliases
+
+If the internal endpoint cannot be addressed by Service name, map the hostname
+in the PEP pod instead:
+
+```yaml
+zeta-guard:
+  pepproxy:
+    hostAliases:
+      - ip: 10.96.1.23          # ClusterIP of the *ingress controller*
+        hostnames:
+          - <public-host>
+```
+
+Point this at the ingress controller, not at the authserver: the PEP still
+speaks HTTPS to the public hostname, and only the ingress controller serves a
+certificate valid for that name. Entries are merged with those generated by
+`global.enableDNSRedirect`.
+
+Prefer `pepInternalUrl` where possible — it needs no IP address (ClusterIPs are
+cluster-specific and change when a Service is recreated) and avoids the TLS
+consideration entirely.
 
 ---
 

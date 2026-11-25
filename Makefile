@@ -53,7 +53,7 @@ TF_VAR_use_kubernetes ?= true
 # Terraform itself. Terraform's -var-file wins over TF_VAR_* environment
 # variables, so when the stage tfvars sets use_kubernetes that value is the
 # authority and the generator has to follow it — otherwise the generated files
-# and var.use_kubernetes disagree and the check block in credentials.tf fires.
+# and var.use_kubernetes disagree and the check block in mode-assert.tf fires.
 # When the file does not set it, the exported env var below drives both.
 TF_VARS_USE_K8S := $(shell awk '$$1 == "use_kubernetes" && $$2 == "=" { v = $$3 } END { if (v == "true" || v == "false") print v }' $(TF_VARS) 2>/dev/null)
 USE_K8S := $(if $(TF_VARS_USE_K8S),$(TF_VARS_USE_K8S),$(TF_VAR_use_kubernetes))
