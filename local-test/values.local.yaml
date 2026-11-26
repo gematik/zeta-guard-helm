@@ -322,7 +322,7 @@ zeta-guard:
   nginx-ingress:
     controller:
       image:
-        tag: 1.2.0
+        tag: 1.2.3
       ingressClass:
         name: nginx
       service:
@@ -383,7 +383,7 @@ zeta-guard:
       capabilities:
         drop: [ "ALL" ]
     image:
-      tag: 1.2.2
+      tag: 1.2.3
     nginxConf:
       generateConfigMap: true
       pepIssuer: https://zeta-kind.local/auth/realms/zeta-guard

@@ -2,6 +2,22 @@
 
 # Release Notes ZETA Guard Helm Charts
 
+## Release 1.2.7
+
+### fixed:
+
+- bumped pep and nginx-ingress controller image to `1.2.3` to include ASL
+  hardening against HTTP request smuggling and updated nginx/nginx-ingress base
+  images (NIC 5.8.0, matching the nginx-ingress chart 2.9.0).
+- bumped authserver version to `1.2.5` to include the OpenJDK 21.0.13.1 security
+  update (CVE-2026-114938).
+- bumped keychain-generator image to `1.3.0-1`, rebuilt on the current JDK base
+  image because of CVE-2026-114938.
+
+### changed:
+
+- updates nginx-ingress chart to 2.9.0 (NIC 5.8.0)
+
 ## Release 1.2.6
 
 ### fixed:
@@ -18,8 +34,7 @@
 
 ### fixed:
 
-- bumped pep version to include important security hotfix. (with thanks to
-  Machine Spirits UG)
+- bumped pep version to 1.2.1
 
 ## Release 1.2.3
 
